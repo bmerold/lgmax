@@ -6,6 +6,11 @@ smallest party that clears every trainer battle in it, simulating the whole run
 with no items: HP and PP are spent across the section and restored only at the
 section boundary (you passed a Pokemon Center) or at an in-game healing spot.
 
+A section that contains a mid-run heal is additionally reported as separate
+LEGS, cut at every full heal, so the page never shows a PP bar that quietly
+spans a Pokemon Center (see build_legs). The PARTY is still chosen for the
+whole section — the legs change how the run is reported, not how it is solved.
+
 The only mid-dungeon healing spots in FRLG, per the game's scripts
 (`special HealPlayerParty` outside a Pokemon Center):
     Pokemon Tower 5F   — the Purified Zone
@@ -310,7 +315,8 @@ def choose_moveset(pm, pool, opponents, badges):
 # ------------------------------------------------------------------ section run
 class Member:
     __slots__ = ("species", "name", "mon", "moves", "pp", "hp", "maxhp", "types",
-                 "level", "used", "minHpPct", "fainted", "refills", "pool", "obey")
+                 "level", "used", "minHpPct", "fainted", "refills", "pool", "obey",
+                 "legBase", "legMinHpPct", "legFaints")
     def __init__(self, mon, moves, pool=None, obey=1.0):
         # >1 for a traded Pokemon above the badge obedience cap: every turn it
         # spends loafing is a turn, but it is not a use of the move, so the
@@ -327,6 +333,7 @@ class Member:
         self.refills = 0
         # every move it could have known, so a TM's alternative is knowable
         self.pool = list(pool) if pool else list(moves)
+        self.leg_mark()
     def alive(self): return self.hp > 0
     def teach(self, move, replacing=None):
         """Put an HM in a move slot, dropping `replacing` if the four are full."""
@@ -344,18 +351,27 @@ class Member:
         self.used[move] += take
     def hurt(self, dmg):
         self.hp -= dmg
-        self.minHpPct = min(self.minHpPct, max(0.0, self.hp) / self.maxhp * 100)
+        pct = max(0.0, self.hp) / self.maxhp * 100
+        self.minHpPct = min(self.minHpPct, pct)
+        self.legMinHpPct = min(self.legMinHpPct, pct)
     def reset(self):
         """Start of section: wipe the ledger too."""
         self.hp = float(self.maxhp); self.minHpPct = 100.0; self.fainted = 0
         self.refills = 0
         for m in self.pp:
             self.pp[m] = float(E.MOVES[m]["pp"]); self.used[m] = 0.0
+        self.leg_mark()
     def restore(self):
         """An in-game healing spot: HP and PP come back, the ledger does not."""
         self.hp = float(self.maxhp)
         self.refills += 1
         for m in self.pp: self.pp[m] = float(E.MOVES[m]["pp"])
+    def leg_mark(self):
+        """Start a new leg: the stretch between two full heals. Everything
+        since the last mark is what THIS leg cost."""
+        self.legBase = dict(self.used)
+        self.legMinHpPct = max(0.0, self.hp) / self.maxhp * 100
+        self.legFaints = self.fainted
 
 def usable(member, opp, badges):
     """Best move this member can still afford against this opponent."""
@@ -789,6 +805,18 @@ def run_section(team, battles, badges, heal_after_idx, tm_value=None):
     log, total_turns, faints, failed = [], 0.0, 0, 0
     wild_turns = 0.0
     leads = {}          # map -> the Pokemon you are walking around with
+    # A "leg" is the stretch between two full heals. Cumulative counters are
+    # snapshotted at every heal so the section can be reported leg by leg.
+    marks = []
+    def mark(bi, why):
+        marks.append({
+            "battle": bi, "why": why,
+            "turns": total_turns, "wildTurns": wild_turns,
+            "faints": faints, "failed": failed,
+            "members": [{"used": {mv: round(m.used[mv] - m.legBase.get(mv, 0.0), 1)
+                                  for mv in m.moves},
+                         "minHpPct": m.legMinHpPct,
+                         "fainted": m.fainted - m.legFaints} for m in team]})
     for bi, enc in enumerate(battles):
         if enc["kind"] == "wild":
             # You cannot pick your lead against something you have not seen yet.
@@ -809,7 +837,7 @@ def run_section(team, battles, badges, heal_after_idx, tm_value=None):
                 m.spend(p["move"], ppc)
                 m.hurt(thr["avg"] * hits)
                 # Self-Destruct and Explosion knock out the user as well
-                if selfko: m.hp = 0.0; m.minHpPct = 0.0
+                if selfko: m.hp = 0.0; m.minHpPct = 0.0; m.legMinHpPct = 0.0
                 if m.hp <= 0:
                     faints += 1; m.fainted += 1
                     active = None      # the next send-out after a faint is free
@@ -837,12 +865,16 @@ def run_section(team, battles, badges, heal_after_idx, tm_value=None):
                     "location": enc["location"], "steps": entries,
                     "group": enc.get("group")})
         if bi in heal_after_idx:
-            for m in team: m.restore()
-            log[-1]["healedAfter"] = (heal_after_idx[bi]
-                                      if isinstance(heal_after_idx, dict) else True)
+            why = (heal_after_idx[bi]
+                   if isinstance(heal_after_idx, dict) else True)
+            mark(bi, why)
+            for m in team:
+                m.restore(); m.leg_mark()
+            log[-1]["healedAfter"] = why
+    if battles: mark(len(battles) - 1, None)
     hp_lost = sum(1.0 - (max(0.0, m.hp) / m.maxhp) for m in team) / max(1, len(team))
     return {"turns": total_turns, "wildTurns": wild_turns, "hpLost": hp_lost,
-            "faints": faints, "failed": failed, "log": log,
+            "faints": faints, "failed": failed, "log": log, "legMarks": marks,
             "ppLeft": min([min(m.pp.values()) / max(1, max(E.MOVES[x]["pp"] for x in m.moves))
                            for m in team], default=1.0),
             "team": team}
@@ -902,6 +934,103 @@ def collapse_wild(log):
                           for k, v in sorted(tally.items(), key=lambda kv: -kv[1])]
     return out
 
+# ------------------------------------------------------------------ legs
+# A section used to be shown as one block even when a Pokemon Center sat in the
+# middle of it, which read wrong: 50 PP of Confusion "in Mt. Moon" really meant
+# 25 on Route 3, a heal at the Route 4 Center, then 25 more in the cave. So the
+# section is cut into LEGS at every full heal, and each leg reports its own
+# ledger — PP, lowest HP and faints spent on that stretch alone.
+_TAIL_SEG = re.compile(r"^(B?\d+F|Room\d+|Entrance)$")
+
+def _leg_span_names(span):
+    """Ordered unique base locations of a leg (floor/room suffixes stripped),
+    plus the floor tags seen for each, for naming the leg after its ground."""
+    tr = [e for e in span if e["kind"] != "wild"] or span
+    seq, tails = [], {}
+    for e in tr:
+        raw = e.get("locationRaw") or e.get("location") or ""
+        parts = raw.split("_")
+        tail = []
+        while len(parts) > 1 and _TAIL_SEG.match(parts[-1]):
+            tail.insert(0, parts.pop())
+        base = "_".join(parts)
+        if base not in seq: seq.append(base)
+        tails.setdefault(base, []).append(" ".join(tail))
+    return seq, tails
+
+def _title_legs(legs):
+    """Name each leg after the ground it covers: one map's name, or the walk
+    from the first map to the last. Two legs of the same dungeon (split at an
+    in-dungeon healing spot) are told apart by floor range instead."""
+    titles = []
+    for leg in legs:
+        seq, _ = _leg_span_names(leg["_span"])
+        names = [G.pretty_location(b) for b in seq]
+        titles.append(names[0] if len(names) == 1
+                      else f"{names[0]} → {names[-1]}")
+    dup = {t for t in titles if titles.count(t) > 1}
+    for i, leg in enumerate(legs):
+        if titles[i] in dup:
+            seq, tails = _leg_span_names(leg["_span"])
+            tl = [t for t in tails.get(seq[0], []) if t]
+            if len(seq) == 1 and tl:
+                rng = tl[0] if tl[0] == tl[-1] else f"{tl[0]}–{tl[-1]}"
+                titles[i] = f"{G.pretty_location(seq[0])} {rng}"
+        leg["title"] = titles[i]
+        leg.pop("_span", None)
+
+def _leg_member(m, md, avail, stage):
+    """One party member's ledger for one leg: PP and HP spent on this stretch
+    alone, out of a single (unrefilled) PP bar — a leg never spans a heal."""
+    rec = avail[m.species]
+    return {
+        "species": m.species, "name": m.name, "level": m.level,
+        "types": [t for i, t in enumerate(m.types) if i == 0 or t != m.types[0]],
+        "hp": m.maxhp, "hpLeft": round(md["minHpPct"]), "fainted": md["fainted"],
+        "obtainedAt": rec["stage"], "obtainedVia": rec["source"],
+        "newHere": rec["stage"] == stage,
+        "moves": [{"name": E.MOVES[mv]["name"],
+                   "tm": SCARCE.get(mv, {}).get("item"),
+                   "type": E.move_type_for(m.mon, mv),
+                   "power": E.nominal_power(m.mon, mv),
+                   "pp": E.MOVES[mv]["pp"], "basePP": E.MOVES[mv]["pp"],
+                   "refills": 0,
+                   "used": md["used"].get(mv, 0.0),
+                   "left": round(max(0.0, float(E.MOVES[mv]["pp"])
+                                      - md["used"].get(mv, 0.0)), 1)}
+                  for mv in m.moves],
+    }
+
+def build_legs(battles, final, avail, stage):
+    """Cut the final run into legs at its full heals. Returns the leg records
+    (each holding its own roster ledger and row count) and the section log,
+    with the wild rows collapsed per leg so a walk never merges across a heal."""
+    legs, sec_log, start = [], [], 0
+    prev = {"turns": 0.0, "wildTurns": 0.0, "faints": 0, "failed": 0}
+    for mk in final.get("legMarks") or []:
+        end = mk["battle"]
+        span = battles[start:end + 1]
+        rows = collapse_wild(final["log"][start:end + 1])
+        trainers = [e for e in span if e["kind"] != "wild"]
+        legs.append({
+            "title": None, "_span": span,
+            "endsAt": mk["why"] if isinstance(mk["why"], str) else None,
+            "rows": len(rows),
+            "battles": len(trainers),
+            "opposingMons": sum(len(e["_mons"]) for e in trainers),
+            "wildBattles": len(span) - len(trainers),
+            "turns": round(mk["turns"] - prev["turns"], 1),
+            "wildTurns": round(mk["wildTurns"] - prev["wildTurns"], 1),
+            "faints": mk["faints"] - prev["faints"],
+            "unanswered": mk["failed"] - prev["failed"],
+            "team": [_leg_member(m, md, avail, stage)
+                     for m, md in zip(final["team"], mk["members"])],
+        })
+        sec_log.extend(rows)
+        prev, start = mk, end + 1
+    _title_legs(legs)
+    return legs, sec_log
+
 def solve_section(stage, encs, starter, avail, tm_value=None):
     st = P.STAGE_BY_ID[stage]
     level, badges = st["level"], O.badges_for(stage)
@@ -925,7 +1054,7 @@ def solve_section(stage, encs, starter, avail, tm_value=None):
         return {"stage": stage, "starter": starter, "level": level,
                 "badges": badges["count"], "battles": 0, "opposingMons": 0,
                 "turns": 0.0, "faints": 0, "unanswered": 0, "healPoints": [],
-                "team": [], "bench": [], "log": [], "buildOrder": [],
+                "team": [], "bench": [], "log": [], "legs": [], "buildOrder": [],
                 "noBattles": True,
                 "hms": [], "hmKit": [{"name": E.MOVES[HM.HM_MOVE[h]]["name"],
                                       "hm": HM.HM_ITEM[h].replace("ITEM_", ""),
@@ -1067,6 +1196,7 @@ def solve_section(stage, encs, starter, avail, tm_value=None):
                       for mv in m.moves],
         })
     wild_only = [e for e in battles if e["kind"] == "wild"]
+    legs, sec_log = build_legs(battles, final, avail, stage)
     return {
         "stage": stage, "starter": starter, "level": level,
         "badges": badges["count"],
@@ -1078,7 +1208,7 @@ def solve_section(stage, encs, starter, avail, tm_value=None):
         "turns": round(final["turns"], 1),
         "faints": final["faints"], "unanswered": final["failed"],
         "healPoints": sorted(heal_idx),
-        "team": roster, "bench": bench, "log": collapse_wild(final["log"]),
+        "team": roster, "bench": bench, "log": sec_log, "legs": legs,
         "buildOrder": history,
         "hms": [{**p, "name": E.MOVES[p["move"]]["name"],
                  "hm": HM.HM_ITEM[HM._hm_of(p["move"])].replace("ITEM_", ""),

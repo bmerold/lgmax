@@ -158,6 +158,30 @@ def main():
         return [S(b["name"]), [S(x) for x in b["types"]], b["soloTurns"],
                 b["soloFailed"], S(b["via"])]
 
+    def leg_rows(sec):
+        """A section split at its full heals. Each leg carries its own roster
+        ledger and log slice, so no PP bar shown ever spans a heal."""
+        legs = sec.get("legs") or [{
+            # a section with no battles at all still renders as one (empty) leg
+            "title": None, "endsAt": None, "rows": len(sec["log"]),
+            "battles": sec["battles"], "opposingMons": sec["opposingMons"],
+            "wildBattles": sec.get("wildBattles", 0), "turns": sec["turns"],
+            "wildTurns": sec.get("wildTurns", 0), "faints": sec["faints"],
+            "unanswered": sec["unanswered"], "team": sec["team"]}]
+        out, i0 = [], 0
+        for leg in legs:
+            chunk = sec["log"][i0:i0 + leg["rows"]]; i0 += leg["rows"]
+            out.append({
+                "ti": S(leg["title"]), "hz": S(leg.get("endsAt")),
+                "b": leg["battles"], "om": leg["opposingMons"],
+                "wb": leg["wildBattles"], "t": leg["turns"],
+                "wt": leg["wildTurns"], "f": leg["faints"],
+                "u": leg["unanswered"],
+                "team": [member_row(t) for t in leg["team"]],
+                "log": [log_row(l) for l in merge_walks(chunk)],
+            })
+        return out
+
     out_sections = {}
     for _mode, _by_starter in secs["sections"].items():
       out_sections[_mode] = {}
@@ -179,9 +203,8 @@ def main():
                 "keep": [[S(k["name"]), k["next"], S(k["nextName"]), k["nextLevel"],
                           k["gap"], k["times"], S(k["why"]), S(k.get("becomes"))]
                          for k in sec.get("keep", [])],
-                "team": [member_row(t) for t in sec["team"]],
                 "bench": [bench_row(b) for b in sec["bench"]],
-                "log": [log_row(l) for l in merge_walks(sec["log"])],
+                "legs": leg_rows(sec),
             }
         out_sections[_mode][starter] = rows
 
