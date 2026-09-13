@@ -1028,7 +1028,12 @@ function renderSecPanel(id, leg){
   const stops = L.rt || [];
   const keys = stops.map(stopKey);
   const doneCount = keys.filter(kk => DONE.has(kk)).length;
-  const nextIdx = keys.findIndex(kk => !DONE.has(kk));
+  /* "next" means the stop after the FURTHEST one you've ticked -- a skipped
+     stop earlier (an absent renewable, a fight saved for later) must not
+     drag the gold stretch backwards */
+  let hiDone = -1;
+  keys.forEach((kk, i) => { if (DONE.has(kk)) hiDone = i; });
+  const nextIdx = hiDone + 1 < stops.length ? hiDone + 1 : -1;
 
   /* the compressed fight plan for the i-th trainer stop: who leads, what
      they press — pulled from the same ledger the checklist shows in full */
@@ -1284,7 +1289,9 @@ function renderSecPanel(id, leg){
   stickyInfo = {
     title: `${label} · ${doneCount}/${stops.length}`,
     next: nxt ? `next: ${nextIdx + 1}. ${str(nxt[1]) || ""}${
-      planByStop[nextIdx + 1] ? " — " + planByStop[nextIdx + 1] : ""}` : "all done — on to the next section",
+      planByStop[nextIdx + 1] ? " — " + planByStop[nextIdx + 1] : ""}`
+      : doneCount >= stops.length ? "all done — on to the next section"
+      : "end of the leg — a few skipped stops remain above",
     n: nextIdx >= 0 ? nextIdx + 1 : null
   };
   updateSticky();
