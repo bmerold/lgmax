@@ -167,9 +167,21 @@ def harvest():
         nodes.append({"kind": "event", "what": label, "map": name,
                       "x": xy[0], "y": xy[1], "stage": stage})
 
-    # catch stops: each wild species routed to where it FIRST becomes
-    # catchable, grouped by the ground you stand on to catch it
-    first = {}
+    # catch stops: a species is caught the first stage it exists. Among the
+    # grounds that offer it then, prefer where the walk already goes -- maps
+    # whose trainers this stage fights (catching Weedle IN Viridian Forest,
+    # not on a detour back to Route 2) -- and fold species together so one
+    # patch of grass covers many.
+    graph = json.load(open(f"{OUT}/encounters.json"))
+    trainer_ground = {(e["stage"], e.get("locationRaw")) for e in graph
+                      if e["kind"] not in ("wild", "rematch")}
+    first_gate, cands = {}, collections.defaultdict(set)
+    def offer(sp, gate, name, label):
+        cur = first_gate.get(sp)
+        if cur is None or gate < cur:
+            first_gate[sp] = gate; cands[sp] = {(name, label)}
+        elif gate == cur:
+            cands[sp].add((name, label))
     for enc in E.WILD["encounters"]:
         if enc["version"] == "FireRed": continue
         name = WD._const_to_folder().get(enc["map"])
@@ -181,22 +193,31 @@ def harvest():
                 for rod, idxs in E.WILD["fishingGroups"].items():
                     gate = max(ms, P.ROD_STAGE.get(rod, 0))
                     for slot in tbl["slots"]:
-                        if slot["slot"] not in idxs: continue
-                        k = (gate, name, rod.replace("_", " "))
-                        cur = first.get(slot["species"])
-                        if cur is None or k < cur: first[slot["species"]] = k
+                        if slot["slot"] in idxs:
+                            offer(slot["species"], gate, name,
+                                  rod.replace("_", " "))
             else:
                 gate = max(ms, P.METHOD_GATE.get(method, 0))
                 label = {"land_mons": "grass/cave", "water_mons": "surfing",
                          "rock_smash_mons": "Rock Smash"}.get(method, method)
                 for slot in tbl["slots"]:
-                    k = (gate, name, label)
-                    cur = first.get(slot["species"])
-                    if cur is None or k < cur: first[slot["species"]] = k
-    stops = collections.defaultdict(list)
-    for sp, (gate, name, label) in first.items():
-        stops[(gate, name, label)].append(E.SPECIES[sp]["name"])
-    for (gate, name, label), species in sorted(stops.items()):
+                    offer(slot["species"], gate, name, label)
+    by_gate = collections.defaultdict(set)
+    for sp, g in first_gate.items(): by_gate[g].add(sp)
+    picked_stops = []
+    for gate in sorted(by_gate):
+        remaining = set(by_gate[gate])
+        while remaining:
+            cover = collections.defaultdict(set)
+            for sp in remaining:
+                for c in cands[sp]: cover[c].add(sp)
+            (name, label), got = sorted(cover.items(), key=lambda kv: (
+                -int((gate, kv[0][0]) in trainer_ground),
+                -len(kv[1]), kv[0][0], kv[0][1]))[0]
+            remaining -= got
+            picked_stops.append((gate, name, label,
+                                 sorted(E.SPECIES[sp]["name"] for sp in got)))
+    for gate, name, label, species in sorted(picked_stops):
         mode = ("water" if label == "surfing"
                 else "shore" if "rod" in label else "land")
         xy = WD.encounter_anchor(name, mode) or WD.encounter_anchor(name, "land")
@@ -204,14 +225,12 @@ def harvest():
             g = WD.grid(name)
             if not g.warps: continue
             xy = (g.warps[0][0], g.warps[0][1])
-        species.sort()
         nodes.append({"kind": "catch", "map": name, "x": xy[0], "y": xy[1],
                       "stage": gate, "species": species, "method": label,
                       "what": f"Catch {', '.join(species)} ({label})"})
 
     # trainers: the same set the sections fight, on the tiles they stand on
     tiles = R.trainer_tiles()
-    graph = json.load(open(f"{OUT}/encounters.json"))
     seen = set()
     for e in graph:
         if e["kind"] in ("wild", "rematch"): continue
