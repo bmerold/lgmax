@@ -17,7 +17,8 @@ mkdir -p data
 [ -f data/species.json ] || python3 extract.py      # decomp -> data/*.json
 [ -f data/encounters.json ] || python3 build_graph.py
 
-python3 sections.py     # writes wildLoad / tmSupply / commitments, solves every section
+python3 tour.py         # the completionist route: every item, trainer, catch
+python3 sections.py     # solves every section, battles in ROUTE order
 python3 optimize.py     # per-encounter rankings (reads commitments.json)
 python3 render_maps.py  # map PNGs from the decomp's tilesets (incremental)
 python3 compact.py      # array-encoded payload

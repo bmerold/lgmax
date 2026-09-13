@@ -125,13 +125,17 @@ FLOOR_ORDER = {
 
 # ------------------------------------------------------------------ sections
 def build_sections(graph):
-    """Trainer battles grouped by stage, in the order you meet them.
-    Rematches and wild areas are excluded from the PP load; rematches are opt-in
-    and wild encounters are avoidable and unbounded."""
+    """Trainer battles grouped by the stage the ROUTE fights them in — which
+    can be later than the battle's own stage when the walk physically can't
+    reach it yet (Lass Crissy behind Cerulean's cut tree). Falls back to the
+    battle's own stage when no route has been solved. Rematches and wild
+    areas are excluded from the PP load; rematches are opt-in and wild
+    encounters are avoidable and unbounded."""
     by_stage = defaultdict(list)
     for e in graph:
         if e["kind"] in ("wild", "rematch"): continue
-        by_stage[e["stage"]].append(e)
+        rs = route_stage_of(e)
+        by_stage[rs if rs is not None else e["stage"]].append(e)
     return dict(by_stage)
 
 WILD_LOAD = {}     # stage -> [per-map estimate]; filled from walking.py
@@ -219,6 +223,75 @@ def variant_ok(enc, starter):
     """Keep only the rival/champion variant matching the player's starter."""
     sv = enc.get("starterVariant")
     return sv is None or sv == starter
+
+# ------------------------------------------------------------------ route order
+# The completionist route (tour.py, solved before this runs) is the single
+# source of truth for the order battles happen in. The PP/HP simulation walks
+# the same line the player walks, so the guide's checklist, its maps and its
+# ledger all agree. A Fly mid-stage lands at a Pokémon Center, which is a
+# full heal, and is treated as one.
+_ROUTE_POS = None
+
+def route_positions():
+    """battle key -> (global index, heal-after reason or None, route stage).
+    The route stage is where the walk actually fights it, which can be LATER
+    than the battle's own stage: Lass Crissy stands behind Cerulean's cut
+    tree, so the route comes back for her once Cut is live."""
+    global _ROUTE_POS
+    if _ROUTE_POS is not None: return _ROUTE_POS
+    _ROUTE_POS = {}
+    path = f"{OUT}/route.json"
+    if not os.path.exists(path): return _ROUTE_POS
+    rt = json.load(open(path))
+    i, last_key = 0, None
+    for st in rt["stages"]:
+        last_key = None                    # heals don't cross stage ends
+        for s in st["steps"]:
+            if s.get("fly") and last_key is not None:
+                idx, _, rs = _ROUTE_POS[last_key]
+                _ROUTE_POS[last_key] = (
+                    idx, f"flying — you land at the {G.pretty_location(s['fly'])} "
+                         "Pokémon Center", rs)
+            if s["kind"] != "trainer": continue
+            const = (s.get("enc") or "").split(":")[-1]
+            key = R.battle_key(const)
+            if key and key not in _ROUTE_POS:
+                _ROUTE_POS[key] = (i, None, st["stage"])
+                last_key = key
+            i += 1
+    return _ROUTE_POS
+
+def route_order_battles(battles):
+    """Reorder a section's battles to match the route; battles the route does
+    not know keep their walk order at the end. Returns (battles, heal_after)
+    where heal_after marks Centers walked past and Fly landings between
+    consecutive fights."""
+    pos = route_positions()
+    def rp(e):
+        hit = pos.get(R.battle_key(e["trainerConst"]))
+        return hit[0] if hit else None
+    if not any(rp(e) is not None for e in battles):
+        return battles, {}
+    order = sorted(range(len(battles)),
+                   key=lambda i: (rp(battles[i]) if rp(battles[i]) is not None
+                                  else 1 << 30, i))
+    battles = [battles[i] for i in order]
+    heal_after = {}
+    for a, b in zip(battles, battles[1:]):
+        hit = pos.get(R.battle_key(a["trainerConst"]))
+        if hit and hit[1]:
+            heal_after[a["id"]] = hit[1]
+            continue
+        ma, mb = a.get("locationRaw"), b.get("locationRaw")
+        if ma and mb and ma != mb:
+            why = R.center_between(ma, mb)
+            if why: heal_after[a["id"]] = why
+    return battles, heal_after
+
+def route_stage_of(enc):
+    """The stage the route actually fights this battle in, if known."""
+    hit = route_positions().get(R.battle_key(enc["trainerConst"]))
+    return hit[2] if hit else None
 
 # ------------------------------------------------------------------ caches
 _profile_cache = {}
@@ -1040,6 +1113,9 @@ def solve_section(stage, encs, starter, avail, tm_value=None):
     # only a proxy for "further in" and is not even monotonic along a route.
     battles, path_heals = R.section_order(stage, [e for e in encs if variant_ok(e, starter)],
                                           FLOOR_ORDER)
+    # the route, once solved, decides the real order (and the heals along it)
+    if route_positions():
+        battles, path_heals = route_order_battles(battles)
     for e in battles:
         if "_mons" not in e:
             e["_mons"] = [E.realize_trainer_mon(e["trainerConst"], i)

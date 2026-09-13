@@ -289,7 +289,10 @@ button{font:inherit;color:inherit}
 .healnote{font-size:11.5px;color:var(--good);font-weight:600;margin-top:8px}
 .logno{display:inline-block;min-width:20px;height:20px;border-radius:10px;margin-right:7px;
   background:var(--surface-3);color:var(--ink-2);font:600 11px/20px "IBM Plex Mono",monospace;
-  text-align:center;vertical-align:1px}
+  text-align:center;vertical-align:1px;padding:0 4px}
+.fightlink{background:none;border:0;padding:0;font:inherit;color:inherit;cursor:pointer;
+  text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px}
+.fightlink:hover{color:var(--accent)}
 .logrow.flash{animation:rowflash 1.6s ease-out}
 @keyframes rowflash{0%,60%{background:color-mix(in srgb, var(--accent) 18%, transparent)}100%{background:transparent}}
 
@@ -299,10 +302,52 @@ button{font:inherit;color:inherit}
   border-radius:10px;background:var(--surface-2)}
 .mapbox{position:relative;width:max-content}
 .mapbox img{display:block;image-rendering:pixelated}
+.mapbox img.stitch{position:absolute}
 .mark{position:absolute;transform:translate(-50%,-50%);min-width:20px;height:20px;padding:0 4px;
   border:2px solid #fff;border-radius:11px;color:#fff;text-align:center;cursor:pointer;
   font:700 11px/16px "IBM Plex Mono",monospace;box-shadow:0 1px 5px rgba(0,0,0,.55)}
 .mark:hover{transform:translate(-50%,-50%) scale(1.25);z-index:2}
+.mark.flash{animation:markpulse 1.3s ease-out}
+@keyframes markpulse{0%{box-shadow:0 0 0 0 rgba(196,73,28,.95)}
+  70%{box-shadow:0 0 0 16px rgba(196,73,28,0)}100%{box-shadow:0 1px 5px rgba(0,0,0,.55)}}
+
+/* ---------- map side list: the stops beside the map, not below it ---------- */
+.mapblock{display:flex;gap:12px;margin:0 16px 14px;align-items:flex-start}
+.mapblock .mapwrap{margin:0;flex:1 1 auto;min-width:0}
+.mapside{flex:0 0 272px;position:sticky;top:10px;max-height:82vh;overflow-y:auto;
+  border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+.side-row{display:flex;gap:8px;width:100%;text-align:left;background:none;border:0;
+  border-bottom:1px solid var(--line);padding:7px 10px;cursor:pointer;font:inherit;
+  align-items:flex-start}
+.side-row:last-child{border-bottom:0}
+.side-row:hover{background:var(--surface-2)}
+.side-row.flash{animation:rowflash 1.6s ease-out}
+.side-n{min-width:20px;height:20px;border-radius:10px;text-align:center;flex-shrink:0;
+  font:700 10.5px/20px "IBM Plex Mono",monospace;color:#fff;padding:0 3px}
+.side-t{font-weight:600;font-size:12px;line-height:1.35}
+.side-d{font-size:10.5px;color:var(--ink-3);margin-top:1px;line-height:1.35}
+.side-go{margin-left:auto;flex-shrink:0;border:0;background:none;color:var(--ink-3);
+  cursor:pointer;font:inherit;font-size:13px;padding:0 2px}
+.side-go:hover{color:var(--accent)}
+@media(max-width:960px){.mapblock{flex-direction:column}
+  .mapside{position:static;flex:auto;width:100%;max-height:300px}}
+.mapbox svg{position:absolute;left:0;top:0;pointer-events:none}
+.rpath{fill:none;stroke:#fff;stroke-width:5;stroke-linejoin:round;stroke-linecap:round;opacity:.55}
+.rpath2{fill:none;stroke:#C4491C;stroke-width:2.5;stroke-linejoin:round;stroke-linecap:round}
+.rarrow0{fill:none;stroke:#7A2D10;stroke-width:4;stroke-linecap:round;stroke-linejoin:round}
+.rarrow{fill:none;stroke:#fff;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+
+/* ---------- route checklist ---------- */
+.rt-steps{border-top:1px solid var(--line)}
+.rt-row{display:flex;gap:10px;align-items:baseline;padding:7px 16px;border-bottom:1px solid var(--line);font-size:12.5px}
+.rt-row:last-child{border-bottom:0}
+.rt-no{min-width:24px;height:20px;border-radius:10px;text-align:center;flex-shrink:0;
+  font:700 11px/20px "IBM Plex Mono",monospace;color:#fff}
+.rt-what{font-weight:600}
+.rt-where{color:var(--ink-3);font-size:11px;margin-left:auto;text-align:right;flex-shrink:0}
+.rt-fly{color:var(--accent);font-weight:600;font-size:11px}
+.rt-species{color:var(--ink-2);font-size:11.5px}
+.rt-row.flash{animation:rowflash 1.6s ease-out}
 
 /* ---------- choices ---------- */
 .choice-h{padding:16px 18px 14px}
@@ -371,7 +416,7 @@ details.notes[open] summary::after{content:"−"}
     </div>
     <nav class="nav" id="nav">
       <button class="navb" data-view="enc" aria-current="true">Encounters</button>
-      <button class="navb" data-view="sec" aria-current="false">Section parties</button>
+      <button class="navb" data-view="sec" aria-current="false">The guide</button>
       <button class="navb" data-view="tm" aria-current="false">TM plan</button>
       <button class="navb" data-view="cho" aria-current="false">Choices</button>
     </nav>
@@ -431,6 +476,8 @@ const SECTIONS_BY = DATA.sections, CHOICES_BY = DATA.choices;
 /* Map images rendered straight from the decomp's tilesets and layouts,
    keyed by map folder name: [width px, height px, base64 png, pretty name]. */
 const MAPART = DATA.mapart || {};
+/* The completionist route: per stage, ordered stops with real tile paths. */
+const ROUTE = DATA.route || {total: 0, stages: []};
 /* Choices the run makes once and keeps; the section parties are solved with
    these locked, so a single Eevee can't become a Vaporeon in one town and a
    Jolteon in the next. */
@@ -491,7 +538,8 @@ function renderMast(){
     [n("gym") + n("elite4") + n("champion") + n("boss"), "boss fights"],
     [n("trainer") + n("rematch") + n("rival"), "trainer battles"],
     [n("wild"), "wild areas"],
-    [totalSections(), "sections"]
+    [totalSections(), "sections"],
+    [(ROUTE.total || 0).toLocaleString(), "steps to 100%"]
   ];
   document.getElementById("mastStats").innerHTML = rows
     .map(([v, l]) => `<div class="mstat"><b>${v}</b><span>${l}</span></div>`).join("");
@@ -790,7 +838,8 @@ function renderSecList(){
       return `<button class="sec-row" data-sec="${s.id}" data-leg="${k}"
         aria-current="${s.id === selectedSec && k === selectedLeg}">
         <span class="sec-top"><span class="sec-n">${esc(label)}</span>
-          <span class="sec-k">Lv ${s.level}${L && L.b ? " · " + L.b + " fights" : ""}</span></span>
+          <span class="sec-k">Lv ${s.level}${L && L.b ? " · " + L.b + " fights" : ""}${
+            L && L.st ? " · " + L.st + " steps" : ""}</span></span>
         <span class="sec-party">${esc(party)}</span></button>`;
     }).join("");
   }).join("");
@@ -806,12 +855,41 @@ document.getElementById("secList").addEventListener("click", ev => {
   renderSecPanel(selectedSec, selectedLeg);
   if (window.innerWidth <= 960) document.getElementById("secPanel").scrollIntoView({behavior:"smooth"});
 });
-/* Clicking a numbered pin on the map jumps to that fight in the battle list. */
+/* The map, its side list and the checklist are cross-linked: a pin lights
+   up its side-list row, a side-list row pans the map to its pin, the ↓
+   jumps to the full checklist entry, fight titles open the matchup. */
+const flashEl = el => {
+  el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
+};
 document.getElementById("secPanel").addEventListener("click", ev => {
-  const m = ev.target.closest(".mark"); if (!m) return;
-  const row = document.getElementById("fight-" + m.dataset.n); if (!row) return;
-  row.scrollIntoView({block: "center"});
-  row.classList.remove("flash"); void row.offsetWidth; row.classList.add("flash");
+  const f = ev.target.closest(".fightlink");
+  if (f){ openEncounter(f.dataset.enc); return; }
+  const go = ev.target.closest(".side-go");
+  if (go){
+    const row = document.getElementById("fight-" + go.dataset.n);
+    if (row){ row.scrollIntoView({block: "center"}); flashEl(row); }
+    return;
+  }
+  const sr = ev.target.closest(".side-row");
+  if (sr){
+    const block = sr.closest(".mapblock");
+    const pin = block && block.querySelector(`.mark[data-n="${sr.dataset.n}"]`);
+    if (pin){
+      pin.scrollIntoView({block: "nearest", inline: "center"});
+      flashEl(pin);
+    }
+    return;
+  }
+  const m = ev.target.closest(".mark");
+  if (m){
+    const block = m.closest(".mapblock");
+    const row = block && block.querySelector(`.side-row[data-n="${m.dataset.n}"]`);
+    if (row){ row.scrollIntoView({block: "nearest"}); flashEl(row); }
+    else {
+      const full = document.getElementById("fight-" + m.dataset.n);
+      if (full){ full.scrollIntoView({block: "center"}); flashEl(full); }
+    }
+  }
 });
 
 function renderSecPanel(id, leg){
@@ -840,6 +918,7 @@ function renderSecPanel(id, leg){
         ends ? `<span>Ends with a full heal at <b>${esc(ends)}</b></span>` : ""}</div>` : ""}
     <div class="ctx">
       <div class="ctxi"><b>${size || "—"}</b><span>party needed</span></div>
+      <div class="ctxi"><b>${(L.st || 0).toLocaleString()}</b><span>steps walked</span></div>
       <div class="ctxi"><b>${L.t}</b><span>turns total</span></div>
       ${L.wb ? `<div class="ctxi"><b>${L.wt}</b><span>of them wild</span></div>` : ""}
       <div class="ctxi"><b>${L.f}</b><span>faints</span></div>
@@ -919,36 +998,105 @@ function renderSecPanel(id, leg){
         : "all six earn their slot here"}</span></div>
     <div class="party">${L.team.map(partyCard).join("")}</div></section>`;
 
+  /* ---- one set of maps: the route's walk plus every numbered stop ---- */
+  const stops = L.rt || [];
+  const pinsByMap = {};
+  stops.forEach((s, i) => {
+    const mp = s[2];
+    if (!MAPART[mp]) return;
+    (pinsByMap[mp] = pinsByMap[mp] || []).push(
+      {n: i + 1, x: s[3], y: s[4], kind: str(s[0]), what: str(s[1]),
+       walk: s[5], fly: s[6], species: (s[8] || []).length,
+       underfoot: s[9]});
+  });
+  const sideRow = p => {
+    const k = RKIND[p.kind] || RKIND.event;
+    const bits = [k.label, p.walk + " steps"];
+    if (p.fly) bits.push("✈ fly in");
+    if (p.underfoot) bits.push("needs Itemfinder");
+    else if (p.kind === "hidden") bits.push("invisible — press A");
+    if (p.species > 1) bits.push(p.species + " species");
+    return `<button class="side-row" data-n="${p.n}">
+      <span class="side-n" style="background:${k.color}">${p.n}</span>
+      <span><span class="side-t">${esc(p.what || "")}</span>
+        <div class="side-d">${esc(bits.join(" · "))}</div></span>
+      <span class="side-go" data-n="${p.n}" title="jump to the full entry in the checklist">↓</span>
+    </button>`;
+  };
   if (L.mp && L.mp.length){
-    const pinned = L.mp.reduce((a, m) => a + m[1].length, 0);
+    /* Adjacent outdoor maps are stitched into one picture at their true
+       connection offsets, so the ground reads continuously across a map
+       boundary — the climb from Route 3 up past the Route 4 Center is one
+       scene, the way the game shows it. */
+    const segsByMap = Object.fromEntries(L.mp.map(m => [m[0], m[1] || []]));
+    const clusters = (L.cl && L.cl.length) ? L.cl : L.mp.map(m => [[m[0], 0, 0]]);
     html += `<section class="card"><div class="card-h"><h2>The ground you cover</h2>
-        <span class="note">rendered from the game's own tilesets — numbers match the battle list below</span></div>
-      ${L.mp.map(m => {
-        const name = m[0], marks = m[1], art = MAPART[name];
-        if (!art) return "";
-        const [w, h, b64, pretty] = art;
-        return `<div class="maph">${esc(str(pretty) || name)}
-            <span class="note">${marks.length ? marks.length + " trainer" + (marks.length === 1 ? "" : "s") + " here" : "no set trainers — just the walk"}</span></div>
-          <div class="mapwrap"><div class="mapbox">
-            <img src="data:image/png;base64,${b64}" width="${w}" height="${h}" alt="Map of ${esc(str(pretty) || name)}" loading="lazy">
-            ${marks.map(mk => {
-              const [x, y, n, nm, kd] = mk;
-              return `<button class="mark" style="left:${(x + 0.5) * 16}px;top:${(y + 0.5) * 16}px;
-                background:${(KIND[str(kd)] || KIND.trainer).color}" data-n="${n}"
-                title="${n}. ${esc(str(nm))}">${n}</button>`;
-            }).join("")}
-          </div></div>`;
+        <span class="note">the walk in orange — numbered stops match the checklist below</span></div>
+      ${clusters.map(cluster => {
+        const members = cluster.filter(c => MAPART[c[0]]);
+        if (!members.length) return "";
+        const W = Math.max(...members.map(c => c[1] * 16 + MAPART[c[0]][0]));
+        const H = Math.max(...members.map(c => c[2] * 16 + MAPART[c[0]][1]));
+        const names = members.map(c => prettyMap(c[0]));
+        const shown = names.length > 3 ? names.slice(0, 3).join(" · ") + " …"
+                                       : names.join(" · ");
+        let pinsHtml = "", nPins = 0;
+        const svgs = members.map(c => {
+          const [name, ox, oy] = c;
+          (pinsByMap[name] || []).forEach(p => {
+            nPins++;
+            pinsHtml += `<button class="mark" data-n="${p.n}"
+              style="left:${(ox + p.x + 0.5) * 16}px;top:${(oy + p.y + 0.5) * 16}px;
+              background:${(RKIND[p.kind] || RKIND.event).color}"
+              title="${p.n}. ${esc(p.what || "")}">${p.n}</button>`;
+          });
+          const segs = segsByMap[name] || [];
+          if (!segs.length) return "";
+          return `<g transform="translate(${ox * 16} ${oy * 16})">
+            ${segs.map(cc => `<polyline class="rpath" points="${svgPath(cc)}"/>`).join("")}
+            ${segs.map(cc => `<polyline class="rpath2" points="${svgPath(cc)}"/>`).join("")}
+            ${segs.map(cc => svgArrows(cc)).join("")}
+          </g>`;
+        }).join("");
+        const clusterPins = members.flatMap(c => pinsByMap[c[0]] || [])
+                                   .sort((a, b) => a.n - b.n);
+        return `<div class="maph">${esc(shown)}
+            <span class="note">${nPins ? nPins + " stop" + (nPins === 1 ? "" : "s") : "just the walk"}</span></div>
+          <div class="mapblock">
+          <div class="mapwrap"><div class="mapbox" style="width:${W}px;height:${H}px">
+            ${members.map(c => `<img class="stitch" src="data:image/png;base64,${MAPART[c[0]][2]}"
+                width="${MAPART[c[0]][0]}" height="${MAPART[c[0]][1]}"
+                style="left:${c[1] * 16}px;top:${c[2] * 16}px"
+                alt="Map of ${esc(c[0])}" loading="lazy">`).join("")}
+            <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${svgs}</svg>
+            ${pinsHtml}
+          </div></div>
+          ${clusterPins.length ? `<aside class="mapside">${clusterPins.map(sideRow).join("")}</aside>` : ""}
+          </div>`;
       }).join("")}
-      ${pinned < L.b ? `<p class="note kitnote">${L.b - pinned} of this section's battles
-        ${L.b - pinned === 1 ? "is" : "are"} scripted — a rival ambush or a fight with no overworld
-        sprite standing on a tile — so ${L.b - pinned === 1 ? "it has" : "they have"} no pin.</p>` : ""}
     </section>`;
   }
 
-  let fightNo = 0;
-  html += `<section class="card"><div class="card-h"><h2>Battle by battle</h2>
-      <span class="note">Trainers in the order you meet them, with the walking between</span></div>
-    ${L.log.map(l => logRow(l, str(l[2]) === "wild" ? 0 : ++fightNo)).join("")}</section>`;
+  /* ---- one checklist: fights (with the full ledger), pickups, catches
+     and events, interleaved in the exact order you walk them ---- */
+  let li = 0, listHtml = "";
+  const flushWilds = () => {
+    while (li < L.log.length && str(L.log[li][2]) === "wild")
+      listHtml += logRow(L.log[li++], 0);
+  };
+  stops.forEach((s, i) => {
+    if (str(s[0]) === "trainer"){
+      flushWilds();
+      if (li < L.log.length) listHtml += logRow(L.log[li++], i + 1);
+    } else {
+      listHtml += rtRow(s, i + 1);
+    }
+  });
+  flushWilds();
+  while (li < L.log.length) listHtml += logRow(L.log[li++], 0);
+  html += `<section class="card"><div class="card-h"><h2>Step by step</h2>
+      <span class="note">fights, pickups and catches in walk order — click a fight for its matchup analysis</span></div>
+    ${listHtml}</section>`;
 
   if (d.bench.length){
     html += `<section class="card"><div class="card-h"><h2>Also strong here</h2>
@@ -998,6 +1146,22 @@ function partyCard(t){
   </article>`;
 }
 
+function rtRow(s, n){
+  const kind = str(s[0]), what = str(s[1]), mp = s[2], walk = s[5],
+        flyFrom = s[6], species = s[8] || [], underfoot = s[9];
+  return `<div class="rt-row" id="fight-${n}">
+    <span class="rt-no" style="background:${(RKIND[kind] || RKIND.event).color}">${n}</span>
+    <span>
+      <span class="rt-what">${esc(what || "")}</span>
+      ${underfoot ? `<span class="tmtag" title="buried — only the Itemfinder digs it up">Itemfinder</span>`
+        : kind === "hidden" ? `<span class="note" title="hidden items have no sprite — they're there from the start of the game">invisible — face the pinned tile, press A</span>` : ""}
+      ${flyFrom ? `<div class="rt-fly">✈ Fly to ${esc(prettyMap(flyFrom))}, then walk</div>` : ""}
+      ${species.length > 1 ? `<div class="rt-species">${species.map(x => esc(str(x))).join(" · ")}</div>` : ""}
+    </span>
+    <span class="rt-where">${esc(prettyMap(mp))}<br><span class="num">${walk} steps</span></span>
+  </div>`;
+}
+
 function logRow(l, fightNo){
   const name = l[0], kind = l[2], location = l[3], steps = l[4], healed = l[5],
         count = l[6] || 0;
@@ -1017,7 +1181,9 @@ function logRow(l, fightNo){
   }
   return `<div class="logrow${healed ? " heal" : ""}"${fightNo ? ` id="fight-${fightNo}"` : ""}>
     <div class="log-h"><span class="log-n">
-      ${fightNo ? `<span class="logno">${fightNo}</span>` : ""}<span class="kdot" style="background:${k.color}"></span>${esc(str(name))}</span>
+      ${fightNo ? `<span class="logno" style="background:${RKIND.trainer.color};color:#fff">${fightNo}</span>` : ""}<span class="kdot" style="background:${k.color}"></span>${
+        fightNo ? `<button class="fightlink" data-enc="${esc(l[1])}"
+          title="open this fight's matchup analysis">${esc(str(name))}</button>` : esc(str(name))}</span>
       <span class="log-l">${esc(str(location))}</span></div>
     <div class="log-steps">${steps.map(st => {
       const opp = st[0], lvl = st[1], by = st[2], move = st[3], turns = st[6],
@@ -1047,6 +1213,12 @@ function secNotes(d, L, multi){
       <li>One continuous run through all ${L.b} trainer battle${L.b === 1 ? "" : "s"} in this
         section at level ${d.lv}, <strong>with no items at all</strong> — no potions,
         no ethers, no revives.</li>
+      <li><strong>The order is the completionist route's</strong>: a travelling-salesman pass
+        over the game's real tile graph — every walkable tile, ledge, warp, ferry and spin
+        floor from the decomp — decides the walk, and the simulation fights in exactly that
+        order. The checklist, the maps and the PP ledger all describe the same line. Once Fly
+        is yours a hop may fly to the best Pokémon Center instead; landing there is a full
+        heal, so those cuts start a new section like any other.</li>
       <li>HP and PP carry across every battle in the section, and sections are cut exactly
         where the game restores you: at every Pokémon Center you walk past, taken from the
         game's own heal-location table — which includes the two easily-forgotten route
@@ -1123,6 +1295,69 @@ function secNotes(d, L, multi){
       <li>Catching Pokémon, which costs turns and Poké Balls but no meaningful PP.</li>
     </ul>
   </div></details>`;
+}
+
+/* ---------------- route helpers (used by the guide) ---------------- */
+const RKIND = {
+  item:   {color:"#9A7A00", label:"item ball"},
+  hidden: {color:"#3E8E96", label:"hidden item"},
+  trainer:{color:"#8A4A3A", label:"fight"},
+  catch:  {color:"#3F8536", label:"catch"},
+  event:  {color:"#5B45B8", label:"event"}
+};
+
+function svgPath(coords){
+  const pts = [];
+  for (let i = 0; i < coords.length; i += 2)
+    pts.push(`${(coords[i] + 0.5) * 16},${(coords[i + 1] + 0.5) * 16}`);
+  return pts.join(" ");
+}
+
+/* Chevrons spaced along a run, pointing the way you walk. Each is drawn
+   twice — a dark wide pass under a white narrow one — so it reads on both
+   pale sand and dark cave floors. */
+function svgArrows(coords){
+  const pts = [];
+  for (let i = 0; i < coords.length; i += 2)
+    pts.push([(coords[i] + 0.5) * 16, (coords[i + 1] + 0.5) * 16]);
+  const GAP = 72;
+  let out = "", acc = GAP / 2;
+  for (let i = 1; i < pts.length; i++){
+    const [x0, y0] = pts[i - 1], [x1, y1] = pts[i];
+    const dx = x1 - x0, dy = y1 - y0, len = Math.hypot(dx, dy);
+    if (!len) continue;
+    const ang = (Math.atan2(dy, dx) * 180 / Math.PI).toFixed(1);
+    let d = acc;
+    while (d <= len){
+      const t = `translate(${(x0 + dx * d / len).toFixed(1)} ${(y0 + dy * d / len).toFixed(1)}) rotate(${ang})`;
+      out += `<path class="rarrow0" transform="${t}" d="M-3 -3 L3 0 L-3 3"/>`
+           + `<path class="rarrow" transform="${t}" d="M-3 -3 L3 0 L-3 3"/>`;
+      d += GAP;
+    }
+    acc = d - len;
+  }
+  return out;
+}
+
+/* Jump from a fight in the guide to its per-encounter matchup analysis. */
+function openEncounter(id){
+  const e = ENC.find(x => x.id === id);
+  if (!e) return;
+  selected = id; view = "enc";
+  document.querySelectorAll("[data-view]").forEach(x =>
+    x.setAttribute("aria-current", x.dataset.view === "enc"));
+  ["enc","sec","tm","cho"].forEach(v =>
+    document.getElementById("view-" + v).hidden = v !== "enc");
+  renderList();
+  renderPanel(e);
+  window.scrollTo({top: 0});
+  const row = document.querySelector(`.enc[data-id="${CSS.escape(id)}"]`);
+  if (row) row.scrollIntoView({block: "center"});
+}
+
+function prettyMap(mp){
+  const art = MAPART[mp];
+  return art && str(art[3]) ? str(art[3]) : mp;
 }
 
 /* ---------------- TM plan ---------------- */

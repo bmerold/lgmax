@@ -227,6 +227,12 @@ def maps_needed():
         if raw: need.add(raw)
     for per_map in json.load(open(f"{OUT}/wildLoad.json")).values():
         for m in per_map: need.add(m["map"])
+    # every map the completionist route acts on (items in houses, gift rooms)
+    rt = f"{OUT}/route.json"
+    if os.path.exists(rt):
+        for st in json.load(open(rt))["stages"]:
+            for s in st["steps"]:
+                need.add(s["map"])
     return sorted(m for m in need if m in R.maps())
 
 def main():
@@ -249,8 +255,20 @@ def main():
     trainers = {const: [mp, x, y]
                 for const, (mp, x, y) in R.trainer_tiles().items()
                 if mp in index}
+    # outdoor connections with their offsets, so adjacent maps can be
+    # stitched back into one continuous picture
+    conns = {}
+    for m in index:
+        mj = R.maps().get(m) or {}
+        rows = []
+        for c in (mj.get("connections") or []):
+            nb = R._const_name(c["map"])
+            if nb in index:
+                rows.append([c["direction"], int(c.get("offset", 0)), nb])
+        if rows: conns[m] = rows
     with open(os.path.join(ART, "index.json"), "w") as f:
-        json.dump({"maps": index, "trainers": trainers}, f)
+        json.dump({"maps": index, "trainers": trainers,
+                   "connections": conns}, f)
     size = sum(os.path.getsize(os.path.join(ART, f"{m}.png")) for m in index)
     print(f"maps: {len(index)} ({drawn} drawn, {kept} kept), "
           f"{size/1e6:.2f} MB of PNG; trainers placed: {len(trainers)}")

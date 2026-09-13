@@ -1,0 +1,490 @@
+#!/usr/bin/env python3
+"""One path through the whole game: every item ball, every hidden item, every
+trainer, in the order that costs the fewest steps.
+
+The game is a gated travelling-salesman problem. The stages of the
+progression model gate it: a node (something to pick up or fight) becomes
+collectable once its map is open AND the world graph can physically reach it
+-- an item behind a cut tree on a stage-2 route is not reachable until Cut is
+live, and the scheduler simply holds it until the first stage where a path
+exists. Within each stage the tour starts wherever the previous stage ended,
+visits everything newly collectable, and is pinned to end at the stage's
+final story battle (the gym leader, the boss), so the route always advances
+the game.
+
+Distances are exact: Dijkstra over world.py's tile graph, ledge hops and
+spin-tile slides included. The ordering is nearest-neighbour polished by
+2-opt and Or-opt -- near-optimal in practice and deterministic.
+
+Output: data/route.json -- per stage, the ordered actions with their real
+tile paths (corner points only), plus step totals.
+"""
+import json, os, re, collections
+import world as WD
+import route_order as R
+import progression as P
+import sections as S
+import build_graph as G
+import engine as E
+
+OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+REPO = R.REPO
+
+ITEM_GFX = "OBJ_EVENT_GFX_ITEM_BALL"
+FLY_COST = 30      # menu, animation, landing -- a nominal fare, not a walk
+
+# The overworld's fixed Pokémon, found by their own sprites.
+STATIC_MON_GFX = {
+    "OBJ_EVENT_GFX_SNORLAX": "Wake Snorlax (Poké Flute)",
+    "OBJ_EVENT_GFX_ARTICUNO": "Catch Articuno",
+    "OBJ_EVENT_GFX_ZAPDOS": "Catch Zapdos",
+    "OBJ_EVENT_GFX_MOLTRES": "Catch Moltres",
+    "OBJ_EVENT_GFX_MEWTWO": "Catch Mewtwo",
+}
+
+# One-time events with no sprite of their own to find: gift Pokémon, key
+# hand-outs, the choices. Anchored inside the door of the map they happen in
+# (or at given coords); the stage is when the story hands them out.
+EVENTS = [
+    ("Choose your starter", "PalletTown_ProfessorOaksLab", 0),
+    ("Oak's Parcel from the Mart clerk", "ViridianCity_Mart", 1),
+    ("Deliver the Parcel — Pokédex from Oak", "PalletTown_ProfessorOaksLab", 1),
+    ("Town Map from Daisy", "PalletTown_RivalsHouse", 1, "Daisy"),
+    ("Old Amber from the scientist", "PewterCity_Museum_1F", 4, "OldAmberScientist"),
+    ("Helix or Dome Fossil (pick one)", "MtMoon_B2F", 5),
+    ("Buy the Magikarp (500)", "Route4_PokemonCenter_1F", 6),
+    ("S.S. Ticket from Bill", "Route25_SeaCottage", 7, "Bill"),
+    ("Bike Voucher from the Fan Club", "VermilionCity_PokemonFanClub", 9),
+    ("Bicycle from the Bike Shop", "CeruleanCity_BikeShop", 9),
+    ("Powder Jar from the Berry lady", "CeruleanCity_House5", 6, "BerryPowderMan"),
+    ("Old Rod", "VermilionCity_House1", 9),
+    ("HM01 Cut from the Captain", "SSAnne_CaptainsOffice", 10),
+    ("Itemfinder from Oak's aide", "Route11_EastEntrance_2F", 12),
+    ("HM05 Flash from Oak's aide (10 owned)", "Route2_EastBuilding", 12),
+    ("Tea from the old lady (opens Saffron's gates)", "CeladonCity_Condominiums_1F", 15, "TeaWoman"),
+    ("Everstone from the collector", "Route10_PokemonCenter_1F", 13, "Gentleman"),
+    ("Coin Case from the gambler", "CeladonCity_Restaurant", 15),
+    ("Game Corner prize (one pick)", "CeladonCity_GameCorner_PrizeRoom", 15),
+    ("Eevee on the Condominiums roof", "CeladonCity_Condominiums_RoofRoom", 15),
+    ("Poké Flute from Mr. Fuji", "LavenderTown_VolunteerPokemonHouse", 19, "MrFuji"),
+    ("Super Rod", "Route12_FishingHouse", 19),
+    ("TM27 Return from the gate girl", "Route12_NorthEntrance_2F", 19),
+    ("Exp. Share from Oak's aide (50 owned)", "Route15_WestEntrance_2F", 19),
+    ("HM02 Fly from the trapped girl", "Route16_House", 20),
+    ("Amulet Coin from Oak's aide (40 owned)", "Route16_NorthEntrance_2F", 20),
+    ("Good Rod", "FuchsiaCity_House2", 21),
+    ("HM03 Surf in the Secret House", "SafariZone_SecretHouse", 21),
+    ("HM04 Strength for the Gold Teeth", "FuchsiaCity_WardensHouse", 21, "Warden"),
+    ("Lapras from the Silph employee", "SilphCo_7F", 23, "LaprasGuy"),
+    ("Master Ball from the President", "SilphCo_11F", 23, "President"),
+    ("TM29 Psychic from Mr. Psychic", "SaffronCity_MrPsychicsHouse", 23, "MrPsychic"),
+    ("Hitmonlee or Hitmonchan (pick one)", "SaffronCity_Dojo", 23),
+    ("Revive your fossils", "CinnabarIsland_PokemonLab_ExperimentRoom", 26, "FossilScientist"),
+    ("Help Celio at the Network Center", "OneIsland_PokemonCenter_1F", 28, "Celio"),
+    ("HM06 Rock Smash in the Ember Spa", "OneIsland_KindleRoad_EmberSpa", 28, "RockSmashMan"),
+    ("Rescue Lostelle in the Berry Forest", "ThreeIsland_BerryForest", 28, "Lostelle"),
+    ("The prospector's Nugget", "ThreeIsland_DunsparceTunnel", 28, "Prospector"),
+    ("Togepi egg from the caretaker", "FiveIsland_WaterLabyrinth", 33, "EggGentleman"),
+    ("TM42 Facade for a Lemonade", "FiveIsland_MemorialPillar", 33, "MemorialMan"),
+    ("Take the Ruby", "MtEmber_RubyPath_B3F", 33),
+    ("The Sapphire from Gideon", "FiveIsland_RocketWarehouse", 33),
+    ("Ruby and Sapphire to Celio — trading unlocked", "OneIsland_PokemonCenter_1F", 33, "Celio"),
+]
+
+# Story precedence inside a stage: the fetch has to happen before the stop
+# that spends it, even when the TSP would rather swing by the other way.
+EVENT_BEFORE = [
+    ("Oak's Parcel from the Mart clerk", "Deliver the Parcel — Pokédex from Oak"),
+    ("Deliver the Parcel — Pokédex from Oak", "Town Map from Daisy"),
+    ("Poké Flute from Mr. Fuji", "Wake Snorlax (Poké Flute)"),
+    ("Take the Ruby", "Ruby and Sapphire to Celio — trading unlocked"),
+    ("The Sapphire from Gideon", "Ruby and Sapphire to Celio — trading unlocked"),
+]
+
+# Stages with no boss battle can still have a story finish line: stage 1 is
+# over when the Parcel is delivered and the Pokédex is in hand.
+EVENT_ANCHORS = {"Deliver the Parcel — Pokédex from Oak"}
+
+# ------------------------------------------------------------------ nodes
+def _item_ball_scripts():
+    """Script label -> item constant, from the one flat file that defines
+    every real item ball. Prop balls (starters, Eevee...) aren't in it."""
+    txt = open(f"{REPO}/data/scripts/item_ball_scripts.inc").read()
+    out = {}
+    for m in re.finditer(r"(\w+)::\s*\n\s*finditem (ITEM_\w+)", txt):
+        out[m.group(1)] = m.group(2)
+    return out
+
+def pretty_item(const):
+    return const.replace("ITEM_", "").replace("_", " ").title().replace("Tm", "TM").replace("Hm", "HM")
+
+def harvest():
+    """Every collectable with a tile: items, hidden items, trainers."""
+    balls = _item_ball_scripts()
+    nodes = []
+    for name, mj in R.maps().items():
+        if WD._map_stage(name) is None: continue
+        for o in mj.get("object_events", []):
+            if o.get("graphics_id") != ITEM_GFX: continue
+            item = balls.get(o.get("script"))
+            if not item: continue          # prop ball, not an item
+            nodes.append({"kind": "item", "what": pretty_item(item),
+                          "map": name,
+                          "x": o.get("x", 0), "y": o.get("y", 0)})
+        for b in mj.get("bg_events", []):
+            if b.get("type") != "hidden_item": continue
+            nodes.append({"kind": "hidden",
+                          "what": pretty_item(b.get("item", "?")),
+                          "map": name, "x": b.get("x", 0), "y": b.get("y", 0),
+                          "underfoot": bool(b.get("underfoot"))})
+
+    # the overworld's fixed Pokémon, standing on their own tiles
+    for name, mj in R.maps().items():
+        if WD._map_stage(name) is None: continue
+        for o in mj.get("object_events", []):
+            label = STATIC_MON_GFX.get(o.get("graphics_id"))
+            if label:
+                nodes.append({"kind": "event", "what": label, "map": name,
+                              "x": o.get("x", 0), "y": o.get("y", 0)})
+
+    # gift/choice/hand-out events: anchored on the NPC who gives them when
+    # one is named (the Old Amber scientist stands in the museum's cut-gated
+    # east wing -- the front door would be both the wrong tile and wrongly
+    # reachable before Cut), otherwise inside the door
+    for ev in EVENTS:
+        label, name, stage = ev[0], ev[1], ev[2]
+        hint = ev[3] if len(ev) > 3 else None
+        if name not in R.maps(): continue
+        xy = None
+        if hint:
+            for o in R.maps()[name].get("object_events", []):
+                if hint in (o.get("script") or ""):
+                    xy = (o.get("x", 0), o.get("y", 0)); break
+        if xy is None:
+            g = WD.grid(name)
+            xy = ((g.warps[0][0], g.warps[0][1]) if g.warps
+                  else WD.encounter_anchor(name, "land") or (g.w // 2, g.h // 2))
+        nodes.append({"kind": "event", "what": label, "map": name,
+                      "x": xy[0], "y": xy[1], "stage": stage})
+
+    # catch stops: each wild species routed to where it FIRST becomes
+    # catchable, grouped by the ground you stand on to catch it
+    first = {}
+    for enc in E.WILD["encounters"]:
+        if enc["version"] == "FireRed": continue
+        name = WD._const_to_folder().get(enc["map"])
+        if not name or WD._map_stage(name) is None: continue
+        ms = WD._map_stage(name)
+        for method, tbl in (enc["tables"] or {}).items():
+            if not tbl or not tbl.get("slots"): continue
+            if method == "fishing_mons":
+                for rod, idxs in E.WILD["fishingGroups"].items():
+                    gate = max(ms, P.ROD_STAGE.get(rod, 0))
+                    for slot in tbl["slots"]:
+                        if slot["slot"] not in idxs: continue
+                        k = (gate, name, rod.replace("_", " "))
+                        cur = first.get(slot["species"])
+                        if cur is None or k < cur: first[slot["species"]] = k
+            else:
+                gate = max(ms, P.METHOD_GATE.get(method, 0))
+                label = {"land_mons": "grass/cave", "water_mons": "surfing",
+                         "rock_smash_mons": "Rock Smash"}.get(method, method)
+                for slot in tbl["slots"]:
+                    k = (gate, name, label)
+                    cur = first.get(slot["species"])
+                    if cur is None or k < cur: first[slot["species"]] = k
+    stops = collections.defaultdict(list)
+    for sp, (gate, name, label) in first.items():
+        stops[(gate, name, label)].append(E.SPECIES[sp]["name"])
+    for (gate, name, label), species in sorted(stops.items()):
+        mode = ("water" if label == "surfing"
+                else "shore" if "rod" in label else "land")
+        xy = WD.encounter_anchor(name, mode) or WD.encounter_anchor(name, "land")
+        if xy is None:
+            g = WD.grid(name)
+            if not g.warps: continue
+            xy = (g.warps[0][0], g.warps[0][1])
+        species.sort()
+        nodes.append({"kind": "catch", "map": name, "x": xy[0], "y": xy[1],
+                      "stage": gate, "species": species, "method": label,
+                      "what": f"Catch {', '.join(species)} ({label})"})
+
+    # trainers: the same set the sections fight, on the tiles they stand on
+    tiles = R.trainer_tiles()
+    graph = json.load(open(f"{OUT}/encounters.json"))
+    seen = set()
+    for e in graph:
+        if e["kind"] in ("wild", "rematch"): continue
+        if e.get("starterVariant") not in (None, "Bulbasaur"): continue
+        const = e["trainerConst"]
+        if const in seen: continue
+        seen.add(const)
+        t = tiles.get(const)
+        if t:
+            mp, x, y = t
+        else:
+            # scripted battle with no overworld tile: anchor to its map's
+            # door, or failing that any open ground (the Nugget Bridge
+            # Rocket stands on a warpless outdoor route)
+            mp = e.get("locationRaw") or ""
+            if mp not in R.maps(): continue
+            g = WD.grid(mp)
+            if g.warps:
+                x, y = g.warps[0][0], g.warps[0][1]
+            else:
+                xy = (WD.encounter_anchor(mp, "land")
+                      or WD.first_open_tile(mp))
+                if xy is None: continue
+                x, y = xy
+        nodes.append({"kind": "trainer", "what": e["name"], "map": mp,
+                      "x": x, "y": y, "enc": e["id"], "stage": e["stage"]})
+    return nodes
+
+def node_stage(n):
+    """The stage a node belongs to (reachability may still defer it)."""
+    if "stage" in n: return n["stage"]
+    st = WD._map_stage(n["map"])
+    return 33 if st is None else st
+
+# ------------------------------------------------------------------ anchors
+def stage_anchor(stage, nodes):
+    """The battle a stage ends on: the last fight of the section walk."""
+    graph = json.load(open(f"{OUT}/encounters.json"))
+    encs = [e for e in graph if e["stage"] == stage
+            and e["kind"] not in ("wild", "rematch")
+            and e.get("starterVariant") in (None, "Bulbasaur")]
+    if not encs: return None
+    ordered, _ = R.section_order(stage, encs, S.FLOOR_ORDER)
+    by_enc = {n.get("enc"): n for n in nodes if n["kind"] == "trainer"}
+    for e in reversed(ordered):
+        n = by_enc.get(e["id"])
+        if n: return n
+    return None
+
+# ------------------------------------------------------------------ solver
+def scc_groups(mat, n, start_row=0):
+    """One-way terrain (Cycling Road's downhill, the Seafoam hole drops)
+    makes some node pairs reachable in only one direction. Group the nodes
+    that CAN all reach each other, then order the groups so every one-way
+    arc points forward — inside a group the tour is free, between groups the
+    order is forced."""
+    reach = [[mat[i][j] < INF for j in range(n + 1)] for i in range(n + 1)]
+    groups, assigned = [], set()
+    for i in range(1, n + 1):
+        if i in assigned: continue
+        grp = [j for j in range(1, n + 1) if j not in assigned
+               and reach[i][j] and reach[j][i]]
+        assigned.update(grp)
+        groups.append(grp)
+    # Kahn's algorithm over the group DAG, nearest-to-start first among ties
+    n_g = len(groups)
+    before = [[False] * n_g for _ in range(n_g)]
+    for a in range(n_g):
+        for b in range(n_g):
+            if a == b: continue
+            if any(reach[i][j] for i in groups[a] for j in groups[b]) and \
+               not any(reach[j][i] for i in groups[a] for j in groups[b]):
+                before[a][b] = True
+    indeg = [sum(before[a][b] for a in range(n_g)) for b in range(n_g)]
+    out, done = [], set()
+    while len(out) < n_g:
+        ready = [g for g in range(n_g) if g not in done and indeg[g] == 0]
+        if not ready:
+            ready = [g for g in range(n_g) if g not in done]  # cycle: give up
+        g = min(ready, key=lambda g: min(mat[start_row][i] for i in groups[g]))
+        out.append(groups[g]); done.add(g)
+        for b in range(n_g):
+            if before[g][b]: indeg[b] -= 1
+    return out
+
+def order_tour(mat, start_i, end_i, idxs):
+    """Open tour from start over `idxs`, optionally pinned to end at end_i.
+    Nearest-neighbour seed, then Or-opt and 2-opt (asymmetric-safe: every
+    candidate is scored with the real directed matrix)."""
+    todo = [i for i in idxs if i != end_i]
+    tour, cur = [], start_i
+    while todo:
+        nxt = min(todo, key=lambda j: mat[cur][j])
+        tour.append(nxt); todo.remove(nxt); cur = nxt
+    if end_i is not None: tour.append(end_i)
+
+    def cost(t):
+        c, prev = 0, start_i
+        for j in t:
+            c += mat[prev][j]; prev = j
+        return c
+
+    best, best_c = tour, cost(tour)
+    improved, rounds = True, 0
+    fixed_tail = 1 if end_i is not None else 0
+    while improved and rounds < 12:
+        improved = False; rounds += 1
+        n = len(best)
+        # Or-opt: move a run of 1-3 nodes somewhere better
+        for size in (1, 2, 3):
+            for i in range(0, n - fixed_tail - size + 1):
+                seg = best[i:i + size]
+                rest = best[:i] + best[i + size:]
+                for j in range(0, len(rest) - fixed_tail + 1):
+                    if j == i: continue
+                    cand = rest[:j] + seg + rest[j:]
+                    cc = cost(cand)
+                    if cc < best_c - 1e-9:
+                        best, best_c, improved = cand, cc, True
+                        break
+                if improved: break
+            if improved: break
+        if improved: continue
+        # 2-opt: reverse a middle segment
+        for i in range(0, n - fixed_tail - 1):
+            for j in range(i + 2, n - fixed_tail + 1):
+                cand = best[:i] + best[i:j][::-1] + best[j:]
+                cc = cost(cand)
+                if cc < best_c - 1e-9:
+                    best, best_c, improved = cand, cc, True
+                    break
+            if improved: break
+    return best, best_c
+
+def corners(path):
+    """A tile path compressed to its turning points."""
+    if not path: return []
+    out = [path[0]]
+    for i in range(1, len(path) - 1):
+        (m0, x0, y0), (m1, x1, y1), (m2, x2, y2) = path[i - 1], path[i], path[i + 1]
+        if m0 != m1 or m1 != m2 or (x1 - x0, y1 - y0) != (x2 - x1, y2 - y1):
+            out.append(path[i])
+    if len(path) > 1: out.append(path[-1])
+    return out
+
+# ------------------------------------------------------------------ the run
+INF = 1 << 30
+
+def solve(max_stage=34, verbose=True):
+    nodes = harvest()
+    for n in nodes:
+        n["_st"] = node_stage(n)
+    pending = list(nodes)
+    pos = WD.spawn()
+    route, total = [], 0
+
+    for stage in range(0, max_stage + 1):
+        due = [n for n in pending if n["_st"] <= stage]
+        if not due: continue
+        # what can this stage's world actually reach?
+        reach = {n_id: WD.reach_tile((n["map"], n["x"], n["y"]), stage)
+                 for n_id, n in enumerate(due)}
+        dist0 = WD.bfs(pos, stage)
+        todo = [i for i in range(len(due)) if reach[i] in dist0]
+        if not todo:
+            continue
+        picked = [due[i] for i in todo]
+        tiles = [reach[todo_i] for todo_i in todo]
+        anchor = stage_anchor(stage, picked)
+        if anchor is None:
+            anchor = next((n for n in picked
+                           if n.get("what") in EVENT_ANCHORS), None)
+        end_i = picked.index(anchor) if anchor in picked else None
+
+        # distance matrix: start + every node tile. Once Fly is live, any hop
+        # can instead fly to the best Pokémon Center and walk from there.
+        fly = stage >= P.HM_STAGE["FLY"]
+        cdist, cparent = ({}, {})
+        if fly:
+            centers = [c for c in WD.center_nodes()
+                       if WD._open_map(c[0], stage)]
+            cdist, cparent = WD.bfs_multi(centers, stage)
+        pts = [pos] + tiles
+        wmat = [[INF] * len(pts) for _ in pts]
+        for i, p in enumerate(pts):
+            d = WD.bfs(p, stage, targets=set(pts))
+            for j, q in enumerate(pts):
+                if q in d: wmat[i][j] = d[q]
+        mat = [row[:] for row in wmat]
+        if fly:
+            for j, q in enumerate(pts):
+                if j == 0: continue
+                f = FLY_COST + cdist.get(q, INF)
+                for i in range(len(pts)):
+                    if i != j and f < mat[i][j]: mat[i][j] = f
+        groups = scc_groups(mat, len(pts) - 1)
+        order, cur_idx = [], 0
+        for gi, grp in enumerate(groups):
+            pin = ((end_i + 1) if end_i is not None and (end_i + 1) in grp
+                   and gi == len(groups) - 1 else None)
+            sub, _ = order_tour(mat, cur_idx, pin, grp)
+            order += sub
+            cur_idx = sub[-1]
+        # story precedence: a stop that depends on a fetch is pushed back to
+        # just after it (never the fetch pulled forward, which would tear the
+        # stop off the stage's pinned ending), repeated to a fixpoint
+        by_what = {picked[i - 1].get("what"): i for i in order}
+        for _ in range(8):
+            changed = False
+            for a_name, b_name in EVENT_BEFORE:
+                ia, ib = by_what.get(a_name), by_what.get(b_name)
+                if ia is None or ib is None: continue
+                if order.index(ia) > order.index(ib):
+                    order.remove(ib)
+                    order.insert(order.index(ia) + 1, ib)
+                    changed = True
+            if not changed: break
+        cost, prev = 0, 0
+        for oi in order:
+            cost += mat[prev][oi]; prev = oi
+
+        steps = []
+        cur, prev_idx = pos, 0
+        for oi in order:
+            n = picked[oi - 1]
+            tgt = tiles[oi - 1]
+            flew = mat[prev_idx][oi] < wmat[prev_idx][oi]
+            if flew:
+                path = WD.walk_back(cparent, tgt)   # from the landing Center
+            else:
+                path = WD.path_between(cur, tgt, stage) or [cur, tgt]
+            step = {"kind": n["kind"], "what": n["what"],
+                    "map": n["map"], "at": [n["x"], n["y"]],
+                    "walk": int(mat[prev_idx][oi]),
+                    "path": [[m, x, y] for m, x, y in corners(path)]}
+            if flew: step["fly"] = path[0][0] if path else True
+            if n.get("enc"): step["enc"] = n["enc"]
+            if n.get("underfoot"): step["underfoot"] = True
+            if n.get("species"): step["species"] = n["species"]
+            steps.append(step)
+            cur, prev_idx = tgt, oi
+        route.append({"stage": stage, "steps": steps,
+                      "stepTotal": int(cost),
+                      "startsAt": [pos[0], pos[1], pos[2]],
+                      "endsAt": [cur[0], cur[1], cur[2]]})
+        total += cost
+        pos = cur
+        done = {id(n) for n in picked}
+        pending = [n for n in pending if id(n) not in done]
+        if verbose:
+            st = P.STAGE_BY_ID.get(stage, {})
+            kinds = collections.Counter(n["kind"] for n in picked)
+            print(f"  [{stage:2}] {st.get('name','?')[:34]:36} "
+                  f"{int(cost):6} steps  "
+                  f"{kinds.get('trainer',0):3} fights "
+                  f"{kinds.get('item',0):3} items "
+                  f"{kinds.get('hidden',0):3} hidden "
+                  f"{kinds.get('catch',0):2} catch "
+                  f"{kinds.get('event',0):2} events", flush=True)
+
+    leftovers = [(n["kind"], n["what"], n["map"]) for n in pending]
+    return {"stages": route, "stepTotal": int(total), "left": leftovers}
+
+def main():
+    print("routing the whole game...", flush=True)
+    out = solve()
+    with open(f"{OUT}/route.json", "w") as f:
+        json.dump(out, f)
+    print(f"\n  whole game: {out['stepTotal']} steps")
+    if out["left"]:
+        print(f"  unreachable ({len(out['left'])}):")
+        for k, w, m in out["left"][:15]:
+            print(f"    {k:8} {w:28} {m}")
+
+if __name__ == "__main__":
+    main()

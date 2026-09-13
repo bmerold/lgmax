@@ -12,7 +12,7 @@ def main():
     recs = json.load(open(f"{OUT}/recommendations.json"))
     secs = json.load(open(f"{OUT}/sections.json"))
     mapart = json.load(open(f"{OUT}/mapart/index.json"))
-    enc_by_id = {e["id"]: e for e in graph}
+    route = json.load(open(f"{OUT}/route.json"))
 
     # ---- string pools (species, move and type names repeat thousands of times)
     pool, pool_idx = [], {}
@@ -162,35 +162,62 @@ def main():
 
     used_maps = set()
 
-    def leg_maps(merged):
-        """The maps a leg crosses, in walk order, with every trainer battle
-        pinned to the tile its object event stands on. Numbers count the
-        trainer rows in display order, so they match the battle list. A
-        scripted battle without an overworld tile (rival ambushes) simply
-        gets no pin."""
-        seq, marks, n = [], {}, 0
-        def add(mp):
-            if mp in mapart["maps"]:
-                if mp not in seq: seq.append(mp)
-                return True
-            return False
-        for l in merged:
-            if l["kind"] == "wild":
-                add(l.get("group") or "")
-                continue
-            n += 1
-            e = enc_by_id.get(l["id"]) or {}
-            add(e.get("locationRaw") or "")
-            tile = mapart["trainers"].get(e.get("trainerConst") or "")
-            if tile and add(tile[0]):
-                marks.setdefault(tile[0], []).append(
-                    [tile[1], tile[2], n, S(l["enc"]), S(l["kind"])])
-        used_maps.update(seq)
-        # raw folder names, NOT pooled: S() prettifies "Pokemon" -> "Pokémon",
-        # which would break the join against the mapart keys
-        return [[mp, marks.get(mp, [])] for mp in seq]
+    # ---- the completionist route, sliced per section leg. The section
+    # battles are simulated in route order (sections.py reads route.json),
+    # so a leg's fights and the route's trainer stops line up one to one:
+    # a leg's slice runs through its last trainer stop, and the pickups,
+    # catches and events in between land exactly where they happen.
+    import collections as _c
+    route_steps_by_stage = {st["stage"]: st["steps"] for st in route["stages"]}
 
-    def leg_rows(sec):
+    def path_runs(path):
+        out = []
+        for m, x, y in path:
+            if not out or out[-1][0] != m: out.append([m, []])
+            out[-1][1].extend((x, y))
+        return out
+
+    def clusters_of(seq):
+        """Stitch a leg's adjacent outdoor maps back together: maps joined by
+        a connection are placed at their true relative offsets, so the ground
+        reads continuously across the boundary instead of being cut into
+        separate pictures. Interiors stay singletons. Tile coordinates."""
+        conns = mapart.get("connections", {})
+        dims = mapart["maps"]
+        seqset, seen, out = set(seq), set(), []
+        for m in seq:
+            if m in seen: continue
+            comp, queue = {m: (0, 0)}, [m]
+            while queue:
+                a = queue.pop()
+                ax, ay = comp[a]
+                aw, ah = dims[a]["w"] // 16, dims[a]["h"] // 16
+                for d, off, nb in conns.get(a, []):
+                    if nb not in seqset or nb in comp: continue
+                    bw = dims[nb]["w"] // 16; bh = dims[nb]["h"] // 16
+                    if d == "down":    bx, by = ax + off, ay + ah
+                    elif d == "up":    bx, by = ax + off, ay - bh
+                    elif d == "right": bx, by = ax + aw, ay + off
+                    elif d == "left":  bx, by = ax - bw, ay + off
+                    else: continue
+                    comp[nb] = (bx, by); queue.append(nb)
+            minx = min(x for x, _ in comp.values())
+            miny = min(y for _, y in comp.values())
+            out.append([[n, x - minx, y - miny]
+                        for n, (x, y) in sorted(comp.items(),
+                                                key=lambda kv: seq.index(kv[0]))])
+            seen |= set(comp)
+        return out
+
+    def pack_stop(s):
+        # [kind, what, map, x, y, walk, flyLanding, pathRuns, species, buried]
+        return [S(s["kind"]), S(s["what"]), s["map"], s["at"][0], s["at"][1],
+                s["walk"], s["fly"] if isinstance(s.get("fly"), str) else 0,
+                path_runs(s["path"]),
+                [S(x) for x in s.get("species", [])],
+                1 if s.get("underfoot") else 0]
+
+    def leg_rows(sec, stage):
         """A section split at its full heals. Each leg carries its own roster
         ledger and log slice, so no PP bar shown ever spans a heal."""
         legs = sec.get("legs") or [{
@@ -200,19 +227,41 @@ def main():
             "wildBattles": sec.get("wildBattles", 0), "turns": sec["turns"],
             "wildTurns": sec.get("wildTurns", 0), "faints": sec["faints"],
             "unanswered": sec["unanswered"], "team": sec["team"]}]
-        out, i0 = [], 0
-        for leg in legs:
+        steps = route_steps_by_stage.get(stage, [])
+        out, i0, cursor = [], 0, 0
+        for li, leg in enumerate(legs):
             chunk = sec["log"][i0:i0 + leg["rows"]]; i0 += leg["rows"]
             merged = merge_walks(chunk)
+            fights = sum(1 for l in merged if l["kind"] != "wild")
+            end, seen = cursor, 0
+            while end < len(steps) and seen < fights:
+                if steps[end]["kind"] == "trainer": seen += 1
+                end += 1
+            if li == len(legs) - 1: end = len(steps)
+            stops = steps[cursor:end]; cursor = end
+            # this leg's maps in the order the walk meets them, with the
+            # walk itself as polyline runs per map
+            seq, segs = [], _c.defaultdict(list)
+            for s in stops:
+                for name, coords in path_runs(s["path"]):
+                    if name not in mapart["maps"]: continue
+                    if name not in seq: seq.append(name)
+                    segs[name].append(coords)
+                mp = s["map"]
+                if mp in mapart["maps"] and mp not in seq: seq.append(mp)
+            used_maps.update(seq)
             out.append({
                 "ti": S(leg["title"]), "hz": S(leg.get("endsAt")),
                 "b": leg["battles"], "om": leg["opposingMons"],
                 "wb": leg["wildBattles"], "t": leg["turns"],
                 "wt": leg["wildTurns"], "f": leg["faints"],
                 "u": leg["unanswered"],
+                "st": sum(s["walk"] for s in stops),
                 "team": [member_row(t) for t in leg["team"]],
                 "log": [log_row(l) for l in merged],
-                "mp": leg_maps(merged),
+                "rt": [pack_stop(s) for s in stops],
+                "mp": [[mp, segs.get(mp, [])] for mp in seq],
+                "cl": clusters_of(seq),
             })
         return out
 
@@ -238,7 +287,7 @@ def main():
                           k["gap"], k["times"], S(k["why"]), S(k.get("becomes"))]
                          for k in sec.get("keep", [])],
                 "bench": [bench_row(b) for b in sec["bench"]],
-                "legs": leg_rows(sec),
+                "legs": leg_rows(sec, int(stage)),
             }
         out_sections[_mode][starter] = rows
 
@@ -270,7 +319,7 @@ def main():
         art[mp] = [meta["w"], meta["h"], b64, S(_G.pretty_location(mp))]
 
     payload = {"pool": pool, "stages": stages, "encounters": out_encs,
-               "mapart": art,
+               "mapart": art, "route": {"total": route["stepTotal"]},
                "sections": out_sections, "choices": choices,
                "commitments": secs.get("tradeCommitments", {}),
                "tmPlans": secs.get("tmPlans", {}),

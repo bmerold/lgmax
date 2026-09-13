@@ -271,6 +271,14 @@ def _legs(m, trainers, entry, exit_pt, onward_pt):
                   if c in tiles else 0)
     return fwd, back
 
+def battle_key(trainer_const):
+    """A rival/Champion fight exists as three constants, one per starter the
+    RIVAL holds. Drop that suffix so the same fight matches across runs."""
+    parts = trainer_const.split("_")
+    if parts[-1] in ("BULBASAUR", "CHARMANDER", "SQUIRTLE"):
+        return "_".join(parts[:-1])
+    return trainer_const
+
 def section_order(stage, encs, floor_order):
     """One section's trainer battles, in the order you meet them, plus the
     points along the way where you walk past a Pokemon Center."""

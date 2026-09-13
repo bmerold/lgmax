@@ -20,7 +20,7 @@ export LGMAX_POKEFIRERED=~/pokefirered      # optional; this is the default
 ```
 
 Python 3.10+, no third-party packages. Takes 6–8 minutes; `build.sh` runs the whole pipeline and
-finishes with `verify.py`, which must print 27 OKs. The output is `app.html` — one self-contained
+finishes with `verify.py`, which must print 33 OKs. The output is `app.html` — one self-contained
 file, ~6 MB, no server needed.
 
 ## What it does
@@ -31,6 +31,7 @@ file, ~6 MB, no server needed.
 | **Section parties** | the smallest party that clears each section, simulated end to end **with no items** — HP and PP spent across the whole stretch, HMs carried, and a running list of what to keep levelled for later. Sections are presented cut at every full heal (a Pokémon Center walked past, or an in-dungeon healing spot), so a PP bar never quietly spans a heal |
 | **TM plan** | 43 of the 49 TMs exist in exactly one copy; this decides who gets each one, judged over the whole run rather than the first fight it helps |
 | **Choices** | starter, fossil, Fighting Dojo, Eevee stone, Game Corner prize — each ranked on whole evolution lines |
+| **The route** | one continuous ~25,000-step walk through the whole game — every item ball, hidden item, trainer, one-off and first-catch, ordered by a travelling-salesman pass over the real tile graph and drawn onto the maps |
 
 Toggles for **starter** and **trading on/off** re-solve the recommendations rather than filtering
 them.
@@ -57,10 +58,12 @@ them.
 | `hms.py` | field obstacles per map → which HMs each section demands |
 | `constraints.py` | evolution lines, one-of groups, run-wide commitments, outgrown forms |
 | `optimize.py` | per-encounter optimizer (scalar screen → exact turn DP) |
+| `world.py` | the game as one walkable graph: every tile, ledge, spin floor, warp, ferry and elevator, stage-gated |
+| `tour.py` | the completionist route: a gated travelling-salesman pass that collects every item, fights every trainer, catches every new species |
 | `render_maps.py` | renders each section's maps to PNG from the decomp's tilesets/layouts, and pins every trainer to the tile its object event stands on |
 | `sections.py` | two-pass per-section party optimizer + choice evaluation |
 | `compact.py` | array-encoded payload (~25 MB → ~5 MB) |
-| `verify.py` | **27 guard rails; all must pass after every rebuild** |
+| `verify.py` | **33 guard rails; all must pass after every rebuild** |
 | `setup_study.py` | standalone: does setting up beat hit-and-switch? (it does not) |
 
 `sections.py` runs before `optimize.py` because it writes `data/commitments.json`, which the
@@ -92,5 +95,5 @@ See `docs/` for the working notes behind each of these.
   `AI_SCRIPT_CHECK_BAD_MOVE`.
 - Handovers are searched two segments deep; the party builder is greedy, so individual section
   numbers are not monotonic in the size of the candidate pool.
-- The post-game section lumps Sevii 4–7 and the Elite Four rematch into one continuous run with no
-  healing, so it wipes. That is a sectioning artifact, not a verdict.
+- The post-game stage lumps Sevii 4–7 and the Elite Four rematch together, so the route fights
+  round two of the League straight after round one. That is a staging artifact, not a verdict.

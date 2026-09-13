@@ -279,37 +279,90 @@ check("the Pokemon assigned an HM can actually learn it",
       not cant_learn, str(cant_learn[:4]))
 
 # ------------------------------------------------------------------ walk order
-# A section's battles must read as the walk: each map's trainers together (a
-# route walked in two legs may appear twice), and a map's wild battles sitting
-# among that map's own trainers rather than scattered across the section.
+# The completionist route decides the order battles happen in, and the
+# section simulation must fight in exactly that order — the checklist, the
+# maps and the PP ledger all have to describe the same line.
 import route_order as RO
 tiles = RO.trainer_tiles()
-stray = []
+_routej = json.load(open(f"{OUT}/route.json"))
+_rt_keys = {}
+for st in _routej["stages"]:
+    _rt_keys[st["stage"]] = [RO.battle_key((s.get("enc") or "").split(":")[-1])
+                             for s in st["steps"] if s["kind"] == "trainer"]
+_graph_tmp = json.load(open(f"{OUT}/encounters.json"))
+_const_by_id = {e["id"]: e.get("trainerConst", "") for e in _graph_tmp}
+out_of_line = []
 for starter, per_stage in raw["sections"].items():
     for st, sec in per_stage.items():
         if not sec: continue
-        for l in sec["log"]:
-            if l["kind"] != "wild": continue
-            grp = l.get("group") or ""
-            # the trainers immediately around a walk row should be on that map
-            pass
-# trainers on the same map must be contiguous, allowing at most two legs
-for starter, per_stage in raw["sections"].items():
-    for st, sec in per_stage.items():
-        if not sec: continue
-        runs, last = collections.Counter(), None
-        for l in sec["log"]:
-            if l["kind"] == "wild": continue
-            m = l["location"]
-            if m != last: runs[m] += 1
-            last = m
-        for m, n in runs.items():
-            if n > 2: stray.append((starter, int(st), m, n))
-check("a section's trainers are grouped by map, in at most two legs",
-      not stray, str(stray[:4]))
+        seq = [RO.battle_key(_const_by_id.get(l["id"], ""))
+               for l in sec["log"] if l["kind"] != "wild"]
+        if seq != _rt_keys.get(int(st), seq):
+            out_of_line.append((starter, int(st)))
+check("every section fights in the route's exact order",
+      not out_of_line, str(out_of_line[:5]))
 
 check("every trainer the model orders has a real tile on a real map",
       len(tiles) > 400, f"only {len(tiles)} placed")
+
+# ------------------------------------------------------------------ the route
+# The completionist walk: every stop exactly once, in one continuous line,
+# never before its stage, always in straight tile runs.
+routej = json.load(open(f"{OUT}/route.json"))
+import tour as TOUR
+route_nodes = TOUR.harvest()
+
+check("the route leaves nothing uncollected", not routej.get("left"),
+      str(routej.get("left", [])[:4]))
+
+want = collections.Counter((n["kind"], n["what"], n["map"]) for n in route_nodes)
+got = collections.Counter()
+for st in routej["stages"]:
+    for s in st["steps"]:
+        got[(s["kind"], s["what"], s["map"])] += 1
+check("the route visits every stop exactly once", want == got,
+      str(list(((want - got) + (got - want)).items())[:3]))
+
+prev_end, disc = None, []
+for st in routej["stages"]:
+    if prev_end is not None and st["startsAt"] != prev_end:
+        disc.append(st["stage"])
+    prev_end = st["endsAt"]
+check("the route is one continuous walk", not disc, str(disc[:5]))
+
+bad_tot = [st["stage"] for st in routej["stages"]
+           if not (0 <= st["stepTotal"] < 10 ** 7)]
+check("every stage's step total is finite", not bad_tot, str(bad_tot))
+
+intrinsic = {}
+for n in route_nodes:
+    k = (n["kind"], n["what"], n["map"])
+    intrinsic[k] = min(intrinsic.get(k, 99), TOUR.node_stage(n))
+early = [(st["stage"], s["what"]) for st in routej["stages"]
+         for s in st["steps"]
+         if st["stage"] < intrinsic.get((s["kind"], s["what"], s["map"]), 0)]
+check("no stop is routed before its stage", not early, str(early[:4]))
+
+# Straight-run check. Exempt the maps where a single edge legitimately lands
+# elsewhere: spin-floor slides bend (Rocket Hideout, the Five Island
+# warehouse), and teleporter pads (Sabrina's gym, the Silph Co. pads) are
+# same-map warps. Spin floors are detected from the tiles themselves.
+import world as WORLD
+def _bendy(m):
+    if m == "SaffronCity_Gym" or m.startswith("SilphCo_"): return True
+    try:
+        return any(b in WORLD.MB_SPIN for b in WORLD.grid(m).beh)
+    except Exception:
+        return False
+diag = []
+for st in routej["stages"]:
+    for s in st["steps"]:
+        p = s["path"]
+        for a, b in zip(p, p[1:]):
+            if a[0] == b[0] and not _bendy(a[0]) and a[1] != b[1] and a[2] != b[2]:
+                diag.append((st["stage"], s["what"])); break
+check("route paths run straight, tile to tile, never diagonally",
+      not diag, str(diag[:4]))
 
 # ------------------------------------------------------------------ graph sanity
 graph = json.load(open(f"{OUT}/encounters.json"))
