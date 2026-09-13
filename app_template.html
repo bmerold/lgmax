@@ -324,8 +324,8 @@ button{font:inherit;color:inherit}
 .side-row.flash{animation:rowflash 1.6s ease-out}
 .side-n{min-width:20px;height:20px;border-radius:10px;text-align:center;flex-shrink:0;
   font:700 10.5px/20px "IBM Plex Mono",monospace;color:#fff;padding:0 3px}
-.side-t{font-weight:600;font-size:12px;line-height:1.35}
-.side-d{font-size:10.5px;color:var(--ink-3);margin-top:1px;line-height:1.35}
+.side-t{font-weight:600;font-size:12.5px;line-height:1.35}
+.side-d{font-size:11px;color:var(--ink-3);margin-top:1px;line-height:1.35}
 .side-go{flex-shrink:0;border:0;background:none;color:var(--ink-3);
   cursor:pointer;font:inherit;font-size:13px;padding:0 2px}
 .side-go:hover{color:var(--accent)}
@@ -352,6 +352,30 @@ button{font:inherit;color:inherit}
 .backguide:hover{color:var(--accent);border-color:var(--accent)}
 .enc-head.slim{padding-bottom:12px}
 .enc-head.slim .enc-meta{margin-top:5px}
+
+/* ---------- sticky orientation bar ---------- */
+#stickyBar{position:fixed;top:0;left:0;right:0;z-index:40;display:flex;gap:14px;
+  align-items:center;padding:8px 18px;background:var(--surface);
+  border-bottom:1px solid var(--line);box-shadow:0 2px 10px rgba(0,0,0,.08);
+  font-size:12.5px}
+#stickyTitle{font-weight:700}
+#stickyNext{color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  flex:1;min-width:0}
+#stickyJump{border:1px solid var(--line);border-radius:8px;background:var(--surface-2);
+  color:var(--ink-2);font:600 11.5px/1 inherit;font-family:inherit;padding:6px 10px;
+  cursor:pointer;flex-shrink:0}
+#stickyJump:hover{color:var(--accent);border-color:var(--accent)}
+
+/* ---------- map zoom + hide-done density controls ---------- */
+.mapscale{position:relative;overflow:hidden}
+.mapbox{transform-origin:0 0}
+.zoomctl{display:inline-flex;gap:4px;margin-left:auto}
+.zoomb,.hdone{border:1px solid var(--line);border-radius:7px;background:var(--surface);
+  color:var(--ink-3);font:600 11px/1 inherit;font-family:inherit;padding:5px 9px;cursor:pointer}
+.zoomb[aria-pressed="true"],.hdone[aria-pressed="true"]{background:var(--surface-3);
+  color:var(--ink);border-color:var(--ink-3)}
+.zoomb:hover,.hdone:hover{color:var(--accent);border-color:var(--accent)}
+.hidedone .side-row.done,.hidedone .rt-row.done,.hidedone .logrow.done{display:none}
 @media(max-width:960px){.mapblock{flex-direction:column}
   .mapside{position:static;flex:auto;width:100%;max-height:300px}}
 .mapbox svg{position:absolute;left:0;top:0;pointer-events:none}
@@ -362,7 +386,7 @@ button{font:inherit;color:inherit}
 
 /* ---------- route checklist ---------- */
 .rt-steps{border-top:1px solid var(--line)}
-.rt-row{display:flex;gap:10px;align-items:baseline;padding:7px 16px;border-bottom:1px solid var(--line);font-size:12.5px}
+.rt-row{display:flex;gap:10px;align-items:baseline;padding:7px 16px;border-bottom:1px solid var(--line);font-size:13px}
 .rt-row:last-child{border-bottom:0}
 .rt-no{min-width:24px;height:20px;border-radius:10px;text-align:center;flex-shrink:0;
   font:700 11px/20px "IBM Plex Mono",monospace;color:#fff}
@@ -460,6 +484,11 @@ details.notes[open] summary::after{content:"−"}
   </div>
 
   <div id="view-sec" hidden>
+    <div id="stickyBar" hidden>
+      <span id="stickyTitle"></span>
+      <span id="stickyNext"></span>
+      <button id="stickyJump">next stop ↓</button>
+    </div>
     <div class="shell">
       <aside class="rail">
         <div class="rail-head">
@@ -549,6 +578,9 @@ let selected = null, selectedSec = 18, selectedLeg = 0, tab = "team";
 /* ---- play-through progress + where-you-were, kept in this browser ---- */
 let DONE = new Set();
 try { DONE = new Set(JSON.parse(localStorage.getItem("lgmax-done") || "[]")); } catch (e) {}
+let MAPZOOM = "1", HIDEDONE = false;
+try { MAPZOOM = localStorage.getItem("lgmax-zoom") || "1"; } catch (e) {}
+try { HIDEDONE = localStorage.getItem("lgmax-hidedone") === "1"; } catch (e) {}
 const saveDone = () => { try { localStorage.setItem("lgmax-done", JSON.stringify([...DONE])); } catch (e) {} };
 /* a stop's identity survives re-solves: what it is + where it stands */
 const stopKey = s => [str(s[0]), str(s[1]), s[2], s[3], s[4]].join("|");
@@ -625,6 +657,7 @@ document.getElementById("nav").addEventListener("click", ev => {
     x.setAttribute("aria-current", x.dataset.view === view));
   ["enc","sec","tm","cho"].forEach(v =>
     document.getElementById("view-" + v).hidden = v !== view);
+  updateSticky();
   saveUi();
 });
 
@@ -894,6 +927,8 @@ function renderSecList(){
   }).join("");
   document.getElementById("secCount").textContent =
     `${totalSections()} sections · a full heal between each`;
+  const cur = document.querySelector('#secList .sec-row[aria-current="true"]');
+  if (cur) cur.scrollIntoView({block: "nearest"});
 }
 document.getElementById("secList").addEventListener("click", ev => {
   const b = ev.target.closest("[data-sec]"); if (!b) return;
@@ -912,6 +947,21 @@ const flashEl = el => {
   el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
 };
 document.getElementById("secPanel").addEventListener("click", ev => {
+  const z = ev.target.closest(".zoomb");
+  if (z){
+    MAPZOOM = z.dataset.zoom;
+    try { localStorage.setItem("lgmax-zoom", MAPZOOM); } catch (e) {}
+    applyMapZoom();
+    return;
+  }
+  const hd = ev.target.closest(".hdone");
+  if (hd){
+    HIDEDONE = !HIDEDONE;
+    try { localStorage.setItem("lgmax-hidedone", HIDEDONE ? "1" : "0"); } catch (e) {}
+    document.getElementById("secPanel").classList.toggle("hidedone", HIDEDONE);
+    hd.setAttribute("aria-pressed", String(HIDEDONE));
+    return;
+  }
   const c = ev.target.closest(".chk");
   if (c){
     ev.stopPropagation();
@@ -1125,7 +1175,11 @@ function renderSecPanel(id, leg){
     const segsByMap = Object.fromEntries(L.mp.map(m => [m[0], m[1] || []]));
     const clusters = (L.cl && L.cl.length) ? L.cl : L.mp.map(m => [[m[0], 0, 0]]);
     html += `<section class="card"><div class="card-h"><h2>The ground you cover</h2>
-        <span class="note">the walk in orange — numbered stops match the checklist below</span></div>
+        <span class="note">the walk in orange — numbered stops match the checklist below</span>
+        <span class="zoomctl">
+          <button class="zoomb" data-zoom="fit" title="scale each map to fit the panel">fit</button>
+          <button class="zoomb" data-zoom="1" title="one pixel per game pixel">1×</button>
+          <button class="zoomb" data-zoom="2" title="double size">2×</button></span></div>
       ${clusters.map(cluster => {
         const members = cluster.filter(c => MAPART[c[0]]);
         if (!members.length) return "";
@@ -1157,14 +1211,14 @@ function renderSecPanel(id, leg){
         return `<div class="maph">${esc(shown)}
             <span class="note">${nPins ? nPins + " stop" + (nPins === 1 ? "" : "s") : "just the walk"}</span></div>
           <div class="mapblock">
-          <div class="mapwrap"><div class="mapbox" style="width:${W}px;height:${H}px">
+          <div class="mapwrap" data-w="${W}" data-h="${H}"><div class="mapscale"><div class="mapbox" style="width:${W}px;height:${H}px">
             ${members.map(c => `<img class="stitch" src="data:image/png;base64,${MAPART[c[0]][2]}"
                 width="${MAPART[c[0]][0]}" height="${MAPART[c[0]][1]}"
                 style="left:${c[1] * 16}px;top:${c[2] * 16}px"
                 alt="Map of ${esc(c[0])}" loading="lazy">`).join("")}
             <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${svgs}</svg>
             ${pinsHtml}
-          </div></div>
+          </div></div></div>
           ${clusterPins.length ? `<aside class="mapside">${clusterPins.map(sideRow).join("")}</aside>` : ""}
           </div>`;
       }).join("")}
@@ -1190,7 +1244,8 @@ function renderSecPanel(id, leg){
   flushWilds();
   while (li < L.log.length) listHtml += logRow(L.log[li++], 0);
   html += `<section class="card"><div class="card-h"><h2>Step by step</h2>
-      <span class="note">fights, pickups and catches in walk order — tick things off as you play; click a fight for its matchup analysis</span></div>
+      <span class="note">fights, pickups and catches in walk order — tick things off as you play; click a fight for its matchup analysis</span>
+      ${doneCount ? `<button class="hdone" aria-pressed="${HIDEDONE}">hide done (${doneCount})</button>` : ""}</div>
     ${listHtml}</section>`;
   html += prep;
 
@@ -1209,7 +1264,55 @@ function renderSecPanel(id, leg){
   }
   html += secNotes(d, L, multi);
   el.innerHTML = html;
+  el.classList.toggle("hidedone", HIDEDONE);
+  applyMapZoom();
+  /* feed the sticky orientation bar */
+  const label = multi ? `${id}${legLetter(k)}. ${title}` : `${id}. ${title}`;
+  const nxt = nextIdx >= 0 ? stops[nextIdx] : null;
+  stickyInfo = {
+    title: `${label} · ${doneCount}/${stops.length}`,
+    next: nxt ? `next: ${nextIdx + 1}. ${str(nxt[1]) || ""}${
+      planByStop[nextIdx + 1] ? " — " + planByStop[nextIdx + 1] : ""}` : "all done — on to the next section",
+    n: nextIdx >= 0 ? nextIdx + 1 : null
+  };
+  updateSticky();
 }
+
+/* ---- map zoom: 1x, 2x, or scaled to fit the panel ---- */
+function applyMapZoom(){
+  document.querySelectorAll("#secPanel .mapwrap[data-w]").forEach(wrap => {
+    const W = +wrap.dataset.w, H = +wrap.dataset.h;
+    const sc = wrap.querySelector(".mapscale"), box = wrap.querySelector(".mapbox");
+    if (!sc || !box) return;
+    const scale = MAPZOOM === "2" ? 2
+      : MAPZOOM === "fit" ? Math.min(1, Math.max(0.25, (wrap.clientWidth - 2) / W))
+      : 1;
+    sc.style.width = Math.round(W * scale) + "px";
+    sc.style.height = Math.round(H * scale) + "px";
+    box.style.transform = scale === 1 ? "" : `scale(${scale})`;
+  });
+  document.querySelectorAll(".zoomb").forEach(b =>
+    b.setAttribute("aria-pressed", String(b.dataset.zoom === MAPZOOM)));
+}
+window.addEventListener("resize", () => { if (MAPZOOM === "fit") applyMapZoom(); });
+
+/* ---- sticky orientation bar: who am I, what's next ---- */
+let stickyInfo = null;
+function updateSticky(){
+  const bar = document.getElementById("stickyBar");
+  const show = view === "sec" && stickyInfo && window.scrollY > 380;
+  bar.hidden = !show;
+  if (!show) return;
+  document.getElementById("stickyTitle").textContent = stickyInfo.title;
+  document.getElementById("stickyNext").textContent = stickyInfo.next;
+  document.getElementById("stickyJump").hidden = stickyInfo.n == null;
+}
+window.addEventListener("scroll", updateSticky, {passive: true});
+document.getElementById("stickyJump").addEventListener("click", () => {
+  if (!stickyInfo || stickyInfo.n == null) return;
+  const row = document.getElementById("fight-" + stickyInfo.n);
+  if (row){ row.scrollIntoView({block: "center"}); flashEl(row); }
+});
 
 function partyCard(t){
   const name = t[0], types = t[1], level = t[2], hp = t[3], hpLeft = t[4],
