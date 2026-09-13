@@ -12,3 +12,4 @@ package-lock.json
 *.png
 vexcl*.py
 peek.py
+shot.js
