@@ -5,8 +5,11 @@ into normalized JSON. Source of truth is the actual game code, not wiki transcri
 import json, os, re, sys
 from collections import defaultdict
 
-REPO = "/home/claude/pokefirered"
-OUT = "/home/claude/lgmax/data"
+# Path to a checkout of pret/pokefirered. extract.py runs before data/ exists,
+# so it cannot import engine for this -- it resolves the path itself.
+REPO = os.environ.get("LGMAX_POKEFIRERED",
+                      os.path.expanduser("~/pokefirered"))
+OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 os.makedirs(OUT, exist_ok=True)
 
 def read(p):

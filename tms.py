@@ -12,8 +12,9 @@ the whole playthrough, which is what this module quantifies: how many copies of
 each TM a run can actually hold, and where they come from.
 """
 import json, os, re, glob, collections
+import engine as E
 
-REPO = "/home/claude/pokefirered"
+REPO = E.REPO
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 
 # Game Corner TMs can be re-bought, but at thousands of coins each. A normal
