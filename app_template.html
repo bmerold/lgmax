@@ -1,0 +1,1244 @@
+<title>LeafGreen Encounter Atlas</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+:root{
+  --bg:#F5F4F0; --surface:#FFFFFF; --surface-2:#EFEDE7; --surface-3:#E6E3DB;
+  --line:#DCD9D1; --line-strong:#C3BFB4;
+  --ink:#191B1F; --ink-2:#4E535C; --ink-3:#7C818B;
+  --accent:#0F6E5C; --accent-ink:#0B564A; --accent-soft:#E0EFEB; --on-accent:#FFFFFF;
+  --good:#1B6E47; --good-soft:#E0EFE6;
+  --warn:#8C6100; --warn-soft:#F5EBD6;
+  --bad:#A03225;  --bad-soft:#F6E4E1;
+  --shadow:0 1px 2px rgba(25,27,31,.06), 0 6px 16px -10px rgba(25,27,31,.18);
+  --r:10px;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,Segoe UI,sans-serif;
+  --display:"Archivo","IBM Plex Sans",system-ui,sans-serif;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#131519; --surface:#1B1E23; --surface-2:#22262C; --surface-3:#2A2F36;
+    --line:#2E333A; --line-strong:#414751;
+    --ink:#E9E7E2; --ink-2:#AAAFB8; --ink-3:#7B818B;
+    --accent:#54C3A6; --accent-ink:#7FD6BF; --accent-soft:#16302A; --on-accent:#0B211C;
+    --good:#5BBF86; --good-soft:#16301F;
+    --warn:#D6A346; --warn-soft:#332714;
+    --bad:#E2786A;  --bad-soft:#3A211D;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 20px -12px rgba(0,0,0,.7);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#131519; --surface:#1B1E23; --surface-2:#22262C; --surface-3:#2A2F36;
+  --line:#2E333A; --line-strong:#414751;
+  --ink:#E9E7E2; --ink-2:#AAAFB8; --ink-3:#7B818B;
+  --accent:#54C3A6; --accent-ink:#7FD6BF; --accent-soft:#16302A; --on-accent:#0B211C;
+  --good:#5BBF86; --good-soft:#16301F;
+  --warn:#D6A346; --warn-soft:#332714;
+  --bad:#E2786A;  --bad-soft:#3A211D;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 20px -12px rgba(0,0,0,.7);
+}
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);
+     font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4{font-family:var(--display);margin:0;text-wrap:balance;letter-spacing:-.015em}
+button{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+[hidden]{display:none!important}
+
+.wrap{max-width:1440px;margin:0 auto;padding-inline:20px;padding-block:0 48px}
+
+/* ---------- masthead ---------- */
+.masthead{border-bottom:1px solid var(--line);padding-block:22px 0;margin-bottom:20px}
+.mast-row{display:flex;flex-wrap:wrap;align-items:flex-end;gap:16px 24px;justify-content:space-between}
+.mast-title{font-size:26px;font-weight:700;line-height:1.1}
+.mast-title .dim{color:var(--ink-3);font-weight:500}
+.mast-sub{color:var(--ink-2);max-width:60ch;margin-top:6px;font-size:13.5px}
+.mast-right{display:flex;flex-direction:column;gap:12px;align-items:flex-start}
+.mast-stats{display:flex;gap:20px;flex-wrap:wrap}
+.mstat{display:flex;flex-direction:column;gap:1px}
+.mstat b{font-family:var(--mono);font-size:18px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.1}
+.mstat span{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3)}
+
+.starter{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.starter-l{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3)}
+.starter-btns{display:flex;border:1px solid var(--line-strong);border-radius:8px;overflow:hidden}
+.sbtn{border:0;background:var(--surface);padding:6px 13px;font-size:12.5px;font-weight:600;
+      cursor:pointer;border-right:1px solid var(--line);font-family:var(--display)}
+.sbtn:last-child{border-right:0}
+.sbtn[aria-pressed="true"]{background:var(--accent);color:var(--on-accent)}
+.rec-tag{font-size:10.5px;color:var(--ink-3)}
+
+.nav{display:flex;gap:24px;margin-top:18px}
+.navb{border:0;background:none;padding:0 0 11px;font-family:var(--display);font-size:14px;
+      font-weight:600;color:var(--ink-3);cursor:pointer;border-bottom:2px solid transparent;
+      margin-bottom:-1px}
+.navb[aria-current="true"]{color:var(--ink);border-bottom-color:var(--accent)}
+
+/* ---------- shell ---------- */
+.shell{display:grid;grid-template-columns:328px minmax(0,1fr);gap:22px;align-items:start}
+@media (max-width:960px){.shell{grid-template-columns:1fr}}
+
+/* ---------- rail ---------- */
+.rail{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);
+      overflow:hidden;position:sticky;top:12px;max-height:calc(100vh - 24px);
+      display:flex;flex-direction:column}
+@media (max-width:960px){.rail{position:static;max-height:none}}
+.rail-head{padding:12px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:9px}
+.search{width:100%;padding:8px 10px;border:1px solid var(--line-strong);border-radius:7px;
+        background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:13px}
+.search::placeholder{color:var(--ink-3)}
+.chips{display:flex;flex-wrap:wrap;gap:5px}
+.chip{border:1px solid var(--line-strong);background:transparent;color:var(--ink-2);
+      border-radius:99px;padding:3px 9px;font-size:11.5px;font-weight:500;cursor:pointer}
+.chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.rail-list{overflow-y:auto;flex:1;min-height:0}
+@media (max-width:960px){.rail-list{max-height:56vh}}
+.grp{padding:9px 12px 5px;font-family:var(--display);font-size:11px;font-weight:600;
+     letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);
+     background:var(--surface-2);border-block:1px solid var(--line);
+     position:sticky;top:0;z-index:2;display:flex;justify-content:space-between;gap:8px}
+.grp .badges{font-family:var(--mono);letter-spacing:0;text-transform:none;color:var(--ink-3)}
+.enc{width:100%;text-align:left;background:none;border:0;border-bottom:1px solid var(--line);
+     padding:8px 12px;cursor:pointer;display:grid;
+     grid-template-columns:minmax(0,1fr) 34px;gap:2px 8px}
+.enc:hover{background:var(--surface-2)}
+.enc[aria-current="true"]{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent)}
+.enc-n{grid-column:1;grid-row:1;font-size:12.8px;font-weight:500;line-height:1.3;
+       overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.enc-l{grid-column:1;grid-row:2;font-size:11px;color:var(--ink-3);
+       overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.enc-lv{grid-column:2;grid-row:1/3;font-family:var(--mono);font-size:11px;color:var(--ink-3);
+        align-self:center;text-align:right;font-variant-numeric:tabular-nums}
+.kdot{display:inline-block;width:6px;height:6px;border-radius:2px;margin-right:6px;vertical-align:middle}
+.empty{padding:24px 14px;color:var(--ink-3);font-size:13px;text-align:center}
+
+.sec-row{width:100%;text-align:left;background:none;border:0;border-bottom:1px solid var(--line);
+         padding:9px 12px;cursor:pointer;display:block}
+.sec-row:hover{background:var(--surface-2)}
+.sec-row[aria-current="true"]{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent)}
+.sec-top{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+.sec-n{font-size:12.8px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sec-k{font-family:var(--mono);font-size:11px;color:var(--ink-3);white-space:nowrap;
+       font-variant-numeric:tabular-nums}
+.sec-party{display:block;font-size:11px;color:var(--ink-3);margin-top:2px;overflow:hidden;
+           text-overflow:ellipsis;white-space:nowrap}
+
+/* ---------- panel ---------- */
+.panel{display:flex;flex-direction:column;gap:18px;min-width:0}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r)}
+.card-h{padding:14px 16px;border-bottom:1px solid var(--line);display:flex;
+        justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+.card-h h2{font-size:14px;font-weight:600}
+.card-h .note{font-size:11.5px;color:var(--ink-3)}
+
+.enc-head{padding:18px 18px 16px}
+.enc-kind{display:inline-flex;align-items:center;gap:6px;font-size:10.5px;font-weight:600;
+          letter-spacing:.1em;text-transform:uppercase;color:var(--ink-2)}
+.enc-title{font-size:24px;font-weight:700;margin-top:6px;line-height:1.15}
+.enc-meta{display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:8px;color:var(--ink-2);font-size:13px}
+.enc-meta b{font-family:var(--mono);font-weight:600;color:var(--ink);font-variant-numeric:tabular-nums}
+.ctx{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}
+.ctxi{background:var(--surface-2);border-radius:7px;padding:7px 11px;min-width:92px}
+.ctxi b{display:block;font-family:var(--mono);font-size:16px;font-weight:600;font-variant-numeric:tabular-nums}
+.ctxi span{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3)}
+
+/* ---------- roster ---------- */
+.roster{display:grid;grid-template-columns:repeat(auto-fill,minmax(212px,1fr));gap:10px;padding:14px 16px}
+.mon{border:1px solid var(--line);border-radius:8px;padding:10px 11px;background:var(--surface-2)}
+.mon-top{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.mon-n{font-family:var(--display);font-weight:600;font-size:14px}
+.mon-lv{font-family:var(--mono);font-size:12px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.tw{display:inline-flex;gap:4px;flex-wrap:wrap}
+.type{font-size:9.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;
+      padding:2px 6px;border-radius:4px;color:#fff;white-space:nowrap}
+.mon-stats{display:flex;flex-wrap:wrap;gap:2px 10px;margin-top:8px;font-family:var(--mono);
+           font-size:11px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.mon-stats i{font-style:normal;color:var(--ink-3)}
+.mon-mv{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}
+.mv{font-size:10.5px;padding:2px 6px;border:1px solid var(--line-strong);border-radius:4px;color:var(--ink-2)}
+.mon-x{margin-top:7px;font-size:11px;color:var(--ink-3)}
+
+.wild{width:100%;border-collapse:collapse;font-size:13px}
+.wild th{text-align:left;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
+         color:var(--ink-3);font-weight:600;padding:8px 16px;border-bottom:1px solid var(--line)}
+.wild td{padding:7px 16px;border-bottom:1px solid var(--line)}
+.wild tr:last-child td{border-bottom:0}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.rate{display:flex;align-items:center;gap:8px}
+.ratebar{height:5px;border-radius:0 3px 3px 0;background:var(--accent);min-width:2px}
+
+.tabs{display:flex;gap:2px;padding:4px;background:var(--surface-2);border-radius:9px;
+      border:1px solid var(--line);width:fit-content}
+.tab{border:0;background:none;padding:6px 14px;border-radius:6px;font-size:12.5px;
+     font-weight:600;color:var(--ink-2);cursor:pointer;font-family:var(--display)}
+.tab[aria-selected="true"]{background:var(--surface);color:var(--ink);box-shadow:var(--shadow)}
+
+/* ---------- ranking ---------- */
+.rank{border-bottom:1px solid var(--line)}
+.rank:last-child{border-bottom:0}
+.rank-b{width:100%;display:grid;
+        grid-template-columns:26px minmax(130px,1.4fr) 62px minmax(110px,1fr) max-content 14px;
+        gap:14px;align-items:center;padding:11px 16px;background:none;border:0;
+        text-align:left;cursor:pointer}
+.rank-b:hover{background:var(--surface-2)}
+@media (max-width:760px){
+  .rank-b{grid-template-columns:26px minmax(0,1fr) 62px;gap:8px 12px}
+  .rank-b .meter{grid-column:2/4}
+  .rank-b .verdict{grid-column:2/4}
+  .rank-b .caret{grid-column:3;grid-row:1;justify-self:end}
+}
+.rk{font-family:var(--mono);font-size:13px;font-weight:600;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.rk.top{color:var(--accent)}
+.who{min-width:0}
+.who-n{display:block;font-family:var(--display);font-weight:600;font-size:14.5px}
+.who-src{display:block;font-size:11px;color:var(--ink-3);margin-top:2px;overflow:hidden;
+         text-overflow:ellipsis;white-space:nowrap}
+.who-alt{display:block;font-size:11px;color:var(--accent);margin-top:1px;overflow:hidden;
+         text-overflow:ellipsis;white-space:nowrap}
+.turns{text-align:right}
+.turns b{font-family:var(--mono);font-size:18px;font-weight:600;font-variant-numeric:tabular-nums;display:block;line-height:1.1}
+.turns span{font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3)}
+.meter{display:flex;flex-direction:column;gap:4px}
+.meter-t{display:flex;justify-content:space-between;font-size:10.5px;color:var(--ink-3);
+         letter-spacing:.06em;text-transform:uppercase}
+.meter-t b{font-family:var(--mono);font-weight:600;color:var(--ink-2);letter-spacing:0;
+           text-transform:none;font-variant-numeric:tabular-nums}
+.track{height:6px;background:var(--surface-3);border-radius:3px;overflow:hidden}
+.fill{height:100%;border-radius:0 3px 3px 0;min-width:2px}
+.verdict{font-size:11px;font-weight:600;padding:3px 8px;border-radius:5px;
+         display:inline-flex;align-items:center;gap:5px;justify-self:start;white-space:nowrap}
+.v-good{background:var(--good-soft);color:var(--good)}
+.v-warn{background:var(--warn-soft);color:var(--warn)}
+.v-bad{background:var(--bad-soft);color:var(--bad)}
+.caret{color:var(--ink-3);font-size:11px;transition:transform .15s ease;justify-self:end}
+.rank-b[aria-expanded="true"] .caret{transform:rotate(90deg)}
+.rank-d{padding:0 16px 14px;overflow-x:auto}
+
+.dt{width:100%;border-collapse:collapse;font-size:12.5px;min-width:640px}
+.dt th{text-align:left;font-size:10px;letter-spacing:.07em;text-transform:uppercase;
+       color:var(--ink-3);font-weight:600;padding:6px 10px 6px 0;border-bottom:1px solid var(--line)}
+.dt td{padding:7px 10px 7px 0;border-bottom:1px solid var(--line);vertical-align:top}
+.dt tr:last-child td{border-bottom:0}
+.dt .r{text-align:right}
+.eff{font-family:var(--mono);font-size:11px;font-weight:600;padding:1px 5px;border-radius:4px}
+.e-super{background:var(--good-soft);color:var(--good)}
+.e-neutral{color:var(--ink-3)}
+.e-resist{background:var(--warn-soft);color:var(--warn)}
+
+.opp{border-bottom:1px solid var(--line)}
+.opp:last-child{border-bottom:0}
+.opp-h{padding:12px 16px 8px;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.opp-h .mon-n{font-size:15px}
+.opp-h .num{color:var(--ink-3);font-size:12px}
+.opp-tbl{padding:0 16px 14px;overflow-x:auto}
+
+/* ---------- party ---------- */
+.party{display:grid;grid-template-columns:repeat(auto-fill,minmax(268px,1fr));gap:12px;padding:14px 16px}
+.pm{border:1px solid var(--line);border-radius:9px;background:var(--surface-2);
+    padding:12px 13px;display:flex;flex-direction:column;gap:9px}
+.pm-h{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.pm-n{font-family:var(--display);font-weight:600;font-size:15px}
+.pm-slot{font-family:var(--mono);font-size:11px;color:var(--ink-3);white-space:nowrap}
+.pm-new{font-size:9.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;
+        background:var(--accent-soft);color:var(--accent);padding:2px 6px;border-radius:4px;
+        margin-left:4px}
+.pm-src{font-size:11px;color:var(--ink-3)}
+.tmtag{font-size:8.5px;font-weight:700;letter-spacing:.08em;background:var(--warn-soft);
+       color:var(--warn);padding:1px 4px;border-radius:3px;margin-left:5px;vertical-align:1px}
+.tmwhy{font-size:11px;color:var(--ink-3);margin-top:2px}
+.tmwhy b{font-family:var(--mono);color:var(--ink-2);font-weight:600}
+.lede{padding:16px 18px;color:var(--ink-2);max-width:78ch}
+.lede code{font-family:var(--mono);font-size:11.5px;background:var(--surface-2);
+           padding:1px 4px;border-radius:3px}
+.pp{display:flex;flex-direction:column;gap:6px}
+.pprow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 8px;align-items:baseline}
+.ppn{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ppv{font-family:var(--mono);font-size:11px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.pptrack{grid-column:1/3;height:4px;background:var(--surface-3);border-radius:2px;overflow:hidden}
+.ppfill{height:100%;border-radius:0 2px 2px 0;min-width:1px}
+.pm-hp{display:flex;flex-direction:column;gap:4px;margin-top:auto}
+
+.logrow{border-bottom:1px solid var(--line);padding:10px 16px}
+.logrow:last-child{border-bottom:0}
+.logrow.heal{background:var(--good-soft)}
+.logrow.walk{background:var(--surface-2)}
+.log-h{display:flex;justify-content:space-between;gap:10px;align-items:baseline;flex-wrap:wrap}
+.log-n{font-weight:600;font-size:13px}
+.log-l{font-size:11px;color:var(--ink-3)}
+.log-steps{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px}
+.step{font-size:11.5px;background:var(--surface);border:1px solid var(--line);
+      border-radius:6px;padding:3px 8px;display:inline-flex;gap:6px;align-items:baseline}
+.step b{font-weight:600}
+.step .by{color:var(--accent);font-weight:600}
+.step .num{color:var(--ink-3);font-size:10.5px}
+.hm-free td{opacity:.95}
+.hm-carrier .by{color:var(--accent)}
+.hm-cost td{background:color-mix(in srgb, var(--warn, #b45309) 8%, transparent)}
+.hm-gap td{background:color-mix(in srgb, var(--bad) 10%, transparent)}
+.kitnote{padding:10px 14px 2px}
+.keep-sep td{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--ink-3);background:var(--surface);padding-top:10px}
+/* the tail of a mid-fight handover — reads as a continuation, not a new fight */
+.step.ho{border-style:dashed;background:transparent;margin-left:-2px}
+.healnote{font-size:11.5px;color:var(--good);font-weight:600;margin-top:8px}
+
+/* ---------- choices ---------- */
+.choice-h{padding:16px 18px 14px}
+.choice-h h3{font-size:18px;font-weight:700}
+.choice-w{font-size:12.5px;color:var(--ink-3);margin-top:3px}
+.choice-note{font-size:12.5px;color:var(--ink-2);margin-top:8px;max-width:70ch}
+.pick{margin-top:12px;display:inline-flex;align-items:center;gap:9px;background:var(--accent-soft);
+      border:1px solid var(--accent);border-radius:8px;padding:8px 12px}
+.pick-l{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--accent)}
+.pick-n{font-family:var(--display);font-weight:700;font-size:16px;color:var(--accent-ink)}
+.ctab{width:100%;border-collapse:collapse;font-size:12.5px}
+.ctab th{text-align:left;font-size:10px;letter-spacing:.07em;text-transform:uppercase;
+         color:var(--ink-3);font-weight:600;padding:8px 16px;border-block:1px solid var(--line)}
+.ctab td{padding:9px 16px;border-bottom:1px solid var(--line);vertical-align:middle}
+.ctab tr:last-child td{border-bottom:0}
+.ctab tr.win td{background:var(--accent-soft)}
+.ctab .r{text-align:right}
+.linehint{font-size:11px;color:var(--ink-3);margin-top:2px}
+.ctab-wrap{overflow-x:auto}
+
+/* ---------- notes ---------- */
+details.notes{background:var(--surface);border:1px solid var(--line);border-radius:var(--r)}
+details.notes summary{padding:13px 16px;cursor:pointer;font-family:var(--display);
+                      font-weight:600;font-size:13.5px;list-style:none;display:flex;
+                      justify-content:space-between;align-items:center;gap:10px}
+details.notes summary::-webkit-details-marker{display:none}
+details.notes summary::after{content:"+";color:var(--ink-3);font-family:var(--mono)}
+details.notes[open] summary::after{content:"−"}
+.notes-b{padding:0 16px 16px;border-top:1px solid var(--line);padding-top:14px}
+.notes-b h4{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3);
+            margin:16px 0 7px}
+.notes-b h4:first-child{margin-top:0}
+.notes-b ul{margin:0;padding-left:17px;color:var(--ink-2);max-width:76ch}
+.notes-b li{margin-bottom:5px}
+.notes-b code{font-family:var(--mono);font-size:11.5px;background:var(--surface-2);
+              padding:1px 4px;border-radius:3px}
+.foot{color:var(--ink-3);font-size:12px;text-align:center;padding-top:8px;max-width:70ch;
+      margin-inline:auto}
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <div class="mast-row">
+      <div>
+        <h1 class="mast-title">LeafGreen Encounter Atlas <span class="dim">/ Kanto</span></h1>
+        <p class="mast-sub">Every trainer battle and wild encounter in Pokémon LeafGreen, ordered by
+          when you can reach it and solved with the Game Boy Advance's own damage formula — plus a
+          recommended party for each stretch of the game, with PP and HP counted across it.</p>
+      </div>
+      <div class="mast-right">
+        <div class="starter">
+          <span class="starter-l">Your starter</span>
+          <div class="starter-btns" id="starterBtns"></div>
+          <span class="rec-tag" id="starterRec"></span>
+        </div>
+        <div class="starter">
+          <span class="starter-l">Trading</span>
+          <div class="starter-btns" id="tradeBtns">
+            <button class="sbtn" data-trade="no" aria-pressed="true">Solo</button>
+            <button class="sbtn" data-trade="yes" aria-pressed="false">Trades OK</button>
+          </div>
+          <span class="rec-tag" id="tradeNote"></span>
+        </div>
+        <div class="mast-stats" id="mastStats"></div>
+      </div>
+    </div>
+    <nav class="nav" id="nav">
+      <button class="navb" data-view="enc" aria-current="true">Encounters</button>
+      <button class="navb" data-view="sec" aria-current="false">Section parties</button>
+      <button class="navb" data-view="tm" aria-current="false">TM plan</button>
+      <button class="navb" data-view="cho" aria-current="false">Choices</button>
+    </nav>
+  </header>
+
+  <div id="view-enc">
+    <div class="shell">
+      <aside class="rail">
+        <div class="rail-head">
+          <input class="search" id="q" type="search" placeholder="Search trainers, routes, Pokémon…"
+                 autocomplete="off" aria-label="Search encounters">
+          <div class="chips" id="filters"></div>
+        </div>
+        <div class="rail-list" id="list"></div>
+      </aside>
+      <main class="panel" id="panel"></main>
+    </div>
+  </div>
+
+  <div id="view-sec" hidden>
+    <div class="shell">
+      <aside class="rail">
+        <div class="rail-head">
+          <span class="starter-l">35 sections · a Pokémon Center between each</span>
+        </div>
+        <div class="rail-list" id="secList"></div>
+      </aside>
+      <main class="panel" id="secPanel"></main>
+    </div>
+  </div>
+
+  <div id="view-tm" hidden>
+    <main class="panel" id="tmPanel"></main>
+  </div>
+
+  <div id="view-cho" hidden>
+    <main class="panel" id="choPanel"></main>
+  </div>
+
+  <p class="foot">Built from the <em>pokefirered</em> decompilation — base stats, movesets, trainer
+    rosters, encounter tables, healing spots and the damage formula are read from the game's own
+    source, not from a wiki.</p>
+</div>
+
+<script type="application/json" id="payload">__PAYLOAD__</script>
+<script>
+(() => {
+"use strict";
+const DATA = JSON.parse(document.getElementById("payload").textContent);
+const S = DATA.pool, STAGES = DATA.stages, ENC = DATA.encounters;
+/* Two whole solves: one for a run that never trades, one for a run that will.
+   Trading is not a small tweak -- it adds Alakazam, Machamp, Golem and Gengar,
+   so the commitments, the TM plan and every party are re-derived for each. */
+let trading = false;
+const tradeKey = () => trading ? "yes" : "no";
+const SECTIONS_BY = DATA.sections, CHOICES_BY = DATA.choices;
+/* Choices the run makes once and keeps; the section parties are solved with
+   these locked, so a single Eevee can't become a Vaporeon in one town and a
+   Jolteon in the next. */
+const COMMITTED_BY = DATA.commitments || {};
+/* TMs are consumed when taught (HMs are not), so most are a one-shot decision
+   for the whole playthrough. TM_PLANS says where each one should go. */
+const TM_PLANS_BY = DATA.tmPlans || {}, TM_SUPPLY = DATA.tmSupply || {};
+const SECTIONS = () => SECTIONS_BY[tradeKey()] || {};
+const CHOICES  = () => CHOICES_BY[tradeKey()] || [];
+const COMMITTED = () => COMMITTED_BY[tradeKey()] || {};
+const TM_PLANS = () => TM_PLANS_BY[tradeKey()] || {};
+/* With trading off, the four trade evolutions simply do not exist for the run,
+   so they are filtered out of every ranked list rather than built twice. */
+const tradeOK = flag => trading || !flag;
+const str = i => (i === -1 || i == null) ? null : S[i];
+
+const TYPE_COLORS = {
+  NORMAL:"#8A8A6E", FIGHTING:"#A2331F", FLYING:"#6B62C9", POISON:"#8B3B8B",
+  GROUND:"#9A7B32", ROCK:"#8A7A2C", BUG:"#78892A", GHOST:"#5C4B87",
+  STEEL:"#6E7080", FIRE:"#C4491C", WATER:"#3A6DC4", GRASS:"#3F8536",
+  ELECTRIC:"#9A7A00", PSYCHIC:"#C43A66", ICE:"#3E8E96", DRAGON:"#5B45B8",
+  DARK:"#5A473C", MYSTERY:"#7C818B"
+};
+const KIND = {
+  gym:{label:"Gym Leader",color:"#C4491C"}, elite4:{label:"Elite Four",color:"#5B45B8"},
+  champion:{label:"Champion",color:"#9A7A00"}, boss:{label:"Boss",color:"#A2331F"},
+  rival:{label:"Rival",color:"#3A6DC4"}, trainer:{label:"Trainer",color:"#6E7080"},
+  rematch:{label:"Rematch",color:"#8A8A6E"}, wild:{label:"Wild",color:"#3F8536"}
+};
+const STAGE_BY_ID = Object.fromEntries(STAGES.map(s => [s.id, s]));
+const STARTERS = ["Bulbasaur", "Charmander", "Squirtle"];
+
+const esc = s => String(s).replace(/[&<>"']/g, c =>
+  ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const chipsOf = names => names.map(t =>
+  `<span class="type" style="background:${TYPE_COLORS[t] || "#7C818B"}">${esc(t)}</span>`).join("");
+const typeChips = ids => chipsOf(ids.map(str));
+const effClass = e => e > 1 ? "e-super" : (e < 1 ? "e-resist" : "e-neutral");
+const effLabel = e => e === 0 ? "immune" : e + "×";
+const costColor = p => p < 40 ? "var(--good)" : (p < 100 ? "var(--warn)" : "var(--bad)");
+const hpColor = p => p > 50 ? "var(--good)" : (p > 15 ? "var(--warn)" : "var(--bad)");
+
+let starter = "Bulbasaur", view = "enc";
+let selected = null, selectedSec = 18, tab = "team";
+let active = new Set(["boss","rival","trainer","wild"]);
+let query = "";
+
+/* A rival or Champion battle exists in three versions, one per starter.
+   Showing only your starter's version is both correct and less cluttered. */
+const forStarter = e => !e.sv || e.sv === starter;
+
+/* ---------------- masthead ---------------- */
+function renderMast(){
+  const list = ENC.filter(forStarter);
+  const n = k => list.filter(e => e.k === k).length;
+  const rows = [
+    [list.length, "encounters"],
+    [n("gym") + n("elite4") + n("champion") + n("boss"), "boss fights"],
+    [n("trainer") + n("rematch") + n("rival"), "trainer battles"],
+    [n("wild"), "wild areas"],
+    [STAGES.length, "sections"]
+  ];
+  document.getElementById("mastStats").innerHTML = rows
+    .map(([v, l]) => `<div class="mstat"><b>${v}</b><span>${l}</span></div>`).join("");
+  const sc = CHOICES().find(c => c.id === "starter");
+  document.getElementById("starterRec").textContent =
+    sc ? "Most effective overall: " + sc.best : "";
+  document.getElementById("tradeNote").textContent = trading
+    ? "Alakazam, Machamp, Golem and Gengar in play"
+    : "no trade evolutions";
+}
+
+document.getElementById("starterBtns").innerHTML = STARTERS.map(s =>
+  `<button class="sbtn" data-starter="${s}" aria-pressed="${s === starter}">${s}</button>`).join("");
+document.getElementById("starterBtns").addEventListener("click", ev => {
+  const b = ev.target.closest("[data-starter]"); if (!b) return;
+  starter = b.dataset.starter;
+  document.querySelectorAll("[data-starter]").forEach(x =>
+    x.setAttribute("aria-pressed", x.dataset.starter === starter));
+  const cur = ENC.find(x => x.id === selected);
+  if (!cur || !forStarter(cur)) selected = (ENC.filter(forStarter)[0] || {}).id;
+  renderMast(); renderList(); renderSecList(); renderTM();
+  renderPanel(ENC.find(x => x.id === selected));
+  renderSecPanel(selectedSec);
+});
+
+document.getElementById("tradeBtns").addEventListener("click", ev => {
+  const b = ev.target.closest("[data-trade]"); if (!b) return;
+  trading = b.dataset.trade === "yes";
+  document.querySelectorAll("[data-trade]").forEach(x =>
+    x.setAttribute("aria-pressed", String((x.dataset.trade === "yes") === trading)));
+  renderMast(); renderList(); renderSecList(); renderTM();
+  renderPanel(ENC.find(x => x.id === selected));
+  renderSecPanel(selectedSec);
+});
+
+document.getElementById("nav").addEventListener("click", ev => {
+  const b = ev.target.closest("[data-view]"); if (!b) return;
+  view = b.dataset.view;
+  document.querySelectorAll("[data-view]").forEach(x =>
+    x.setAttribute("aria-current", x.dataset.view === view));
+  ["enc","sec","tm","cho"].forEach(v =>
+    document.getElementById("view-" + v).hidden = v !== view);
+});
+
+/* ---------------- encounters ---------------- */
+const FILTERS = [
+  {id:"boss", label:"Bosses", kinds:["gym","elite4","champion","boss"]},
+  {id:"rival", label:"Rival", kinds:["rival"]},
+  {id:"trainer", label:"Trainers", kinds:["trainer"]},
+  {id:"rematch", label:"Rematches", kinds:["rematch"]},
+  {id:"wild", label:"Wild", kinds:["wild"]}
+];
+document.getElementById("filters").innerHTML = FILTERS.map(f =>
+  `<button class="chip" data-f="${f.id}" aria-pressed="${active.has(f.id)}">${f.label}</button>`).join("");
+document.getElementById("filters").addEventListener("click", ev => {
+  const b = ev.target.closest("[data-f]"); if (!b) return;
+  active.has(b.dataset.f) ? active.delete(b.dataset.f) : active.add(b.dataset.f);
+  b.setAttribute("aria-pressed", active.has(b.dataset.f));
+  renderList();
+});
+const qEl = document.getElementById("q");
+qEl.addEventListener("input", () => { query = qEl.value.trim().toLowerCase(); renderList(); });
+
+function matches(e){
+  if (!forStarter(e)) return false;
+  const kinds = FILTERS.filter(f => active.has(f.id)).flatMap(f => f.kinds);
+  if (!kinds.includes(e.k)) return false;
+  if (!query) return true;
+  if (e.n.toLowerCase().includes(query) || e.l.toLowerCase().includes(query)) return true;
+  const mons = e.p ? e.p.map(m => str(m[0])) : (e.w || []).map(w => str(w[0]));
+  return mons.some(m => m && m.toLowerCase().includes(query));
+}
+
+function renderList(){
+  const el = document.getElementById("list");
+  const shown = ENC.filter(matches);
+  if (!shown.length){
+    el.innerHTML = `<p class="empty">No encounters match “${esc(qEl.value)}”.</p>`; return;
+  }
+  let html = "", last = -1;
+  for (const e of shown){
+    if (e.st !== last){
+      last = e.st;
+      const s = STAGE_BY_ID[e.st] || {name:"—", level:"?", badges:0};
+      html += `<div class="grp"><span>${e.st}. ${esc(s.name)}</span>
+        <span class="badges">Lv ${s.level} · ${s.badges} badge${s.badges === 1 ? "" : "s"}</span></div>`;
+    }
+    const k = KIND[e.k];
+    html += `<button class="enc" data-id="${esc(e.id)}" aria-current="${e.id === selected}">
+      <span class="enc-n"><span class="kdot" style="background:${k.color}"></span>${esc(e.n)}</span>
+      <span class="enc-l">${esc(e.l)}${e.m ? " · " + esc(e.m) : ""}</span>
+      <span class="enc-lv">L${e.mx}</span></button>`;
+  }
+  el.innerHTML = html;
+}
+document.getElementById("list").addEventListener("click", ev => {
+  const b = ev.target.closest("[data-id]"); if (!b) return;
+  selected = b.dataset.id;
+  document.querySelectorAll(".enc").forEach(x =>
+    x.setAttribute("aria-current", x.dataset.id === selected));
+  renderPanel(ENC.find(x => x.id === selected));
+  if (window.innerWidth <= 960) document.getElementById("panel").scrollIntoView({behavior:"smooth"});
+});
+
+function renderPanel(e){
+  const el = document.getElementById("panel");
+  if (!e){ el.innerHTML = ""; return; }
+  const s = STAGE_BY_ID[e.st] || {}, k = KIND[e.k];
+  const heals = (e.it || []).filter(i => /Restore|Potion/.test(i));
+  const ctx = [
+    ["L" + (e.pl != null ? e.pl : (s.level || "?")), "your level"],
+    [String(e.bg != null ? e.bg : (s.badges || 0)), "badges held"],
+    ["L" + e.mx, e.k === "wild" ? "highest wild" : "their strongest"],
+    [e.p ? String(e.p.length) : String((e.w || []).length), e.p ? "Pokémon" : "possible species"]
+  ];
+  let html = `<section class="card"><div class="enc-head">
+      <span class="enc-kind"><span class="kdot" style="background:${k.color}"></span>${k.label}</span>
+      <h2 class="enc-title">${esc(e.n)}</h2>
+      <div class="enc-meta">
+        <span>${esc(e.l)}${e.m ? " · " + esc(e.m) : ""}</span>
+        <span>Section <b>${e.st}</b> — ${esc(s.name || "")}</span>
+        ${e.k === "wild" && e.er ? `<span>Encounter rate <b>${e.er}</b></span>` : ""}
+        ${e.db ? `<span>Double battle</span>` : ""}
+      </div>
+      <div class="ctx">${ctx.map(c =>
+        `<div class="ctxi"><b>${esc(c[0])}</b><span>${esc(c[1])}</span></div>`).join("")}</div>
+    </div></section>`;
+
+  if (e.p){
+    html += `<section class="card"><div class="card-h"><h2>What you're facing</h2>
+      ${heals.length ? `<span class="note">Carries ${heals.length} ${esc(heals[0])} — turn counts include re-KOing through them</span>` : ""}
+      </div><div class="roster">${e.p.map(monCard).join("")}</div></section>`;
+  } else if (e.w){
+    html += `<section class="card"><div class="card-h"><h2>What appears here</h2>
+      <span class="note">Slot rates for this area</span></div>
+      <table class="wild"><thead><tr><th>Pokémon</th><th>Types</th>
+      <th class="r">Levels</th><th>Appearance rate</th></tr></thead>
+      <tbody>${e.w.map(wildRow).join("")}</tbody></table></section>`;
+  }
+
+  const hasTeam = e.team && e.team.length;
+  html += `<section class="card"><div class="card-h">
+      <h2>${e.k === "wild" ? "Best Pokémon to lead with" : "Best Pokémon for this fight"}</h2>
+      <div class="tabs" role="tablist">
+        <button class="tab" role="tab" data-tab="team" aria-selected="${tab === "team"}">Whole fight</button>
+        <button class="tab" role="tab" data-tab="opp" aria-selected="${tab === "opp"}">Per opponent</button>
+      </div></div>
+    <div id="answers">${hasTeam ? (tab === "team" ? teamView(e) : oppView(e))
+      : `<p class="empty">No analysis available for this encounter.</p>`}</div></section>`;
+  html += notesHTML(e, heals);
+  el.innerHTML = html;
+
+  el.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => {
+    tab = t.dataset.tab;
+    el.querySelectorAll(".tab").forEach(x => x.setAttribute("aria-selected", x.dataset.tab === tab));
+    document.getElementById("answers").innerHTML = tab === "team" ? teamView(e) : oppView(e);
+    bindRanks();
+  }));
+  bindRanks();
+}
+
+function monCard(m){
+  const name = m[0], types = m[1], lvl = m[2], moves = m[4], nature = m[5], ability = m[6], st = m[7];
+  return `<article class="mon">
+    <div class="mon-top"><span class="mon-n">${esc(str(name))}</span><span class="mon-lv">Lv ${lvl}</span></div>
+    <div style="margin-top:6px"><span class="tw">${typeChips(types)}</span></div>
+    <div class="mon-stats"><span><i>HP</i> ${st[0]}</span><span><i>Atk</i> ${st[1]}</span>
+      <span><i>Def</i> ${st[2]}</span><span><i>SpA</i> ${st[3]}</span>
+      <span><i>SpD</i> ${st[4]}</span><span><i>Spe</i> ${st[5]}</span></div>
+    <div class="mon-mv">${moves.map(mv => `<span class="mv">${esc(str(mv))}</span>`).join("")}</div>
+    <div class="mon-x">${esc(str(nature))} nature · ${esc(titleAbility(str(ability)))}</div>
+  </article>`;
+}
+const titleAbility = a => (a || "").toLowerCase().replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+
+function wildRow(w){
+  const [name, types, lo, hi, chance] = w;
+  return `<tr><td><strong>${esc(str(name))}</strong></td>
+    <td><span class="tw">${typeChips(types)}</span></td>
+    <td class="r num">${lo === hi ? lo : lo + "–" + hi}</td>
+    <td><span class="rate"><span class="ratebar" style="width:${Math.max(2, chance * 1.6)}px"></span>
+      <span class="num">${chance}%</span></span></td></tr>`;
+}
+
+function teamView(e){
+  /* Rows tagged with a starter line belong to a run that picked that starter,
+     so only the reader's own is shown. Same-line and one-of-a-kind duplicates
+     were already collapsed when the data was built. */
+  const rows = e.team.filter(t => (t[12] === -1 || str(t[12]) === starter) && tradeOK(t[10]))
+                     .slice(0, 10);
+  if (!rows.length) return `<p class="empty">No analysis available for this encounter.</p>`;
+  return rows.map((t, i) => {
+    const name = t[0], types = t[1], turns = t[2], taken = t[3], kos = t[4],
+          survives = t[5], via = t[9], detail = t[11], alts = t[13] || [];
+    const isWild = e.k === "wild";
+    let verdict, vclass;
+    if (survives){ verdict = isWild ? "Wins clean" : "Sweeps"; vclass = "v-good"; }
+    else if (kos > 0){ verdict = "Faints after " + kos + " KO" + (kos === 1 ? "" : "s"); vclass = "v-warn"; }
+    else { verdict = "Faints first"; vclass = "v-bad"; }
+    return `<div class="rank"><button class="rank-b" aria-expanded="false">
+        <span class="rk ${i === 0 ? "top" : ""}">${i + 1}</span>
+        <span class="who"><span class="who-n">${esc(str(name))}</span>
+          <span class="tw">${typeChips(types)}</span>
+          <span class="who-src">${esc(str(via) || "")}</span>
+          ${alts.length ? `<span class="who-alt">or ${alts.map(x => esc(str(x))).join(", ")}</span>` : ""}</span>
+        <span class="turns"><b>${turns.toFixed(1)}</b><span>turns</span></span>
+        <span class="meter"><span class="meter-t"><span>HP lost</span>
+          <b>${taken >= 100 ? "&gt;100" : taken.toFixed(0)}%</b></span>
+          <span class="track"><span class="fill" style="width:${Math.min(100, taken)}%;background:${costColor(taken)}"></span></span></span>
+        <span class="verdict ${vclass}">${verdict}</span>
+        <span class="caret">▶</span></button>
+      <div class="rank-d" hidden>${detailTable(detail, e)}</div></div>`;
+  }).join("");
+}
+
+function detailTable(detail, e){
+  const names = e.p ? e.p.map(m => [str(m[0]), m[2]])
+                    : e.w.map(w => [str(w[0]), Math.round((w[2] + w[3]) / 2)]);
+  return `<table class="dt"><thead><tr><th>Against</th><th>Best move</th><th class="r">Damage</th>
+    <th class="r">Crit</th><th class="r">Turns</th><th class="r">OHKO</th><th>Speed</th>
+    <th>Their best answer</th><th class="r">Costs you</th></tr></thead><tbody>
+    ${detail.map((d, i) => {
+      const move = d[0], eff = d[2], dmin = d[3], dmax = d[4], critMax = d[5],
+            turns = d[6], ohko = d[7], faster = d[8], threat = d[9],
+            tpct = d[11], tmax = d[12], pctHit = d[13], dtm = d[14] != null ? d[14] : -1;
+      const on = names[i] || ["?", "?"];
+      return `<tr><td><strong>${esc(on[0])}</strong> <span class="num" style="color:var(--ink-3)">L${on[1]}</span></td>
+        <td>${esc(str(move) || "—")} <span class="eff ${effClass(eff)}">${effLabel(eff)}</span>${
+          dtm !== -1 ? `<span class="tmtag" title="needs the single-use ${esc(str(dtm).replace("ITEM_",""))}">TM</span>` : ""}</td>
+        <td class="r num">${dmin}–${dmax}<br><span style="color:var(--ink-3);font-size:11px">${pctHit}% per hit</span></td>
+        <td class="r num" style="color:var(--ink-3)">${critMax}</td>
+        <td class="r num">${turns.toFixed(2)}</td><td class="r num">${(ohko * 100).toFixed(0)}%</td>
+        <td>${faster ? "You move first" : `<span style="color:var(--warn)">They move first</span>`}</td>
+        <td>${threat !== -1 ? esc(str(threat)) : `<span style="color:var(--ink-3)">can't hurt you</span>`}</td>
+        <td class="r num">${tpct.toFixed(0)}%<br><span style="color:var(--ink-3);font-size:11px">max ${tmax}</span></td>
+      </tr>`;
+    }).join("")}</tbody></table>`;
+}
+
+function oppView(e){
+  if (!e.cnt || !e.cnt.length) return `<p class="empty">No per-opponent data.</p>`;
+  return e.cnt.map(c => {
+    const [name, level, types, hp, chance, best] = c;
+    return `<div class="opp"><div class="opp-h">
+        <span class="mon-n">${esc(str(name))}</span><span class="tw">${typeChips(types)}</span>
+        <span class="num">Lv ${level} · ${hp} HP${chance >= 0 ? " · appears " + chance + "% of the time" : ""}</span>
+      </div><div class="opp-tbl"><table class="dt"><thead><tr>
+        <th>Use</th><th>Move</th><th class="r">Damage</th><th class="r">Turns</th>
+        <th class="r">OHKO</th><th>Speed</th><th>Their answer</th><th class="r">Costs you</th>
+      </tr></thead><tbody>${best.filter(b => (b[14] === -1 || str(b[14]) === starter) && tradeOK(b[17]))
+        .slice(0, 5).map(b => {
+        const bn = b[0], bt = b[1], move = b[2], eff = b[4], dmin = b[5], dmax = b[6],
+              turns = b[8], ohko = b[9], faster = b[10], threat = b[11], tpct = b[12],
+              pctHit = b[13], alts = b[15] || [], btm = b[16] != null ? b[16] : -1;
+        return `<tr><td><strong>${esc(str(bn))}</strong>
+            ${alts.length ? `<div class="linehint">or ${alts.map(x => esc(str(x))).join(", ")}</div>` : ""}
+            <br><span class="tw">${typeChips(bt)}</span></td>
+          <td>${esc(str(move))} <span class="eff ${effClass(eff)}">${effLabel(eff)}</span>${
+            btm !== -1 ? `<span class="tmtag" title="needs the single-use ${esc(str(btm).replace("ITEM_",""))}">TM</span>` : ""}</td>
+          <td class="r num">${dmin}–${dmax}<br><span style="color:var(--ink-3);font-size:11px">${pctHit}%</span></td>
+          <td class="r num">${turns.toFixed(2)}</td><td class="r num">${(ohko * 100).toFixed(0)}%</td>
+          <td>${faster ? "First" : `<span style="color:var(--warn)">Second</span>`}</td>
+          <td>${threat !== -1 ? esc(str(threat)) : `<span style="color:var(--ink-3)">none</span>`}</td>
+          <td class="r num">${tpct.toFixed(0)}%</td></tr>`;
+      }).join("")}</tbody></table></div></div>`;
+  }).join("");
+}
+
+function bindRanks(){
+  document.querySelectorAll(".rank-b").forEach(b => b.addEventListener("click", () => {
+    const open = b.getAttribute("aria-expanded") === "true";
+    b.setAttribute("aria-expanded", String(!open));
+    b.parentElement.querySelector(".rank-d").hidden = open;
+  }));
+}
+
+/* ---------------- section parties ---------------- */
+const secData = st => (SECTIONS()[starter] || {})[String(st)];
+
+function renderSecList(){
+  document.getElementById("secList").innerHTML = STAGES.map(s => {
+    const d = secData(s.id);
+    const party = d && d.team.length ? d.team.map(t => str(t[0])).join(", ") : "no trainer battles";
+    return `<button class="sec-row" data-sec="${s.id}" aria-current="${s.id === selectedSec}">
+      <span class="sec-top"><span class="sec-n">${s.id}. ${esc(s.name)}</span>
+        <span class="sec-k">Lv ${s.level}${d && d.b ? " · " + d.b + " fights" : ""}</span></span>
+      <span class="sec-party">${esc(party)}</span></button>`;
+  }).join("");
+}
+document.getElementById("secList").addEventListener("click", ev => {
+  const b = ev.target.closest("[data-sec]"); if (!b) return;
+  selectedSec = +b.dataset.sec;
+  document.querySelectorAll(".sec-row").forEach(x =>
+    x.setAttribute("aria-current", +x.dataset.sec === selectedSec));
+  renderSecPanel(selectedSec);
+  if (window.innerWidth <= 960) document.getElementById("secPanel").scrollIntoView({behavior:"smooth"});
+});
+
+function renderSecPanel(id){
+  const el = document.getElementById("secPanel");
+  if (id == null){ el.innerHTML = ""; return; }
+  const s = STAGE_BY_ID[id], d = secData(id);
+  if (!d){ el.innerHTML = `<p class="empty">No data for this section.</p>`; return; }
+  const size = d.team.length;
+
+  let html = `<section class="card"><div class="enc-head">
+    <span class="enc-kind">Section ${id} · ${esc(s.chapter)}</span>
+    <h2 class="enc-title">${esc(s.name)}</h2>
+    <div class="enc-meta"><span>Your level <b>${d.lv}</b></span>
+      <span><b>${d.bg}</b> badge${d.bg === 1 ? "" : "s"}</span>
+      <span><b>${d.b}</b> trainer battle${d.b === 1 ? "" : "s"} · <b>${d.om}</b> Pokémon to beat</span>
+      ${d.wb ? `<span><b>${d.wb}</b> wild battles while clearing it</span>` : ""}</div>
+    <div class="ctx">
+      <div class="ctxi"><b>${size || "—"}</b><span>party needed</span></div>
+      <div class="ctxi"><b>${d.t}</b><span>turns total</span></div>
+      ${d.wb ? `<div class="ctxi"><b>${d.wt}</b><span>of them wild</span></div>` : ""}
+      <div class="ctxi"><b>${d.f}</b><span>faints</span></div>
+      <div class="ctxi"><b>${d.u}</b><span>unanswered</span></div>
+    </div></div></section>`;
+
+  const HOW = {
+    known:     ["already knows it", "free"],
+    spare:     ["free move slot", "free"],
+    carrier:   ["brought along to carry it", "carrier"],
+    sacrifice: ["gave up a move for it", "cost"],
+    swap:      ["swapped into the party to carry it", "carrier"],
+    uncovered: ["nothing on the party can learn it", "gap"],
+  };
+  if (d.hm && d.hm.length){
+    html += `<section class="card"><div class="card-h"><h2>Field moves you need here</h2>
+        <span class="note">what this section's maps demand, plus Fly, and who is carrying each</span></div>
+      <div class="ctab-wrap"><table class="ctab"><thead><tr>
+        <th>HM</th><th>Move</th><th>Badge</th><th>Carried by</th><th>How</th><th>Needed</th>
+      </tr></thead><tbody>${d.hm.map(h => {
+        const [name, hm, by, how, gave, badge, why, gaveBack, perm] = h;
+        const k = HOW[str(how)] || ["", ""];
+        return `<tr class="hm-${k[1]}">
+          <td class="mono">${esc(str(hm))}</td>
+          <td><b>${esc(str(name))}</b></td>
+          <td class="dim">${esc(str(badge))} Badge</td>
+          <td>${by === -1 ? '<span class="bad">nobody</span>'
+                          : `<span class="by">${esc(str(by))}</span>`}</td>
+          <td class="dim">${k[0]}${gave !== -1
+            ? ` — ${str(how) === "swap" ? "in place of" : "dropped"} <b>${esc(str(gave))}</b>${gaveBack !== -1
+                ? `<br><span class="${perm ? "bad" : "dim"}">${esc(str(gaveBack))}</span>` : ""}`
+            : ""}</td>
+          <td class="dim">${esc(str(why))}</td></tr>`;
+      }).join("")}</tbody></table></div>
+      ${d.kit && d.kit.length > d.hm.length ? `<p class="note kitnote">Field kit you should own by
+        now: ${d.kit.map(k => esc(str(k[0]))).join(", ")} — earlier sections still need crossing.</p>` : ""}
+    </section>`;
+  }
+
+  if (d.keep && d.keep.length){
+    const soon = d.keep.filter(k => k[4] <= 3), later = d.keep.filter(k => k[4] > 3);
+    const row = k => {
+      const [name, next, nextName, nextLevel, gap, times, why, becomes] = k;
+      return `<tr><td><b>${esc(str(name))}</b>${becomes !== -1
+        ? `<br><span class="dim">as ${esc(str(becomes))} by then</span>` : ""}</td>
+        <td>Section ${next} — ${esc(str(nextName))}</td>
+        <td class="mono">Lv ${nextLevel}</td>
+        <td class="dim">${gap === 1 ? "next section" : gap + " sections away"}</td>
+        <td class="dim">${times === 1 ? "once" : times + " more sections"}${
+          str(why) !== "battles" ? " · " + esc(str(why)) : ""}</td></tr>`;
+    };
+    html += `<section class="card"><div class="card-h"><h2>Keep these at level</h2>
+        <span class="note">Not needed here, but a later section wants them</span></div>
+      <div class="ctab-wrap"><table class="ctab"><thead><tr>
+        <th>Pokémon</th><th>Next needed</th><th>At</th><th>Gap</th><th>How often after that</th>
+      </tr></thead><tbody>
+        ${soon.map(row).join("")}
+        ${later.length ? `<tr class="keep-sep"><td colspan="5">further out</td></tr>` : ""}
+        ${later.map(row).join("")}
+      </tbody></table></div>
+      <p class="note kitnote">This model never grinds — every Pokémon is at its section's level
+      the moment it is used. That only holds if it stayed in your rotation, so these are the ones
+      not to leave in the box.</p></section>`;
+  }
+
+  if (!d.b){
+    html += `<section class="card"><div class="card-h"><h2>No trainers here</h2></div>
+      <p class="empty">This stretch has no trainer battles — it's travel, catching and the
+      walk itself. The party above is what you need to get across it.</p></section>`;
+  }
+
+  if (!size){ el.innerHTML = html; return; }
+  html += `<section class="card"><div class="card-h">
+      <h2>Recommended party — ${size} Pokémon</h2>
+      <span class="note">${size < 6
+        ? size + " is enough to clear this section; more bodies don't make it faster"
+        : "all six earn their slot here"}</span></div>
+    <div class="party">${d.team.map(partyCard).join("")}</div></section>`;
+
+  html += `<section class="card"><div class="card-h"><h2>Battle by battle</h2>
+      <span class="note">Trainers in the order you meet them, with the walking between</span></div>
+    ${d.log.map(logRow).join("")}</section>`;
+
+  if (d.bench.length){
+    html += `<section class="card"><div class="card-h"><h2>Also strong here</h2>
+      <span class="note">Didn't make the party, but could</span></div>
+      <div class="ctab-wrap"><table class="ctab"><thead><tr><th>Pokémon</th><th>Types</th>
+        <th class="r">Turns alone</th><th>Where you get it</th></tr></thead><tbody>
+      ${d.bench.map(b => {
+        const [name, types, turns, failed, via] = b;
+        return `<tr><td><strong>${esc(str(name))}</strong></td>
+          <td><span class="tw">${typeChips(types)}</span></td>
+          <td class="r num">${failed ? "—" : turns.toFixed(1)}</td>
+          <td style="color:var(--ink-3)">${esc(str(via) || "")}</td></tr>`;
+      }).join("")}</tbody></table></div></section>`;
+  }
+  html += secNotes(d);
+  el.innerHTML = html;
+}
+
+function partyCard(t){
+  const name = t[0], types = t[1], level = t[2], hp = t[3], hpLeft = t[4],
+        fainted = t[5], via = t[7], newHere = t[8], moves = t[9];
+  return `<article class="pm">
+    <div class="pm-h"><span class="pm-n">${esc(str(name))}</span>
+      <span class="pm-slot">Lv ${level} · ${hp} HP</span></div>
+    <div><span class="tw">${typeChips(types)}</span>${newHere ? `<span class="pm-new">New here</span>` : ""}</div>
+    <div class="pm-src">${esc(str(via) || "")}</div>
+    <div class="pp">${moves.map(m => {
+      const mn = m[0], power = m[2], pp = m[3], used = m[4],
+            basePP = m[6] != null ? m[6] : m[3], refills = m[7] || 0,
+            tmItem = m[8] != null ? m[8] : -1;
+      const pct = pp ? Math.min(100, used / pp * 100) : 0;
+      /* `pp` is what the section actually affords: the move's own PP, once per
+         refill at an in-game healing spot. */
+      return `<div class="pprow">
+        <span class="ppn">${esc(str(mn))}${power ? ` <span class="ppv">${power} BP</span>` : ""}${
+          tmItem !== -1 ? `<span class="tmtag" title="single-use ${esc(str(tmItem).replace("ITEM_",""))} — this run spends it here">TM</span>` : ""}</span>
+        <span class="ppv">${used.toFixed(0)}/${pp} PP${refills
+          ? `<span title="${basePP} PP, refilled ${refills === 1 ? "once" : refills + "×"} mid-section"> ✦</span>` : ""}</span>
+        <span class="pptrack"><span class="ppfill" style="width:${pct}%;background:${
+          pct > 90 ? "var(--bad)" : pct > 60 ? "var(--warn)" : "var(--accent)"}"></span></span>
+      </div>`;
+    }).join("")}</div>
+    <div class="pm-hp"><span class="meter-t"><span>Lowest HP reached</span>
+      <b>${fainted ? "fainted" : hpLeft + "%"}</b></span>
+      <span class="track"><span class="fill" style="width:${Math.max(2, hpLeft)}%;background:${
+        fainted ? "var(--bad)" : hpColor(hpLeft)}"></span></span></div>
+  </article>`;
+}
+
+function logRow(l){
+  const name = l[0], kind = l[2], location = l[3], steps = l[4], healed = l[5],
+        count = l[6] || 0;
+  const k = KIND[str(kind)] || KIND.trainer;
+  if (str(kind) === "wild"){
+    return `<div class="logrow walk">
+      <div class="log-h"><span class="log-n">
+        <span class="kdot" style="background:${KIND.wild.color}"></span>${esc(str(name))}</span>
+        <span class="log-l">${count} wild battle${count === 1 ? "" : "s"} on the way through</span></div>
+      <div class="log-steps">${steps.map(s => {
+        const opp = s[0], by = s[2], move = s[3], n = s[12] || 1;
+        return `<span class="step"><b>${esc(str(opp))}</b>
+          <span class="num">×${n}</span>
+          ${by !== -1 ? `<span class="by">${esc(str(by))}</span>` : ""}
+          ${move !== -1 ? `<span class="num">${esc(str(move))}</span>` : ""}</span>`;
+      }).join("")}</div></div>`;
+  }
+  return `<div class="logrow${healed ? " heal" : ""}">
+    <div class="log-h"><span class="log-n">
+      <span class="kdot" style="background:${k.color}"></span>${esc(str(name))}</span>
+      <span class="log-l">${esc(str(location))}</span></div>
+    <div class="log-steps">${steps.map(st => {
+      const opp = st[0], lvl = st[1], by = st[2], move = st[3], turns = st[6],
+            selfKO = st[11], handover = st[13];
+      if (by === -1) return `<span class="step" style="color:var(--bad)">
+        <b>${esc(str(opp))}</b> <span class="num">no answer</span></span>`;
+      // the second half of a mid-fight handover: same opponent, new Pokemon
+      if (handover) return `<span class="step ho" title="Switched in mid-fight to finish this Pokémon">
+        <span class="num">↳ then</span>
+        <span class="by">${esc(str(by))}</span>
+        <span class="num">${esc(str(move))} · ${turns.toFixed(1)}t</span></span>`;
+      return `<span class="step"><b>${esc(str(opp))}</b>
+        <span class="num">L${lvl}</span>
+        <span class="by">${esc(str(by))}</span>
+        <span class="num">${esc(str(move))} · ${turns.toFixed(1)}t</span>
+        ${selfKO ? `<span class="num" style="color:var(--bad)">self-KO</span>` : ""}</span>`;
+    }).join("")}</div>
+    ${healed ? `<div class="healnote">Fully healed here${
+      typeof healed === "number" && healed > 1 ? " at " + esc(str(healed)) : ""} — HP and PP restored</div>` : ""}
+  </div>`;
+}
+
+function secNotes(d){
+  return `<details class="notes"><summary>How this party was chosen</summary><div class="notes-b">
+    <h4>The run</h4>
+    <ul>
+      <li>One continuous run through all ${d.b} trainer battle${d.b === 1 ? "" : "s"} in this
+        section at level ${d.lv}, <strong>with no items at all</strong> — no potions,
+        no ethers, no revives.</li>
+      <li>HP and PP carry across every battle in the section. They reset only where the game
+        itself resets them: a Pokémon Center between sections, or an in-game healing spot.
+        You heal at any Pokémon Center you walk past, taken from the game's own heal-location
+        table — which includes the two easily-forgotten route Centers, Route 4 outside Mt. Moon
+        and Route 10 sitting at the mouth of Rock Tunnel. The only healing spots inside a
+        dungeon are the Purified Zone on Pokémon Tower 5F and the Ember Spa on One Island;
+        Rocket Hideout, Silph Co. and Victory Road have none, and the Elite Four is one
+        unbroken gauntlet from the Indigo Plateau Center. A move refilled partway counts its
+        whole-section total against the larger pool, marked ✦.</li>
+      <li><strong>Switching costs a turn and a hit</strong>, both charged. Before a trainer
+        battle the lead is free — you can see who you are facing and reorder your party outside
+        battle. After a Pokémon faints the next send-out is free, as in the real game.</li>
+      <li><strong>Mid-fight handovers are allowed</strong>: one Pokémon softens a target and a
+        second finishes it, shown as <span class="step ho"><span class="num">↳ then</span></span>.
+        The softening is priced off the same expected-turn maths as the whole fight, so it costs
+        exactly the turns it saves the finisher. Because expected turns are almost perfectly
+        linear in the target's remaining HP, a handover is essentially never <em>faster</em> than
+        just leading with the better Pokémon — the switch turn is pure tax. What it buys is
+        survival, by splitting the incoming damage over two bodies, and reach, by stretching a
+        low-PP nuke across a fight it could not have carried alone.</li>
+      <li><strong>Wild battles do not let you choose your lead.</strong> You cannot see what the
+        grass will send, so each map is walked by a single lead picked blind against that map's
+        whole weighted encounter table — which is why the ideal route Pokémon is the well-rounded
+        one that one-shots everything, not a specialist that answers one slot. Anything else has
+        to be switched in at the usual price once the wild Pokémon is already on screen. The lead
+        rotates only when it faints, runs out of PP, or gets too low to take another average
+        encounter.</li>
+      <li>A Pokémon that faints is gone for the rest of the section. Self-Destruct and
+        Explosion knock out the user too, and are priced accordingly.</li>
+    </ul>
+    <h4>The party</h4>
+    <ul>
+      <li>Drawn from everything catchable or given by this point — including anything that
+        first becomes available in this very section.</li>
+      <li>Members are added one at a time, each time taking whichever Pokémon most improves
+        the run, and it stops as soon as the party clears the section and another body wouldn't
+        meaningfully speed it up. That is why most sections need fewer than six.</li>
+      <li>Move slots are picked for <em>this section's</em> opponents, so a Pokémon may be
+        listed with fewer than four when the rest would never be worth a press.</li>
+      <li><strong>An HM cannot be taken back off.</strong> The game blocks the normal overwrite
+        (<code>IsHMMove2</code>), and the only way out of that slot is the <strong>Move Deleter in
+        Fuchsia City</strong>. So an HM taught before Fuchsia is still sitting on that Pokémon in
+        later sections, and it is carried forward here rather than quietly forgotten. When a move
+        has to be given up for a field move, the one chosen is whichever is <em>cheapest to lose
+        permanently</em>, not merely the weakest: a level-up move comes back from the
+        <strong>Move Maniac on Two Island</strong> for a Big Mushroom (he relearns level-up moves
+        and nothing else), a Game Corner or Dept. Store TM can be bought again, and the run's only
+        copy of a single-use TM is gone for good.</li>
+      <li><strong>Traded Pokémon have to obey you.</strong> Anything with someone else's OT —
+        in LeafGreen that means the in-game trades, Jynx, Mr. Mime, Farfetch'd and Lickitung —
+        only obeys up to a level cap set by your badges: 10, then 30, 50 and 70 at the second,
+        fourth and sixth, and no cap once you have all eight. Above it, the game rolls and it
+        may loaf, nap, hurt itself or fire off a move you didn't pick, and those turns are
+        counted here. It bites in exactly one place: Erika's gym, where you are level 31 on
+        three badges against a cap of 30, so a traded Jynx ignores you about half the time and
+        stops being the answer it looks like on paper.</li>
+      <li>Moves marked <span class="tmtag">TM</span> come from a single-use TM. The run only
+        has one of each, and the TM plan decides who gets it — so a Pokémon here will never
+        be holding a TM that the plan spent on someone else.</li>
+      <li>PP shown is what the whole section costs, not what is left after a mid-section heal.</li>
+    </ul>
+    <h4>Not modelled</h4>
+    <ul>
+      <li>Wild battles <em>are</em> counted now. The number comes from the real map: a
+        nearest-neighbour walk over every item, hidden item, trainer and exit on it, the share
+        of that map's walkable tiles that actually trigger encounters (read from the tileset's
+        metatile attributes), and the game's own per-step formula — <code>rate / 100</code> a
+        step, plus the pity buff that builds on failed checks. Repels and running away cut it;
+        this is the no-shortcuts figure.</li>
+      <li>Stat-changing moves and status on either side, so Sabrina, Agatha and the Champion are
+        harder than this suggests.</li>
+      <li>Catching Pokémon, which costs turns and Poké Balls but no meaningful PP.</li>
+    </ul>
+  </div></details>`;
+}
+
+/* ---------------- TM plan ---------------- */
+function renderTM(){
+  const plan = TM_PLANS()[starter] || [];
+  const supply = Object.values(TM_SUPPLY);
+  const single = supply.filter(s => s.copies !== null).length;
+  const shop = supply.filter(s => s.copies === null).length;
+
+  let html = `<section class="card">
+    <div class="enc-head">
+      <span class="enc-kind">Single-use items</span>
+      <h2 class="enc-title">Where each TM should go</h2>
+      <div class="lede" style="padding:0;margin-top:8px">
+        A TM is destroyed when you teach it. The game's own code spends the item
+        for anything below <code>ITEM_HM01</code> and leaves HMs alone, so Surf and
+        Strength can go on the whole party while a Thunderbolt is a decision you make
+        once for the entire playthrough. Each one below is spent on whichever Pokémon
+        gains the most across <em>all</em> the sections it appears in — not on the first
+        one it happens to help, which is how a good TM ends up on a Pokémon you bench
+        by Saffron.
+      </div>
+      <div class="ctx">
+        <div class="ctxi"><b>${single}</b><span>single-use TMs</span></div>
+        <div class="ctxi"><b>${shop}</b><span>restockable</span></div>
+        <div class="ctxi"><b>${plan.length}</b><span>worth spending</span></div>
+        <div class="ctxi"><b>${plan.reduce((n, p) => n + p.teach.length, 0)}</b><span>copies used</span></div>
+      </div>
+    </div></section>`;
+
+  html += `<section class="card"><div class="card-h"><h2>The plan</h2>
+    <span class="note">Ranked by how much the run would lose without it</span></div>
+    <div class="ctab-wrap"><table class="ctab"><thead><tr>
+      <th>TM</th><th>Move</th><th class="r">Copies</th><th>Where you get it</th>
+      <th>Teach it to</th><th>Runner-up</th></tr></thead><tbody>
+    ${plan.map(p => {
+      const src = TM_SUPPLY[p.item] || {};
+      const where = (src.sources || []).map(s => s.where).join(" · ") || "—";
+      return `<tr>
+        <td><strong>${esc(p.item.replace("ITEM_", ""))}</strong>
+          <div class="linehint">${p.coinCost ? p.coinCost + " coins" : "section " + p.earliest}</div></td>
+        <td>${esc(p.name)}</td>
+        <td class="r num">${p.copies}</td>
+        <td style="color:var(--ink-3)">${esc(where)}</td>
+        <td>${p.teach.map(t => `<div><strong>${esc(t.name)}</strong>
+              <span class="num" style="color:var(--good)">+${t.value}t saved</span></div>`).join("")}</td>
+        <td>${p.runnersUp.length
+              ? p.runnersUp.map(r => `<div class="linehint">${esc(r.name)}
+                  <span class="num">+${r.value}t</span></div>`).join("")
+              : `<span style="color:var(--ink-3)">no one else wants it</span>`}</td>
+      </tr>`;
+    }).join("")}
+    </tbody></table></div></section>`;
+
+  html += `<details class="notes"><summary>How the assignment was decided</summary>
+    <div class="notes-b">
+      <h4>What counts as scarce</h4>
+      <ul>
+        <li><strong>HMs are never scarce.</strong> The item survives being taught, so Cut,
+          Fly, Surf, Strength, Rock Smash and Waterfall are free to spread across the party.</li>
+        <li>Six TMs restock in the Celadon Dept. Store (Roar, Hyper Beam, Dig, Brick Break,
+          Secret Power, Attract) and are treated as unlimited.</li>
+        <li>The five Game Corner TMs can be re-bought, but at 3,500–4,500 coins each, so the
+          plan assumes you buy one and shows the price.</li>
+        <li>Hidden Power's TM does not exist anywhere in LeafGreen.</li>
+      </ul>
+      <h4>What a TM is worth</h4>
+      <ul>
+        <li>Every time a party member reaches for a single-use TM move, the run is priced
+          against what that same Pokémon would have done with its best remaining move
+          instead. The difference, in turns, is the TM's value in that moment.</li>
+        <li>Those moments are summed across the <strong>whole run</strong>, so a TM that
+          shines once early loses to one that pays out from Celadon to the Champion.</li>
+        <li>The copies go to the highest total, and the runner-up column is the real cost
+          of the choice — when it is close, either is defensible.</li>
+        <li>No Pokémon is given more than three single-use TMs; it only has four move slots
+          and needs room for what it learns by levelling.</li>
+      </ul>
+    </div></details>`;
+  document.getElementById("tmPanel").innerHTML = html;
+}
+
+/* ---------------- choices ---------------- */
+function renderChoices(){
+  document.getElementById("choPanel").innerHTML = CHOICES().map(c => {
+    const isStarter = c.id === "starter";
+    return `<section class="card">
+      <div class="choice-h">
+        <h3>${esc(c.label)}</h3>
+        <div class="choice-w">${esc(c.where)}</div>
+        <div class="choice-note">${esc(c.note || "")}</div>
+        <div class="pick"><span class="pick-l">Most effective</span>
+          <span class="pick-n">${esc(c.best)}</span></div>
+        ${COMMITTED()[c.id] ? `<div class="choice-note" style="margin-top:9px">
+          Every section party assumes this pick — the game gives you one, and it is permanent,
+          so the same one carries through the whole run.</div>` : ""}
+      </div>
+      <div class="ctab-wrap"><table class="ctab"><thead><tr>
+        <th>Option</th><th>Types</th><th class="r">Earns a party slot</th>
+        ${isStarter ? `<th class="r">Turns, whole game</th><th>Gyms it carries</th>`
+                    : `<th class="r">Sections it can solo</th><th class="r">Pace vs a full party</th>`}
+      </tr></thead><tbody>
+      ${c.rows.map((r, i) => `<tr class="${i === 0 ? "win" : ""}">
+        <td><strong>${esc(r.name)}</strong>
+          ${r.line.length > 1 ? `<div class="linehint">${esc(r.line.join(" → "))}</div>` : ""}
+          <div class="linehint">from section ${r.fromStage}</div></td>
+        <td><span class="tw">${chipsOf(r.types)}</span></td>
+        <td class="r num">${r.teamPicks} of ${r.sectionsScored}</td>
+        ${isStarter
+          ? `<td class="r num">${r.totalTurns != null ? r.totalTurns : "—"}</td>
+             <td>${r.gymsCarried && r.gymsCarried.length ? esc(r.gymsCarried.join(", "))
+                  : `<span style="color:var(--ink-3)">none outright</span>`}</td>`
+          : `<td class="r num">${r.soloClears || 0}</td>
+             <td class="r num">${r.soloRatio ? r.soloRatio.toFixed(2) + "×" : "—"}</td>`}
+      </tr>`).join("")}
+      </tbody></table></div></section>`;
+  }).join("") + choiceNotes();
+}
+
+function choiceNotes(){
+  return `<details class="notes"><summary>How “most effective” was decided</summary>
+  <div class="notes-b"><ul>
+    <li><strong>Earns a party slot</strong> — how many sections of the game the recommended
+      party actually includes that Pokémon or something it evolves into. This is the primary
+      measure: the optimizer voting with its choices rather than a rating anyone assigned.</li>
+    <li><strong>Sections it can solo</strong> — how many sections its line could clear
+      single-handedly, no items, from the point you get it onward.</li>
+    <li><strong>Pace vs a full party</strong> — its solo turn count divided by the recommended
+      party's. 1.00× means it alone matches a whole team; 1.50× means half again as long.</li>
+    <li>Whole evolution lines are judged together, since picking Abra is really picking Kadabra and
+      picking Dratini is really picking Dragonite. Trade-only evolutions are excluded.</li>
+    <li>The three starters finish within 0.5% of each other over the whole game, so the honest
+      answer is that the choice barely matters for pace — the table shows where each one
+      earns its keep instead.</li>
+  </ul></div></details>`;
+}
+
+/* ---------------- notes (encounters) ---------------- */
+function notesHTML(e, heals){
+  const s = STAGE_BY_ID[e.st] || {};
+  const lv = e.pl != null ? e.pl : s.level;
+  const bg = e.bg != null ? e.bg : (s.badges || 0);
+  return `<details class="notes"><summary>How these numbers were produced</summary><div class="notes-b">
+    <h4>Your Pokémon</h4>
+    <ul>
+      <li>Level <strong>${lv}</strong> — what a player reaches here by beating the trainers
+        along the way, with no grinding. Every candidate is compared at that same level.</li>
+      <li>Average specimen: 15 IVs across the board, no EV training, neutral nature.</li>
+      <li>Best damaging move available at this point — level-up moves learned by level ${lv},
+        plus any TM or HM you could already be holding${e.st >= 28 ? ", plus Two Island move tutors" : ""}.
+        Moves that need a setup turn are charged the extra turn; Hyper Beam is charged its recharge.</li>
+      <li>Only Pokémon obtainable in <strong>LeafGreen</strong> by section ${e.st}. FireRed
+        exclusives and trade-only evolutions (Alakazam, Machamp, Golem, Gengar) are excluded.</li>
+      <li>One entry per evolution line, and one per thing the game only gives you once — so
+        Vaporeon, Jolteon and Flareon compete for a single slot (there is one Eevee), as do the
+        two fossils and the two Dojo Pokémon. Where an option displaced an equal, it is listed
+        as "or …". Your starter's line is shown; the other two are hidden.</li>
+    </ul>
+    <h4>The opposing side</h4>
+    <ul>
+      <li>Built exactly as the game builds it: the trainer's stored IV value, the deterministic
+        nature the game derives from the trainer's name, and the same "last four moves learned"
+        rule the game applies where the roster doesn't specify moves.</li>
+      <li>They use their single best move against you each turn.</li>
+      ${heals && heals.length ? `<li>This trainer carries <strong>${heals.length} ${esc(heals[0])}</strong>.
+        Turn counts include having to knock the same Pokémon down again.</li>` : ""}
+    </ul>
+    <h4>The maths</h4>
+    <ul>
+      <li>Gen 3 damage formula transcribed from the game's own <code>CalculateBaseDamage</code>,
+        integer truncation preserved at every step, the 85–100% damage roll, and a 1/16
+        critical rate (1/8 for high-crit moves).</li>
+      <li>Physical or special is decided by the move's <strong>type</strong>, as in Gen 3.</li>
+      <li>FireRed/LeafGreen give <em>you</em> a 10% stat boost from certain badges
+        (Boulder → Attack, Soul → Defense, Volcano → Sp. Atk and Sp. Def). With
+        ${bg} badge${bg === 1 ? "" : "s"} here, that is factored in.</li>
+      <li>"Turns" is an exact expectation over the full damage distribution and the move's
+        accuracy, so misses and low rolls are priced in.</li>
+    </ul>
+    <h4>Deliberately not modelled</h4>
+    <ul>
+      <li>No items on your side, no switching mid-fight, and no stat-changing moves — Calm Mind,
+        Reflect, Screech and Amnesia are ignored on both sides.</li>
+      <li>Status effects are not simulated, only raw damage. Held-item type boosts are not assumed.</li>
+    </ul>
+  </div></details>`;
+}
+
+/* ---------------- boot ---------------- */
+renderMast();
+renderList();
+renderSecList();
+renderChoices();
+renderTM();
+selected = (ENC.find(e => e.id === "trainer:TRAINER_LEADER_BROCK") || ENC[0]).id;
+renderPanel(ENC.find(e => e.id === selected));
+document.querySelectorAll(".enc").forEach(x =>
+  x.setAttribute("aria-current", x.dataset.id === selected));
+renderSecList();
+renderSecPanel(selectedSec);
+})();
+</script>
