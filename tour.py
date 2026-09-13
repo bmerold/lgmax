@@ -115,12 +115,26 @@ def _item_ball_scripts():
         out[m.group(1)] = m.group(2)
     return out
 
+def renewable_items():
+    """Flag -> rarity tier for the game's renewable hidden items (mushrooms,
+    beach gems...). These START ABSENT: at any moment only one rolled tier
+    per map exists, re-rolled every ~1500 steps you walk on that map
+    (src/renewable_hidden_items.c). The guide must not promise them."""
+    out, tier = {}, None
+    for line in open(f"{REPO}/src/renewable_hidden_items.c"):
+        m = re.search(r"\.(rare|uncommon|common)\s*=", line)
+        if m: tier = m.group(1)
+        f = re.search(r"HIDDEN_ID\((FLAG_HIDDEN_ITEM_\w+)\)", line)
+        if f and tier: out[f.group(1)] = tier
+    return out
+
 def pretty_item(const):
     return const.replace("ITEM_", "").replace("_", " ").title().replace("Tm", "TM").replace("Hm", "HM")
 
 def harvest():
     """Every collectable with a tile: items, hidden items, trainers."""
     balls = _item_ball_scripts()
+    renew = renewable_items()
     nodes = []
     for name, mj in R.maps().items():
         if WD._map_stage(name) is None: continue
@@ -133,10 +147,13 @@ def harvest():
                           "x": o.get("x", 0), "y": o.get("y", 0)})
         for b in mj.get("bg_events", []):
             if b.get("type") != "hidden_item": continue
-            nodes.append({"kind": "hidden",
-                          "what": pretty_item(b.get("item", "?")),
-                          "map": name, "x": b.get("x", 0), "y": b.get("y", 0),
-                          "underfoot": bool(b.get("underfoot"))})
+            node = {"kind": "hidden",
+                    "what": pretty_item(b.get("item", "?")),
+                    "map": name, "x": b.get("x", 0), "y": b.get("y", 0),
+                    "underfoot": bool(b.get("underfoot"))}
+            tier = renew.get(b.get("flag", ""))
+            if tier: node["renewable"] = tier
+            nodes.append(node)
 
     # the overworld's fixed Pokémon, standing on their own tiles
     for name, mj in R.maps().items():
@@ -469,6 +486,7 @@ def solve(max_stage=34, verbose=True):
             if flew: step["fly"] = path[0][0] if path else True
             if n.get("enc"): step["enc"] = n["enc"]
             if n.get("underfoot"): step["underfoot"] = True
+            if n.get("renewable"): step["renewable"] = n["renewable"]
             if n.get("species"): step["species"] = n["species"]
             steps.append(step)
             cur, prev_idx = tgt, oi

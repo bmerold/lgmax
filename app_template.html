@@ -1154,7 +1154,7 @@ function renderSecPanel(id, leg){
     (pinsByMap[mp] = pinsByMap[mp] || []).push(
       {n: i + 1, x: s[3], y: s[4], kind: str(s[0]), what: str(s[1]),
        walk: s[5], fly: s[6], species: (s[8] || []).length,
-       underfoot: s[9], key: keys[i], done: DONE.has(keys[i]),
+       underfoot: s[9], renew: str(s[10]), key: keys[i], done: DONE.has(keys[i]),
        next: i === nextIdx, plan: planByStop[i + 1]});
   });
   const sideRow = p => {
@@ -1162,6 +1162,7 @@ function renderSecPanel(id, leg){
     const bits = [k.label, p.walk + " steps"];
     if (p.fly) bits.push("✈ fly to " + prettyMap(p.fly));
     if (p.underfoot) bits.push("needs Itemfinder");
+    else if (p.renew) bits.push(`renewable — there ${RENEW_ODDS[p.renew] || "?"} of the time`);
     else if (p.kind === "hidden") bits.push("invisible — press A");
     if (p.species > 1) bits.push(p.species + " species");
     return `<button class="side-row${p.done ? " done" : ""}${p.next ? " next" : ""}" data-n="${p.n}">
@@ -1358,7 +1359,8 @@ function partyCard(t){
 
 function rtRow(s, n, st){
   const kind = str(s[0]), what = str(s[1]), mp = s[2], walk = s[5],
-        flyFrom = s[6], species = s[8] || [], underfoot = s[9];
+        flyFrom = s[6], species = s[8] || [], underfoot = s[9],
+        renew = str(s[10]);
   st = st || {};
   return `<div class="rt-row${st.done ? " done" : ""}${st.next ? " next" : ""}" id="fight-${n}">
     ${st.key ? `<span class="chk${st.done ? " on" : ""}" data-key="${esc(st.key)}" title="mark done">✓</span>` : ""}
@@ -1366,6 +1368,7 @@ function rtRow(s, n, st){
     <span>
       <span class="rt-what">${esc(what || "")}</span>
       ${underfoot ? `<span class="tmtag" title="buried — only the Itemfinder digs it up">Itemfinder</span>`
+        : renew ? `<span class="note" title="the game re-rolls its renewable hidden items every ~1500 steps you take on this map; only one rarity tier exists at a time">renewable — there ${RENEW_ODDS[renew] || "?"} of the time, regrows as you walk; skip and re-check on later passes</span>`
         : kind === "hidden" ? `<span class="note" title="hidden items have no sprite — they're there from the start of the game">invisible — face the pinned tile, press A</span>` : ""}
       ${flyFrom ? `<div class="rt-fly">✈ Fly to ${esc(prettyMap(flyFrom))}, then walk</div>` : ""}
       ${species.length > 1 ? `<div class="rt-species">${species.map(x => esc(str(x))).join(" · ")}</div>` : ""}
@@ -1443,9 +1446,11 @@ function secNotes(d, L, multi){
         have no healing spot, and the Elite Four is one unbroken gauntlet from the Indigo
         Plateau Center.${multi ? " This section is one such stretch; its neighbours in the" +
         " list are the rest of the same stage, on the far side of a full heal." : ""}</li>
-      <li><strong>Switching costs a turn and a hit</strong>, both charged. Before a trainer
-        battle the lead is free — you can see who you are facing and reorder your party outside
-        battle. After a Pokémon faints the next send-out is free, as in the real game.</li>
+      <li><strong>Switching mid-fight costs a turn and a hit</strong>, both charged. But the
+        game's default battle style is <strong>Shift</strong>: before a trainer battle the lead
+        is free, and every time a trainer's Pokémon goes down you are offered a free switch
+        before the next one comes out — so each opposing Pokémon gets whoever answers it best,
+        at no cost. After a faint the next send-out is free too, as in the real game.</li>
       <li><strong>Mid-fight handovers are allowed</strong>: one Pokémon softens a target and a
         second finishes it, shown as <span class="step ho"><span class="num">↳ then</span></span>.
         The softening is priced off the same expected-turn maths as the whole fight, so it costs
@@ -1512,6 +1517,7 @@ function secNotes(d, L, multi){
 }
 
 /* ---------------- route helpers (used by the guide) ---------------- */
+const RENEW_ODDS = {common: "60%", uncommon: "30%", rare: "10%"};
 const RKIND = {
   item:   {color:"#9A7A00", label:"item ball"},
   hidden: {color:"#3E8E96", label:"hidden item"},

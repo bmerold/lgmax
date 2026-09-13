@@ -900,6 +900,13 @@ def run_section(team, battles, badges, heal_after_idx, tm_value=None):
             active = None          # party order is free to set before a trainer
         entries = []
         for oi, opp in enumerate(enc["_mons"]):
+            # Gen 3's default battle style is SHIFT: when a trainer's Pokemon
+            # goes down, the game offers a free switch before the next one
+            # comes out. So against a trainer, every opponent gets a free
+            # choice of who fights it -- only mid-fight handovers pay the
+            # switch tax. Wild leads still carry over unpriced choices.
+            if enc["kind"] != "wild" and oi > 0:
+                active = None
             plan = plan_vs(team, opp, badges, active)
             if plan is None:
                 failed += 1
