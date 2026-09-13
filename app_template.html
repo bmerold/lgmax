@@ -287,6 +287,22 @@ button{font:inherit;color:inherit}
 /* the tail of a mid-fight handover — reads as a continuation, not a new fight */
 .step.ho{border-style:dashed;background:transparent;margin-left:-2px}
 .healnote{font-size:11.5px;color:var(--good);font-weight:600;margin-top:8px}
+.logno{display:inline-block;min-width:20px;height:20px;border-radius:10px;margin-right:7px;
+  background:var(--surface-3);color:var(--ink-2);font:600 11px/20px "IBM Plex Mono",monospace;
+  text-align:center;vertical-align:1px}
+.logrow.flash{animation:rowflash 1.6s ease-out}
+@keyframes rowflash{0%,60%{background:color-mix(in srgb, var(--accent) 18%, transparent)}100%{background:transparent}}
+
+/* ---------- section maps ---------- */
+.maph{font-weight:600;font-size:13px;padding:12px 16px 8px;display:flex;gap:10px;align-items:baseline}
+.mapwrap{overflow-x:auto;margin:0 16px 14px;border:1px solid var(--line);
+  border-radius:10px;background:var(--surface-2)}
+.mapbox{position:relative;width:max-content}
+.mapbox img{display:block;image-rendering:pixelated}
+.mark{position:absolute;transform:translate(-50%,-50%);min-width:20px;height:20px;padding:0 4px;
+  border:2px solid #fff;border-radius:11px;color:#fff;text-align:center;cursor:pointer;
+  font:700 11px/16px "IBM Plex Mono",monospace;box-shadow:0 1px 5px rgba(0,0,0,.55)}
+.mark:hover{transform:translate(-50%,-50%) scale(1.25);z-index:2}
 
 /* ---------- choices ---------- */
 .choice-h{padding:16px 18px 14px}
@@ -412,6 +428,9 @@ const S = DATA.pool, STAGES = DATA.stages, ENC = DATA.encounters;
 let trading = false;
 const tradeKey = () => trading ? "yes" : "no";
 const SECTIONS_BY = DATA.sections, CHOICES_BY = DATA.choices;
+/* Map images rendered straight from the decomp's tilesets and layouts,
+   keyed by map folder name: [width px, height px, base64 png, pretty name]. */
+const MAPART = DATA.mapart || {};
 /* Choices the run makes once and keeps; the section parties are solved with
    these locked, so a single Eevee can't become a Vaporeon in one town and a
    Jolteon in the next. */
@@ -787,6 +806,13 @@ document.getElementById("secList").addEventListener("click", ev => {
   renderSecPanel(selectedSec, selectedLeg);
   if (window.innerWidth <= 960) document.getElementById("secPanel").scrollIntoView({behavior:"smooth"});
 });
+/* Clicking a numbered pin on the map jumps to that fight in the battle list. */
+document.getElementById("secPanel").addEventListener("click", ev => {
+  const m = ev.target.closest(".mark"); if (!m) return;
+  const row = document.getElementById("fight-" + m.dataset.n); if (!row) return;
+  row.scrollIntoView({block: "center"});
+  row.classList.remove("flash"); void row.offsetWidth; row.classList.add("flash");
+});
 
 function renderSecPanel(id, leg){
   const el = document.getElementById("secPanel");
@@ -893,9 +919,36 @@ function renderSecPanel(id, leg){
         : "all six earn their slot here"}</span></div>
     <div class="party">${L.team.map(partyCard).join("")}</div></section>`;
 
+  if (L.mp && L.mp.length){
+    const pinned = L.mp.reduce((a, m) => a + m[1].length, 0);
+    html += `<section class="card"><div class="card-h"><h2>The ground you cover</h2>
+        <span class="note">rendered from the game's own tilesets — numbers match the battle list below</span></div>
+      ${L.mp.map(m => {
+        const name = m[0], marks = m[1], art = MAPART[name];
+        if (!art) return "";
+        const [w, h, b64, pretty] = art;
+        return `<div class="maph">${esc(str(pretty) || name)}
+            <span class="note">${marks.length ? marks.length + " trainer" + (marks.length === 1 ? "" : "s") + " here" : "no set trainers — just the walk"}</span></div>
+          <div class="mapwrap"><div class="mapbox">
+            <img src="data:image/png;base64,${b64}" width="${w}" height="${h}" alt="Map of ${esc(str(pretty) || name)}" loading="lazy">
+            ${marks.map(mk => {
+              const [x, y, n, nm, kd] = mk;
+              return `<button class="mark" style="left:${(x + 0.5) * 16}px;top:${(y + 0.5) * 16}px;
+                background:${(KIND[str(kd)] || KIND.trainer).color}" data-n="${n}"
+                title="${n}. ${esc(str(nm))}">${n}</button>`;
+            }).join("")}
+          </div></div>`;
+      }).join("")}
+      ${pinned < L.b ? `<p class="note kitnote">${L.b - pinned} of this section's battles
+        ${L.b - pinned === 1 ? "is" : "are"} scripted — a rival ambush or a fight with no overworld
+        sprite standing on a tile — so ${L.b - pinned === 1 ? "it has" : "they have"} no pin.</p>` : ""}
+    </section>`;
+  }
+
+  let fightNo = 0;
   html += `<section class="card"><div class="card-h"><h2>Battle by battle</h2>
       <span class="note">Trainers in the order you meet them, with the walking between</span></div>
-    ${L.log.map(logRow).join("")}</section>`;
+    ${L.log.map(l => logRow(l, str(l[2]) === "wild" ? 0 : ++fightNo)).join("")}</section>`;
 
   if (d.bench.length){
     html += `<section class="card"><div class="card-h"><h2>Also strong here</h2>
@@ -945,7 +998,7 @@ function partyCard(t){
   </article>`;
 }
 
-function logRow(l){
+function logRow(l, fightNo){
   const name = l[0], kind = l[2], location = l[3], steps = l[4], healed = l[5],
         count = l[6] || 0;
   const k = KIND[str(kind)] || KIND.trainer;
@@ -962,9 +1015,9 @@ function logRow(l){
           ${move !== -1 ? `<span class="num">${esc(str(move))}</span>` : ""}</span>`;
       }).join("")}</div></div>`;
   }
-  return `<div class="logrow${healed ? " heal" : ""}">
+  return `<div class="logrow${healed ? " heal" : ""}"${fightNo ? ` id="fight-${fightNo}"` : ""}>
     <div class="log-h"><span class="log-n">
-      <span class="kdot" style="background:${k.color}"></span>${esc(str(name))}</span>
+      ${fightNo ? `<span class="logno">${fightNo}</span>` : ""}<span class="kdot" style="background:${k.color}"></span>${esc(str(name))}</span>
       <span class="log-l">${esc(str(location))}</span></div>
     <div class="log-steps">${steps.map(st => {
       const opp = st[0], lvl = st[1], by = st[2], move = st[3], turns = st[6],

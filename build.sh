@@ -19,6 +19,7 @@ mkdir -p data
 
 python3 sections.py     # writes wildLoad / tmSupply / commitments, solves every section
 python3 optimize.py     # per-encounter rankings (reads commitments.json)
+python3 render_maps.py  # map PNGs from the decomp's tilesets (incremental)
 python3 compact.py      # array-encoded payload
 
 python3 - <<'PY'

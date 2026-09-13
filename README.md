@@ -57,6 +57,7 @@ them.
 | `hms.py` | field obstacles per map → which HMs each section demands |
 | `constraints.py` | evolution lines, one-of groups, run-wide commitments, outgrown forms |
 | `optimize.py` | per-encounter optimizer (scalar screen → exact turn DP) |
+| `render_maps.py` | renders each section's maps to PNG from the decomp's tilesets/layouts, and pins every trainer to the tile its object event stands on |
 | `sections.py` | two-pass per-section party optimizer + choice evaluation |
 | `compact.py` | array-encoded payload (~25 MB → ~5 MB) |
 | `verify.py` | **27 guard rails; all must pass after every rebuild** |

@@ -3,7 +3,7 @@
 single self-contained page. Same information, far fewer bytes: repeated object
 keys become positional arrays, and shared strings become indices into pools.
 """
-import json, os
+import base64, json, os
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 
@@ -11,6 +11,8 @@ def main():
     graph = json.load(open(f"{OUT}/encounters.json"))
     recs = json.load(open(f"{OUT}/recommendations.json"))
     secs = json.load(open(f"{OUT}/sections.json"))
+    mapart = json.load(open(f"{OUT}/mapart/index.json"))
+    enc_by_id = {e["id"]: e for e in graph}
 
     # ---- string pools (species, move and type names repeat thousands of times)
     pool, pool_idx = [], {}
@@ -158,6 +160,36 @@ def main():
         return [S(b["name"]), [S(x) for x in b["types"]], b["soloTurns"],
                 b["soloFailed"], S(b["via"])]
 
+    used_maps = set()
+
+    def leg_maps(merged):
+        """The maps a leg crosses, in walk order, with every trainer battle
+        pinned to the tile its object event stands on. Numbers count the
+        trainer rows in display order, so they match the battle list. A
+        scripted battle without an overworld tile (rival ambushes) simply
+        gets no pin."""
+        seq, marks, n = [], {}, 0
+        def add(mp):
+            if mp in mapart["maps"]:
+                if mp not in seq: seq.append(mp)
+                return True
+            return False
+        for l in merged:
+            if l["kind"] == "wild":
+                add(l.get("group") or "")
+                continue
+            n += 1
+            e = enc_by_id.get(l["id"]) or {}
+            add(e.get("locationRaw") or "")
+            tile = mapart["trainers"].get(e.get("trainerConst") or "")
+            if tile and add(tile[0]):
+                marks.setdefault(tile[0], []).append(
+                    [tile[1], tile[2], n, S(l["enc"]), S(l["kind"])])
+        used_maps.update(seq)
+        # raw folder names, NOT pooled: S() prettifies "Pokemon" -> "Pokémon",
+        # which would break the join against the mapart keys
+        return [[mp, marks.get(mp, [])] for mp in seq]
+
     def leg_rows(sec):
         """A section split at its full heals. Each leg carries its own roster
         ledger and log slice, so no PP bar shown ever spans a heal."""
@@ -171,6 +203,7 @@ def main():
         out, i0 = [], 0
         for leg in legs:
             chunk = sec["log"][i0:i0 + leg["rows"]]; i0 += leg["rows"]
+            merged = merge_walks(chunk)
             out.append({
                 "ti": S(leg["title"]), "hz": S(leg.get("endsAt")),
                 "b": leg["battles"], "om": leg["opposingMons"],
@@ -178,7 +211,8 @@ def main():
                 "wt": leg["wildTurns"], "f": leg["faints"],
                 "u": leg["unanswered"],
                 "team": [member_row(t) for t in leg["team"]],
-                "log": [log_row(l) for l in merge_walks(chunk)],
+                "log": [log_row(l) for l in merged],
+                "mp": leg_maps(merged),
             })
         return out
 
@@ -225,7 +259,18 @@ def main():
             } for r in c["rows"]]
         })
 
+    # ---- the map images the legs reference, embedded so the page stays
+    # self-contained. Indexed PNGs straight from render_maps.py, keyed by map.
+    import build_graph as _G
+    art = {}
+    for mp in sorted(used_maps):
+        meta = mapart["maps"][mp]
+        b64 = base64.b64encode(
+            open(f"{OUT}/mapart/{mp}.png", "rb").read()).decode()
+        art[mp] = [meta["w"], meta["h"], b64, S(_G.pretty_location(mp))]
+
     payload = {"pool": pool, "stages": stages, "encounters": out_encs,
+               "mapart": art,
                "sections": out_sections, "choices": choices,
                "commitments": secs.get("tradeCommitments", {}),
                "tmPlans": secs.get("tmPlans", {}),
