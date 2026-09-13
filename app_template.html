@@ -326,9 +326,32 @@ button{font:inherit;color:inherit}
   font:700 10.5px/20px "IBM Plex Mono",monospace;color:#fff;padding:0 3px}
 .side-t{font-weight:600;font-size:12px;line-height:1.35}
 .side-d{font-size:10.5px;color:var(--ink-3);margin-top:1px;line-height:1.35}
-.side-go{margin-left:auto;flex-shrink:0;border:0;background:none;color:var(--ink-3);
+.side-go{flex-shrink:0;border:0;background:none;color:var(--ink-3);
   cursor:pointer;font:inherit;font-size:13px;padding:0 2px}
 .side-go:hover{color:var(--accent)}
+.side-p{font-size:11px;color:var(--accent);font-weight:600;margin-top:1px;line-height:1.35}
+
+/* ---------- play-through progress ---------- */
+.chk{margin-left:auto;flex-shrink:0;width:18px;height:18px;border-radius:50%;
+  border:1.5px solid var(--ink-3);color:transparent;background:none;cursor:pointer;
+  font:700 11px/15px sans-serif;text-align:center;align-self:center}
+.chk:hover{border-color:var(--good);color:var(--good)}
+.chk.on{background:var(--good);border-color:var(--good);color:#fff}
+.logrow .chk,.rt-row .chk{margin-left:0;margin-right:8px;display:inline-block;vertical-align:2px}
+.side-row.done,.rt-row.done,.logrow.done{opacity:.45}
+.side-row.done .side-t,.rt-row.done .rt-what{text-decoration:line-through}
+.mark.done{opacity:.35;filter:saturate(.4)}
+.side-row.next,.rt-row.next,.logrow.next{box-shadow:inset 3px 0 0 var(--accent);
+  background:color-mix(in srgb, var(--accent) 6%, transparent)}
+.mark.next{z-index:3;outline:2px solid #fff;box-shadow:0 0 0 4px var(--accent),0 1px 5px rgba(0,0,0,.55)}
+.prog b{color:var(--good)}
+.railok{color:var(--good);font-weight:600}
+.backguide{display:inline-block;margin:0 0 10px;border:1px solid var(--line);border-radius:8px;
+  background:var(--surface);color:var(--ink-2);font:600 12px/1 inherit;font-family:inherit;
+  padding:8px 12px;cursor:pointer}
+.backguide:hover{color:var(--accent);border-color:var(--accent)}
+.enc-head.slim{padding-bottom:12px}
+.enc-head.slim .enc-meta{margin-top:5px}
 @media(max-width:960px){.mapblock{flex-direction:column}
   .mapside{position:static;flex:auto;width:100%;max-height:300px}}
 .mapbox svg{position:absolute;left:0;top:0;pointer-events:none}
@@ -522,6 +545,26 @@ const hpColor = p => p > 50 ? "var(--good)" : (p > 15 ? "var(--warn)" : "var(--b
 
 let starter = "Bulbasaur", view = "enc";
 let selected = null, selectedSec = 18, selectedLeg = 0, tab = "team";
+
+/* ---- play-through progress + where-you-were, kept in this browser ---- */
+let DONE = new Set();
+try { DONE = new Set(JSON.parse(localStorage.getItem("lgmax-done") || "[]")); } catch (e) {}
+const saveDone = () => { try { localStorage.setItem("lgmax-done", JSON.stringify([...DONE])); } catch (e) {} };
+/* a stop's identity survives re-solves: what it is + where it stands */
+const stopKey = s => [str(s[0]), str(s[1]), s[2], s[3], s[4]].join("|");
+const saveUi = () => { try { localStorage.setItem("lgmax-ui",
+  JSON.stringify({view, starter, trading, sec: selectedSec, leg: selectedLeg, enc: selected})); } catch (e) {} };
+try {
+  const u = JSON.parse(localStorage.getItem("lgmax-ui") || "null");
+  if (u){
+    if (STARTERS.includes(u.starter)) starter = u.starter;
+    trading = !!u.trading;
+    if (typeof u.sec === "number") selectedSec = u.sec;
+    if (typeof u.leg === "number") selectedLeg = u.leg;
+    if (["enc","sec","tm","cho"].includes(u.view)) view = u.view;
+    if (typeof u.enc === "string") selected = u.enc;
+  }
+} catch (e) {}
 let active = new Set(["boss","rival","trainer","wild"]);
 let query = "";
 
@@ -582,6 +625,7 @@ document.getElementById("nav").addEventListener("click", ev => {
     x.setAttribute("aria-current", x.dataset.view === view));
   ["enc","sec","tm","cho"].forEach(v =>
     document.getElementById("view-" + v).hidden = v !== view);
+  saveUi();
 });
 
 /* ---------------- encounters ---------------- */
@@ -835,11 +879,16 @@ function renderSecList(){
       const team = L ? L.team : [];
       const party = team.length ? team.map(t => str(t[0])).join(", ") : "no trainer battles";
       const label = multi && str(L.ti) ? `${s.id}${legLetter(k)}. ${str(L.ti)}` : `${s.id}. ${s.name}`;
+      const rt = (L && L.rt) || [];
+      const dn = rt.filter(x => DONE.has(stopKey(x))).length;
+      const progress = !rt.length ? "" :
+        dn >= rt.length ? ` · <span class="railok">✓ done</span>` :
+        dn ? ` · <span class="railok">${dn}/${rt.length}</span>` : "";
       return `<button class="sec-row" data-sec="${s.id}" data-leg="${k}"
         aria-current="${s.id === selectedSec && k === selectedLeg}">
         <span class="sec-top"><span class="sec-n">${esc(label)}</span>
           <span class="sec-k">Lv ${s.level}${L && L.b ? " · " + L.b + " fights" : ""}${
-            L && L.st ? " · " + L.st + " steps" : ""}</span></span>
+            L && L.st ? " · " + L.st + " steps" : ""}${progress}</span></span>
         <span class="sec-party">${esc(party)}</span></button>`;
     }).join("");
   }).join("");
@@ -853,6 +902,7 @@ document.getElementById("secList").addEventListener("click", ev => {
     x.setAttribute("aria-current",
       +x.dataset.sec === selectedSec && (+x.dataset.leg || 0) === selectedLeg));
   renderSecPanel(selectedSec, selectedLeg);
+  saveUi();
   if (window.innerWidth <= 960) document.getElementById("secPanel").scrollIntoView({behavior:"smooth"});
 });
 /* The map, its side list and the checklist are cross-linked: a pin lights
@@ -862,8 +912,20 @@ const flashEl = el => {
   el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
 };
 document.getElementById("secPanel").addEventListener("click", ev => {
+  const c = ev.target.closest(".chk");
+  if (c){
+    ev.stopPropagation();
+    const key = c.dataset.key;
+    if (DONE.has(key)) DONE.delete(key); else DONE.add(key);
+    saveDone();
+    const y = window.scrollY;
+    renderSecList();
+    renderSecPanel(selectedSec, selectedLeg);
+    window.scrollTo(0, y);
+    return;
+  }
   const f = ev.target.closest(".fightlink");
-  if (f){ openEncounter(f.dataset.enc); return; }
+  if (f){ openEncounter(f.dataset.enc, +f.dataset.n || null); return; }
   const go = ev.target.closest(".side-go");
   if (go){
     const row = document.getElementById("fight-" + go.dataset.n);
@@ -905,26 +967,55 @@ function renderSecPanel(id, leg){
   const arrive = multi && k > 0 ? str(legs[k - 1].hz) : null;
   const ends = str(L.hz);
 
-  let html = `<section class="card"><div class="enc-head">
+  /* ---- progress state first: everything on the page reflects it ---- */
+  const stops = L.rt || [];
+  const keys = stops.map(stopKey);
+  const doneCount = keys.filter(kk => DONE.has(kk)).length;
+  const nextIdx = keys.findIndex(kk => !DONE.has(kk));
+
+  /* the compressed fight plan for the i-th trainer stop: who leads, what
+     they press — pulled from the same ledger the checklist shows in full */
+  const planByStop = {};
+  {
+    let li2 = 0;
+    stops.forEach((s2, i2) => {
+      if (str(s2[0]) !== "trainer") return;
+      while (li2 < L.log.length && str(L.log[li2][2]) === "wild") li2++;
+      if (li2 >= L.log.length) return;
+      const segsP = [];
+      for (const st2 of L.log[li2][4]){
+        const by = str(st2[2]), mv = str(st2[3]);
+        if (!by){ segsP.push(["no answer", 1]); continue; }
+        const lbl = by + " · " + (mv || "?");
+        if (segsP.length && segsP[segsP.length - 1][0] === lbl) segsP[segsP.length - 1][1]++;
+        else segsP.push([lbl, 1]);
+      }
+      planByStop[i2 + 1] = segsP.slice(0, 3)
+        .map(([lbl, n2]) => lbl + (n2 > 1 ? " ×" + n2 : ""))
+        .join(", ") + (segsP.length > 3 ? " …" : "");
+      li2++;
+    });
+  }
+
+  const hmLine = (d.hm || []).filter(h => h[2] !== -1)
+    .map(h => `<b>${esc(str(h[0]))}</b> — ${esc(str(h[2]))}`).join(" · ");
+  let html = `<section class="card"><div class="enc-head slim">
     <span class="enc-kind">Section ${id}${multi ? legLetter(k) : ""} · ${esc(s.chapter)}${
       multi ? ` · ${esc(s.name)}, part ${k + 1} of ${legs.length}` : ""}</span>
     <h2 class="enc-title">${esc(title)}</h2>
-    <div class="enc-meta"><span>Your level <b>${d.lv}</b></span>
-      <span><b>${d.bg}</b> badge${d.bg === 1 ? "" : "s"}</span>
-      <span><b>${L.b}</b> trainer battle${L.b === 1 ? "" : "s"} · <b>${L.om}</b> Pokémon to beat</span>
-      ${L.wb ? `<span><b>${L.wb}</b> wild battles while clearing it</span>` : ""}</div>
+    <div class="enc-meta"><span>Lv <b>${d.lv}</b> · <b>${d.bg}</b> badge${d.bg === 1 ? "" : "s"}</span>
+      <span><b>${L.b}</b> fight${L.b === 1 ? "" : "s"} · <b>${(L.st || 0).toLocaleString()}</b> steps
+        · <b>${L.t}</b> turns${L.f ? ` · <b class="bad">${L.f} faint${L.f === 1 ? "" : "s"}</b>` : ""}</span>
+      ${stops.length ? `<span class="prog"><b>${doneCount}</b> of <b>${stops.length}</b> done</span>` : ""}</div>
     ${arrive || ends ? `<div class="enc-meta">${
         arrive ? `<span>You start fully healed — ${esc(arrive)}</span>` : ""}${
         ends ? `<span>Ends with a full heal at <b>${esc(ends)}</b></span>` : ""}</div>` : ""}
-    <div class="ctx">
-      <div class="ctxi"><b>${size || "—"}</b><span>party needed</span></div>
-      <div class="ctxi"><b>${(L.st || 0).toLocaleString()}</b><span>steps walked</span></div>
-      <div class="ctxi"><b>${L.t}</b><span>turns total</span></div>
-      ${L.wb ? `<div class="ctxi"><b>${L.wt}</b><span>of them wild</span></div>` : ""}
-      <div class="ctxi"><b>${L.f}</b><span>faints</span></div>
-      <div class="ctxi"><b>${L.u}</b><span>unanswered</span></div>
-    </div></div></section>`;
+    ${size ? `<div class="enc-meta"><span>Party: ${L.team.map(t =>
+        `<b>${esc(str(t[0]))}</b>`).join(" · ")} <span class="dim">(details below)</span></span></div>` : ""}
+    ${hmLine ? `<div class="enc-meta"><span>Field moves: ${hmLine}</span></div>` : ""}
+    </div></section>`;
 
+  let prep = "";
   const HOW = {
     known:     ["already knows it", "free"],
     spare:     ["free move slot", "free"],
@@ -934,7 +1025,7 @@ function renderSecPanel(id, leg){
     uncovered: ["nothing on the party can learn it", "gap"],
   };
   if (d.hm && d.hm.length){
-    html += `<section class="card"><div class="card-h"><h2>Field moves you need here</h2>
+    prep += `<section class="card"><div class="card-h"><h2>Field moves you need here</h2>
         <span class="note">what this section's maps demand, plus Fly, and who is carrying each</span></div>
       <div class="ctab-wrap"><table class="ctab"><thead><tr>
         <th>HM</th><th>Move</th><th>Badge</th><th>Carried by</th><th>How</th><th>Needed</th>
@@ -970,7 +1061,7 @@ function renderSecPanel(id, leg){
         <td class="dim">${times === 1 ? "once" : times + " more sections"}${
           str(why) !== "battles" ? " · " + esc(str(why)) : ""}</td></tr>`;
     };
-    html += `<section class="card"><div class="card-h"><h2>Keep these at level</h2>
+    prep += `<section class="card"><div class="card-h"><h2>Keep these at level</h2>
         <span class="note">Not needed here, but a later section wants them</span></div>
       <div class="ctab-wrap"><table class="ctab"><thead><tr>
         <th>Pokémon</th><th>Next needed</th><th>At</th><th>Gap</th><th>How often after that</th>
@@ -987,19 +1078,18 @@ function renderSecPanel(id, leg){
   if (!L.b){
     html += `<section class="card"><div class="card-h"><h2>No trainers here</h2></div>
       <p class="empty">This stretch has no trainer battles — it's travel, catching and the
-      walk itself. The party above is what you need to get across it.</p></section>`;
+      walk itself. The party (details below) is what you need to get across it.</p></section>`;
   }
 
-  if (!size){ el.innerHTML = html; return; }
-  html += `<section class="card"><div class="card-h">
+  if (!size){ el.innerHTML = html + prep; return; }
+  prep = `<section class="card"><div class="card-h">
       <h2>Recommended party — ${size} Pokémon</h2>
       <span class="note">${size < 6
         ? size + " is enough to clear this section; more bodies don't make it faster"
         : "all six earn their slot here"}</span></div>
-    <div class="party">${L.team.map(partyCard).join("")}</div></section>`;
+    <div class="party">${L.team.map(partyCard).join("")}</div></section>` + prep;
 
   /* ---- one set of maps: the route's walk plus every numbered stop ---- */
-  const stops = L.rt || [];
   const pinsByMap = {};
   stops.forEach((s, i) => {
     const mp = s[2];
@@ -1007,19 +1097,23 @@ function renderSecPanel(id, leg){
     (pinsByMap[mp] = pinsByMap[mp] || []).push(
       {n: i + 1, x: s[3], y: s[4], kind: str(s[0]), what: str(s[1]),
        walk: s[5], fly: s[6], species: (s[8] || []).length,
-       underfoot: s[9]});
+       underfoot: s[9], key: keys[i], done: DONE.has(keys[i]),
+       next: i === nextIdx, plan: planByStop[i + 1]});
   });
   const sideRow = p => {
     const k = RKIND[p.kind] || RKIND.event;
     const bits = [k.label, p.walk + " steps"];
-    if (p.fly) bits.push("✈ fly in");
+    if (p.fly) bits.push("✈ fly to " + prettyMap(p.fly));
     if (p.underfoot) bits.push("needs Itemfinder");
     else if (p.kind === "hidden") bits.push("invisible — press A");
     if (p.species > 1) bits.push(p.species + " species");
-    return `<button class="side-row" data-n="${p.n}">
+    return `<button class="side-row${p.done ? " done" : ""}${p.next ? " next" : ""}" data-n="${p.n}">
       <span class="side-n" style="background:${k.color}">${p.n}</span>
       <span><span class="side-t">${esc(p.what || "")}</span>
+        ${p.plan ? `<div class="side-p">${esc(p.plan)}</div>` : ""}
         <div class="side-d">${esc(bits.join(" · "))}</div></span>
+      <span class="chk${p.done ? " on" : ""}" data-key="${esc(p.key)}"
+        title="${p.done ? "done — click to untick" : "mark done"}">✓</span>
       <span class="side-go" data-n="${p.n}" title="jump to the full entry in the checklist">↓</span>
     </button>`;
   };
@@ -1045,7 +1139,7 @@ function renderSecPanel(id, leg){
           const [name, ox, oy] = c;
           (pinsByMap[name] || []).forEach(p => {
             nPins++;
-            pinsHtml += `<button class="mark" data-n="${p.n}"
+            pinsHtml += `<button class="mark${p.done ? " done" : ""}${p.next ? " next" : ""}" data-n="${p.n}"
               style="left:${(ox + p.x + 0.5) * 16}px;top:${(oy + p.y + 0.5) * 16}px;
               background:${(RKIND[p.kind] || RKIND.event).color}"
               title="${p.n}. ${esc(p.what || "")}">${p.n}</button>`;
@@ -1085,18 +1179,20 @@ function renderSecPanel(id, leg){
       listHtml += logRow(L.log[li++], 0);
   };
   stops.forEach((s, i) => {
+    const st = {key: keys[i], done: DONE.has(keys[i]), next: i === nextIdx};
     if (str(s[0]) === "trainer"){
       flushWilds();
-      if (li < L.log.length) listHtml += logRow(L.log[li++], i + 1);
+      if (li < L.log.length) listHtml += logRow(L.log[li++], i + 1, st);
     } else {
-      listHtml += rtRow(s, i + 1);
+      listHtml += rtRow(s, i + 1, st);
     }
   });
   flushWilds();
   while (li < L.log.length) listHtml += logRow(L.log[li++], 0);
   html += `<section class="card"><div class="card-h"><h2>Step by step</h2>
-      <span class="note">fights, pickups and catches in walk order — click a fight for its matchup analysis</span></div>
+      <span class="note">fights, pickups and catches in walk order — tick things off as you play; click a fight for its matchup analysis</span></div>
     ${listHtml}</section>`;
+  html += prep;
 
   if (d.bench.length){
     html += `<section class="card"><div class="card-h"><h2>Also strong here</h2>
@@ -1146,10 +1242,12 @@ function partyCard(t){
   </article>`;
 }
 
-function rtRow(s, n){
+function rtRow(s, n, st){
   const kind = str(s[0]), what = str(s[1]), mp = s[2], walk = s[5],
         flyFrom = s[6], species = s[8] || [], underfoot = s[9];
-  return `<div class="rt-row" id="fight-${n}">
+  st = st || {};
+  return `<div class="rt-row${st.done ? " done" : ""}${st.next ? " next" : ""}" id="fight-${n}">
+    ${st.key ? `<span class="chk${st.done ? " on" : ""}" data-key="${esc(st.key)}" title="mark done">✓</span>` : ""}
     <span class="rt-no" style="background:${(RKIND[kind] || RKIND.event).color}">${n}</span>
     <span>
       <span class="rt-what">${esc(what || "")}</span>
@@ -1162,7 +1260,8 @@ function rtRow(s, n){
   </div>`;
 }
 
-function logRow(l, fightNo){
+function logRow(l, fightNo, st){
+  st = st || {};
   const name = l[0], kind = l[2], location = l[3], steps = l[4], healed = l[5],
         count = l[6] || 0;
   const k = KIND[str(kind)] || KIND.trainer;
@@ -1179,10 +1278,11 @@ function logRow(l, fightNo){
           ${move !== -1 ? `<span class="num">${esc(str(move))}</span>` : ""}</span>`;
       }).join("")}</div></div>`;
   }
-  return `<div class="logrow${healed ? " heal" : ""}"${fightNo ? ` id="fight-${fightNo}"` : ""}>
+  return `<div class="logrow${healed ? " heal" : ""}${st.done ? " done" : ""}${st.next ? " next" : ""}"${fightNo ? ` id="fight-${fightNo}"` : ""}>
     <div class="log-h"><span class="log-n">
-      ${fightNo ? `<span class="logno" style="background:${RKIND.trainer.color};color:#fff">${fightNo}</span>` : ""}<span class="kdot" style="background:${k.color}"></span>${
-        fightNo ? `<button class="fightlink" data-enc="${esc(l[1])}"
+      ${st.key ? `<span class="chk${st.done ? " on" : ""}" data-key="${esc(st.key)}" title="mark done">✓</span>` : ""}${
+        fightNo ? `<span class="logno" style="background:${RKIND.trainer.color};color:#fff">${fightNo}</span>` : ""}<span class="kdot" style="background:${k.color}"></span>${
+        fightNo ? `<button class="fightlink" data-enc="${esc(l[1])}" data-n="${fightNo}"
           title="open this fight's matchup analysis">${esc(str(name))}</button>` : esc(str(name))}</span>
       <span class="log-l">${esc(str(location))}</span></div>
     <div class="log-steps">${steps.map(st => {
@@ -1339,8 +1439,10 @@ function svgArrows(coords){
   return out;
 }
 
-/* Jump from a fight in the guide to its per-encounter matchup analysis. */
-function openEncounter(id){
+/* Jump from a fight in the guide to its per-encounter matchup analysis,
+   and remember the way back. */
+let guideReturn = null;      // fight number to land on when returning
+function openEncounter(id, fromN){
   const e = ENC.find(x => x.id === id);
   if (!e) return;
   selected = id; view = "enc";
@@ -1350,10 +1452,36 @@ function openEncounter(id){
     document.getElementById("view-" + v).hidden = v !== "enc");
   renderList();
   renderPanel(e);
+  if (fromN != null){
+    guideReturn = fromN;
+    try { history.pushState({lgmaxGuide: true}, ""); } catch (er) {}
+    document.getElementById("panel").insertAdjacentHTML("afterbegin",
+      `<button class="backguide">← Back to the guide</button>`);
+  }
+  saveUi();
   window.scrollTo({top: 0});
   const row = document.querySelector(`.enc[data-id="${CSS.escape(id)}"]`);
   if (row) row.scrollIntoView({block: "center"});
 }
+function backToGuide(){
+  view = "sec";
+  document.querySelectorAll("[data-view]").forEach(x =>
+    x.setAttribute("aria-current", x.dataset.view === "sec"));
+  ["enc","sec","tm","cho"].forEach(v =>
+    document.getElementById("view-" + v).hidden = v !== "sec");
+  saveUi();
+  if (guideReturn != null){
+    const row = document.getElementById("fight-" + guideReturn);
+    if (row){ row.scrollIntoView({block: "center"}); flashEl(row); }
+    guideReturn = null;
+  }
+}
+document.addEventListener("click", ev => {
+  if (ev.target.closest(".backguide")) backToGuide();
+});
+window.addEventListener("popstate", () => {
+  if (view === "enc" && guideReturn != null) backToGuide();
+});
 
 function prettyMap(mp){
   const art = MAPART[mp];
@@ -1552,11 +1680,24 @@ renderList();
 renderSecList();
 renderChoices();
 renderTM();
-selected = (ENC.find(e => e.id === "trainer:TRAINER_LEADER_BROCK") || ENC[0]).id;
+if (!selected || !ENC.some(e => e.id === selected && forStarter(e)))
+  selected = (ENC.find(e => e.id === "trainer:TRAINER_LEADER_BROCK") || ENC[0]).id;
 renderPanel(ENC.find(e => e.id === selected));
 document.querySelectorAll(".enc").forEach(x =>
   x.setAttribute("aria-current", x.dataset.id === selected));
 renderSecList();
 renderSecPanel(selectedSec, selectedLeg);
+/* pick up where the last session left off */
+document.querySelectorAll("#starterBtns [data-starter]").forEach(x =>
+  x.setAttribute("aria-pressed", String(x.dataset.starter === starter)));
+document.querySelectorAll("[data-trade]").forEach(x =>
+  x.setAttribute("aria-pressed", String((x.dataset.trade === "yes") === trading)));
+document.querySelectorAll("#nav [data-view]").forEach(x =>
+  x.setAttribute("aria-current", x.dataset.view === view));
+["enc","sec","tm","cho"].forEach(v =>
+  document.getElementById("view-" + v).hidden = v !== view);
+const _selRow = document.querySelector(`.sec-row[data-sec="${selectedSec}"][data-leg="${selectedLeg}"]`);
+if (_selRow) _selRow.scrollIntoView({block: "center"});
+window.scrollTo(0, 0);
 })();
 </script>
