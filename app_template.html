@@ -383,6 +383,13 @@ button{font:inherit;color:inherit}
 .rpath2{fill:none;stroke:#C4491C;stroke-width:2.5;stroke-linejoin:round;stroke-linecap:round}
 .rarrow0{fill:none;stroke:#7A2D10;stroke-width:4;stroke-linecap:round;stroke-linejoin:round}
 .rarrow{fill:none;stroke:#fff;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+/* the stretch you are walking RIGHT NOW: last ticked stop -> next stop,
+   marching gold over a dark underlay so it reads on any terrain */
+.rnow0{fill:none;stroke:#3A1A05;stroke-width:6.5;stroke-linejoin:round;stroke-linecap:round;opacity:.85}
+.rnow{fill:none;stroke:#FFD84D;stroke-width:3.2;stroke-linejoin:round;stroke-linecap:round;
+  stroke-dasharray:10 8;animation:antsy .9s linear infinite}
+@keyframes antsy{to{stroke-dashoffset:-18}}
+@media (prefers-reduced-motion: reduce){.rnow{animation:none}}
 
 /* ---------- route checklist ---------- */
 .rt-steps{border-top:1px solid var(--line)}
@@ -1173,9 +1180,10 @@ function renderSecPanel(id, leg){
        boundary — the climb from Route 3 up past the Route 4 Center is one
        scene, the way the game shows it. */
     const segsByMap = Object.fromEntries(L.mp.map(m => [m[0], m[1] || []]));
+    const nextRuns = nextIdx >= 0 ? (stops[nextIdx][7] || []) : [];
     const clusters = (L.cl && L.cl.length) ? L.cl : L.mp.map(m => [[m[0], 0, 0]]);
     html += `<section class="card"><div class="card-h"><h2>The ground you cover</h2>
-        <span class="note">the walk in orange — numbered stops match the checklist below</span>
+        <span class="note">the walk in orange; your NEXT stretch marches in gold — stops match the checklist below</span>
         <span class="zoomctl">
           <button class="zoomb" data-zoom="fit" title="scale each map to fit the panel">fit</button>
           <button class="zoomb" data-zoom="1" title="one pixel per game pixel">1×</button>
@@ -1199,11 +1207,14 @@ function renderSecPanel(id, leg){
               title="${p.n}. ${esc(p.what || "")}">${p.n}</button>`;
           });
           const segs = segsByMap[name] || [];
-          if (!segs.length) return "";
+          const nowSegs = nextRuns.filter(r => r[0] === name).map(r => r[1]);
+          if (!segs.length && !nowSegs.length) return "";
           return `<g transform="translate(${ox * 16} ${oy * 16})">
             ${segs.map(cc => `<polyline class="rpath" points="${svgPath(cc)}"/>`).join("")}
             ${segs.map(cc => `<polyline class="rpath2" points="${svgPath(cc)}"/>`).join("")}
             ${segs.map(cc => svgArrows(cc)).join("")}
+            ${nowSegs.map(cc => `<polyline class="rnow0" points="${svgPath(cc)}"/>`).join("")}
+            ${nowSegs.map(cc => `<polyline class="rnow" points="${svgPath(cc)}"/>`).join("")}
           </g>`;
         }).join("");
         const clusterPins = members.flatMap(c => pinsByMap[c[0]] || [])
