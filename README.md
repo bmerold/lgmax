@@ -20,7 +20,7 @@ export LGMAX_POKEFIRERED=~/pokefirered      # optional; this is the default
 ```
 
 Python 3.10+, no third-party packages. Takes 6–8 minutes; `build.sh` runs the whole pipeline and
-finishes with `verify.py`, which must print 33 OKs. The output is `app.html` — one self-contained
+finishes with `verify.py`, which must print 35 OKs. The output is `app.html` — one self-contained
 file, ~6 MB, no server needed.
 
 ## What it does
@@ -64,7 +64,7 @@ them.
 | `render_maps.py` | renders each section's maps to PNG from the decomp's tilesets/layouts, and pins every trainer to the tile its object event stands on |
 | `sections.py` | two-pass per-section party optimizer + choice evaluation |
 | `compact.py` | array-encoded payload (~25 MB → ~5 MB) |
-| `verify.py` | **33 guard rails; all must pass after every rebuild** |
+| `verify.py` | **35 guard rails; all must pass after every rebuild** |
 | `setup_study.py` | standalone: does setting up beat hit-and-switch? (it does not) |
 
 `sections.py` runs before `optimize.py` because it writes `data/commitments.json`, which the
