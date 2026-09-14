@@ -424,12 +424,15 @@ button{font:inherit;color:inherit}
 #playObj .po-leg{font-size:11px;color:var(--ink-3);letter-spacing:.05em;text-transform:uppercase}
 #playObj .po-what{font-weight:700;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #playObj .po-plan{font-size:13px;color:var(--accent);font-weight:600;margin-top:3px}
-#playObj .po-desc{font-size:15.5px;color:var(--ink);font-weight:500;line-height:1.5;
-  max-width:980px;margin:6px 0 2px;padding:9px 13px;border-radius:0 10px 10px 0;
-  border-left:3px solid var(--accent);
+#playDesc{display:flex;justify-content:center;flex-shrink:0;padding:8px 14px;
+  background:var(--surface);border-bottom:1px solid var(--line)}
+#playDesc .po-desc{font-size:15.5px;color:var(--ink);font-weight:500;line-height:1.5;
+  max-width:940px;padding:9px 16px;border-radius:10px;
+  border:1px solid color-mix(in srgb, var(--accent) 35%, var(--line));
+  border-left:4px solid var(--accent);
   background:color-mix(in srgb, var(--accent) 7%, var(--surface-2))}
-#playObj .po-desc b{color:var(--ink);font-weight:700}
-#playObj .po-desc .fightlink{color:var(--accent);font-weight:700;text-decoration:underline dotted}
+#playDesc .po-desc b{color:var(--ink);font-weight:700}
+#playDesc .po-desc .fightlink{color:var(--accent);font-weight:700;text-decoration:underline dotted}
 #playPrev,#playNext,#playOutlineBtn{border:1px solid var(--line);border-radius:9px;
   background:var(--surface-2);color:var(--ink);font:600 13px/1 inherit;font-family:inherit;
   padding:10px 14px;cursor:pointer;flex-shrink:0}
@@ -574,6 +577,7 @@ details.notes[open] summary::after{content:"−"}
       <button id="playNext" title="mark done, next step (→)">done, next ›</button>
       <button id="playOutlineBtn" title="the whole journey">▤ journey</button>
     </div>
+    <div id="playDesc" hidden></div>
     <div id="playTeam"></div>
     <div id="playMap"><div id="playFit"></div></div>
     <div id="playDetail"></div>
@@ -2133,8 +2137,10 @@ function renderPlay(){
   el.innerHTML = `<div class="po-leg">${esc(label)} · step ${PLAY.node + 1}/${nodes.length}
       · ${doneCount}/${keys2.length} done · ${esc(kindLbl)}</div>
     <div class="po-what">${node && node.stop ? `${node.stopIdx + 1}. ` : ""}${esc(node ? node.label : "")}</div>
-    ${desc ? `<div class="po-desc">${desc}</div>` : ""}
     ${planLine ? `<div class="po-plan">${esc(planLine)}</div>` : ""}`;
+  const dEl = document.getElementById("playDesc");
+  dEl.hidden = !desc;
+  dEl.innerHTML = desc ? `<div class="po-desc">${desc}</div>` : "";
 
   renderPlayTeam(ctx);
   renderPlayMap(ctx);
@@ -2304,12 +2310,13 @@ function playAdvance(dir){
 document.getElementById("playNext").addEventListener("click", () => playAdvance(1));
 document.getElementById("playPrev").addEventListener("click", () => playAdvance(-1));
 /* links inside the objective description: fight matchups and node jumps */
-document.getElementById("playTop").addEventListener("click", ev => {
-  const j = ev.target.closest("[data-jumpnode]");
-  if (j){ PLAY.node = +j.dataset.jumpnode; renderPlay(); return; }
-  const f = ev.target.closest(".fightlink");
-  if (f && f.dataset.enc) openEncounter(f.dataset.enc, +f.dataset.n || null);
-});
+for (const holder of ["playTop", "playDesc"])
+  document.getElementById(holder).addEventListener("click", ev => {
+    const j = ev.target.closest("[data-jumpnode]");
+    if (j){ PLAY.node = +j.dataset.jumpnode; renderPlay(); return; }
+    const f = ev.target.closest(".fightlink");
+    if (f && f.dataset.enc) openEncounter(f.dataset.enc, +f.dataset.n || null);
+  });
 document.addEventListener("keydown", ev => {
   if (view !== "play" || !document.getElementById("playDrawer").hidden
       || !document.getElementById("playModal").hidden) return;
