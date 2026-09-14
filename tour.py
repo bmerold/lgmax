@@ -130,6 +130,24 @@ def renewable_items():
         if f and tier: out[f.group(1)] = tier
     return out
 
+def ambient_renewables():
+    """map -> [[x, y, item, tier]] for the renewable hidden items. These are
+    ABSENT by default: a new game sets every renewable flag, and only a map
+    entry with 1500+ steps on the counter re-rolls ONE rarity tier into
+    existence (60/30/10). They are shown as ambient spawn markers, never as
+    route stops -- a single pass usually finds nothing."""
+    renew = renewable_items()
+    out = collections.defaultdict(list)
+    for name, mj in R.maps().items():
+        if WD._map_stage(name) is None: continue
+        for b in mj.get("bg_events", []):
+            if b.get("type") != "hidden_item": continue
+            tier = renew.get(b.get("flag", ""))
+            if tier:
+                out[name].append([b.get("x", 0), b.get("y", 0),
+                                  pretty_item(b.get("item", "?")), tier])
+    return dict(out)
+
 def pretty_item(const):
     return const.replace("ITEM_", "").replace("_", " ").title().replace("Tm", "TM").replace("Hm", "HM")
 
@@ -149,13 +167,12 @@ def harvest():
                           "x": o.get("x", 0), "y": o.get("y", 0)})
         for b in mj.get("bg_events", []):
             if b.get("type") != "hidden_item": continue
-            node = {"kind": "hidden",
-                    "what": pretty_item(b.get("item", "?")),
-                    "map": name, "x": b.get("x", 0), "y": b.get("y", 0),
-                    "underfoot": bool(b.get("underfoot"))}
-            tier = renew.get(b.get("flag", ""))
-            if tier: node["renewable"] = tier
-            nodes.append(node)
+            if b.get("flag", "") in renew:
+                continue     # renewable: absent by default, never a stop
+            nodes.append({"kind": "hidden",
+                          "what": pretty_item(b.get("item", "?")),
+                          "map": name, "x": b.get("x", 0), "y": b.get("y", 0),
+                          "underfoot": bool(b.get("underfoot"))})
 
     # the overworld's fixed Pokémon, standing on their own tiles
     for name, mj in R.maps().items():
@@ -561,6 +578,7 @@ def solve(max_stage=34, verbose=True):
 def main():
     print("routing the whole game...", flush=True)
     out = solve()
+    out["renewables"] = ambient_renewables()
     with open(f"{OUT}/route.json", "w") as f:
         json.dump(out, f)
     print(f"\n  whole game: {out['stepTotal']} steps")

@@ -344,6 +344,11 @@ button{font:inherit;color:inherit}
 .side-row.next,.rt-row.next,.logrow.next{box-shadow:inset 3px 0 0 var(--accent);
   background:color-mix(in srgb, var(--accent) 6%, transparent)}
 .mark.next{z-index:3;outline:2px solid #fff;box-shadow:0 0 0 4px var(--accent),0 1px 5px rgba(0,0,0,.55)}
+.mark.amb{background:rgba(46,125,70,.7);border-style:dashed;cursor:help;font-size:10px;
+  transform:translate(-50%,-50%)}
+.mark.amb:hover{transform:translate(-50%,-50%)}
+.side-amb{padding:8px 10px;font-size:11px;line-height:1.4;color:var(--ink-3);
+  border-top:1px dashed var(--line)}
 .prog b{color:var(--good)}
 .railok{color:var(--good);font-weight:600}
 .backguide{display:inline-block;margin:0 0 10px;border:1px solid var(--line);border-radius:8px;
@@ -1228,6 +1233,25 @@ function renderSecPanel(id, leg){
         }).join("");
         const clusterPins = members.flatMap(c => pinsByMap[c[0]] || [])
                                    .sort((a, b) => a.n - b.n);
+        const ambByMap = {};
+        (L.amb || []).forEach(a => (ambByMap[a[0]] = ambByMap[a[0]] || []).push(a));
+        let ambPins = "", ambSummary = {};
+        members.forEach(c => {
+          const [name, ox, oy] = c;
+          (ambByMap[name] || []).forEach(a => {
+            const item = str(a[3]), tier = str(a[4]);
+            ambPins += `<span class="mark amb"
+              style="left:${(ox + a[1] + 0.5) * 16}px;top:${(oy + a[2] + 0.5) * 16}px"
+              title="${esc(item)} — renewable spawn, ${RENEW_ODDS[tier] || "?"} tier; absent until a re-roll (enter the map with 1,500+ steps walked)">✦</span>`;
+            const k2 = `${item} (${RENEW_ODDS[tier] || "?"})`;
+            ambSummary[k2] = (ambSummary[k2] || 0) + 1;
+          });
+        });
+        const ambNote = Object.keys(ambSummary).length
+          ? `<div class="side-amb">✦ Renewable spawns — usually absent; one rarity tier
+              re-rolls when you enter with 1,500+ steps walked: ${
+              Object.entries(ambSummary).map(([k2, n2]) =>
+                esc(k2) + (n2 > 1 ? ` ×${n2}` : "")).join(" · ")}</div>` : "";
         return `<div class="maph">${esc(shown)}
             <span class="note">${nPins ? nPins + " stop" + (nPins === 1 ? "" : "s") : "just the walk"}</span></div>
           <div class="mapblock">
@@ -1237,9 +1261,9 @@ function renderSecPanel(id, leg){
                 style="left:${c[1] * 16}px;top:${c[2] * 16}px"
                 alt="Map of ${esc(c[0])}" loading="lazy">`).join("")}
             <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${svgs}</svg>
-            ${pinsHtml}
+            ${pinsHtml}${ambPins}
           </div></div></div>
-          ${clusterPins.length ? `<aside class="mapside">${clusterPins.map(sideRow).join("")}</aside>` : ""}
+          ${clusterPins.length || ambNote ? `<aside class="mapside">${clusterPins.map(sideRow).join("")}${ambNote}</aside>` : ""}
           </div>`;
       }).join("")}
     </section>`;

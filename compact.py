@@ -321,6 +321,9 @@ def main():
                 mp = s["map"]
                 if mp in mapart["maps"] and mp not in seq: seq.append(mp)
             used_maps.update(seq)
+            ambient = route.get("renewables", {})
+            amb = [[mp, a[0], a[1], S(a[2]), S(a[3])]
+                   for mp in seq for a in ambient.get(mp, [])]
             out.append({
                 "ti": S(leg["title"]), "hz": S(leg.get("endsAt")),
                 "cold": 1 if leg.get("cold") else 0,
@@ -332,6 +335,7 @@ def main():
                 "team": [member_row(t) for t in leg["team"]],
                 "log": [log_row(l) for l in merged],
                 "rt": [pack_stop(s) for s in stops],
+                "amb": amb,
                 "mp": [[mp, segs.get(mp, [])] for mp in seq],
                 "cl": clusters_of(seq),
             })
