@@ -43,6 +43,15 @@ MB_WATERFALL = 0x13
 # puzzle that stills them is not state-modelled
 MB_CURRENT = {0x50, 0x51, 0x52, 0x53}
 SURFABLE = set(HM.SURFABLE_MB) | MB_CURRENT | {MB_WATERFALL}
+# Directional walls: MB_IMPASSABLE_* tiles have collision 0 but block
+# movement across one edge -- Mt. Moon's ridge strips are exactly these.
+# Moving in a direction is blocked if the SOURCE tile walls that edge or the
+# DESTINATION tile walls the opposite edge (IsMetatileDirectionallyImpassable).
+_BLOCK_N = {0x32, 0x34, 0x35}
+_BLOCK_S = {0x33, 0x36, 0x37}
+_BLOCK_E = {0x30, 0x34, 0x36}
+_BLOCK_W = {0x31, 0x35, 0x37}
+
 # Cycling Road (0xD0/0xD1) pulls you south when coasting, but bike.c has a
 # real BIKE_TRANS_UPHILL for it -- pedalling up is allowed, so those tiles
 # are ordinary ground to the router.
@@ -315,6 +324,13 @@ def _tile_open(g, x, y, stage, surf_ok):
         return surf_ok
     return g.c(x, y) == 0
 
+def _edge_ok(src_beh, dst_beh, dx, dy):
+    if dy > 0:  return src_beh not in _BLOCK_S and dst_beh not in _BLOCK_N
+    if dy < 0:  return src_beh not in _BLOCK_N and dst_beh not in _BLOCK_S
+    if dx > 0:  return src_beh not in _BLOCK_E and dst_beh not in _BLOCK_W
+    if dx < 0:  return src_beh not in _BLOCK_W and dst_beh not in _BLOCK_E
+    return True
+
 def _elev_ok(g, x, y, gn, nx, ny):
     """The game blocks walking between mismatched elevations even where
     collision is clear -- a raised platform's cliff edge (the Mt. Moon fossil
@@ -380,6 +396,8 @@ def neighbours(node, stage):
             if slide: out.append((slide[0], 1 + slide[1]))
             continue
         if _tile_open(g, nx, ny, stage, surf):
+            if not _edge_ok(g.b(x, y), beh, dx, dy):
+                continue
             if (_elev_ok(g, x, y, g, nx, ny)
                     or g.b(x, y) in SURFABLE or beh in SURFABLE
                     or (nx, ny) in g.warp_tiles or (x, y) in g.warp_tiles):

@@ -60,23 +60,49 @@ def trainer_tiles():
     `trainerbattle_*` line naming the trainer. Joining the two puts every
     trainer on the tile it is standing on.
     """
-    label_to_trainer = {}
+    bodies = {}
     for path in glob.glob(f"{REPO}/data/maps/*/scripts.inc") + \
                 glob.glob(f"{REPO}/data/scripts/*.inc"):
         txt = open(path, encoding="utf-8", errors="replace").read()
         cur = None
         for line in txt.splitlines():
             lm = re.match(r"^(\w+)::", line)
-            if lm: cur = lm.group(1); continue
+            if lm: cur = lm.group(1); bodies.setdefault(cur, []); continue
+            if cur: bodies[cur].append(line)
+    label_to_trainer = {}
+    for lbl, body in bodies.items():
+        for line in body:
             tb = re.search(r"trainerbattle\w*\s+(TRAINER_[A-Z0-9_]+)", line)
-            if tb and cur and cur not in label_to_trainer:
-                label_to_trainer[cur] = tb.group(1)
+            if tb:
+                label_to_trainer[lbl] = tb.group(1); break
+    # a battle reached through call/goto still belongs to the object's own
+    # script -- Miguel's object calls EventScript_BattleMiguel for the fight
+    for _ in range(3):
+        changed = False
+        for lbl, body in bodies.items():
+            if lbl in label_to_trainer: continue
+            for line in body:
+                for ref in re.findall(r"[A-Za-z0-9_]\w{5,}", line):
+                    if ref in label_to_trainer:
+                        label_to_trainer[lbl] = label_to_trainer[ref]
+                        changed = True; break
+                if lbl in label_to_trainer: break
+        if not changed: break
+    # direct battles first; talk-initiated fights (trainer_type NONE, like
+    # Super Nerd Miguel guarding the fossils) resolve through their script
+    # too, but must not steal a tile from the trainer who fights on sight
+    direct = set()
+    for lbl, body in bodies.items():
+        if any(re.search(r"trainerbattle\w*\s+TRAINER_", ln) for ln in body):
+            direct.add(lbl)
     out = {}
-    for name, mj in maps().items():
-        for o in mj.get("object_events", []):
-            if o.get("trainer_type", "TRAINER_TYPE_NONE") == "TRAINER_TYPE_NONE": continue
-            t = label_to_trainer.get(o.get("script"))
-            if t and t not in out:
+    for pass_direct in (True, False):
+        for name, mj in maps().items():
+            for o in mj.get("object_events", []):
+                lbl = o.get("script")
+                t = label_to_trainer.get(lbl)
+                if not t or t in out: continue
+                if (lbl in direct) != pass_direct: continue
                 out[t] = (name, o.get("x", 0), o.get("y", 0))
     return out
 

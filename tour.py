@@ -52,7 +52,7 @@ EVENTS = [
     ("Deliver the Parcel — Pokédex from Oak", "PalletTown_ProfessorOaksLab", 1),
     ("Town Map from Daisy", "PalletTown_RivalsHouse", 1, "Daisy"),
     ("Old Amber from the scientist", "PewterCity_Museum_1F", 4, "OldAmberScientist"),
-    ("Helix or Dome Fossil (pick one)", "MtMoon_B2F", 5),
+    ("Helix or Dome Fossil (pick one)", "MtMoon_B2F", 5, "Fossil"),
     ("Buy the Magikarp (500)", "Route4_PokemonCenter_1F", 6),
     ("S.S. Ticket from Bill", "Route25_SeaCottage", 7, "Bill"),
     ("Bike Voucher from the Fan Club", "VermilionCity_PokemonFanClub", 9),
