@@ -32,8 +32,12 @@ def set_tm_plan(scarce, owners):
     TM_OWNER.update({m: set(v) for m, v in (owners or {}).items()})
     _pool_cache.clear()
 
-def tm_allowed(move, species):
-    if move not in SCARCE_TM: return True      # HM, shop TM, or a level-up move
+def tm_allowed(move, species, stage=None):
+    rec = SCARCE_TM.get(move)
+    if rec is None: return True                # HM, shop-only TM, or a level-up move
+    ss = rec.get("shopStage")
+    if ss is not None and stage is not None and stage >= ss:
+        return True                            # buyable again -- no owner needed
     owners = TM_OWNER.get(move)
     if owners is None: return True             # no plan in force yet
     return species in owners
@@ -60,7 +64,7 @@ def move_pool(species, level, stage):
         m = E.MOVES.get(mv)
         if not m: continue
         if m["effect"] in E.UNUSABLE_EFFECTS: continue
-        if not tm_allowed(mv, species): continue
+        if not tm_allowed(mv, species, stage): continue
         if m["power"] > 0 or m["effect"] in ("DRAGON_RAGE", "SONICBOOM",
                                              "LEVEL_DAMAGE", "PSYWAVE", "SUPER_FANG"):
             dmg.append(mv)

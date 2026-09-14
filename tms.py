@@ -161,7 +161,19 @@ def scarce_moves(supply):
     out = {}
     for item, rec in supply.items():
         if not rec["obtainable"]: continue
-        if rec["copies"] is None: continue        # shop-stocked, effectively free
+        if rec["copies"] is None:
+            # Dept.-store TMs are unlimited -- but only once the shop opens.
+            # Before that stage the run holds exactly its finite copies (the
+            # Cerulean TM28, the S.S. Anne TM31...), so they are scarce until
+            # then and free afterwards.
+            pre = [s for s in rec["sources"] if s["kind"] != "shop"]
+            if not pre: continue      # shop-only: the stage gate already covers it
+            out[rec["move"]] = {"item": item, "copies": len(pre),
+                                "earliest": rec["earliest"], "name": rec["name"],
+                                "repeatable": True, "coinCost": rec["coinCost"],
+                                "shopStage": min(s["stage"] for s in rec["sources"]
+                                                 if s["kind"] == "shop")}
+            continue
         out[rec["move"]] = {"item": item, "copies": rec["copies"],
                             "earliest": rec["earliest"], "name": rec["name"],
                             "repeatable": rec["repeatable"], "coinCost": rec["coinCost"]}

@@ -159,7 +159,12 @@ for starter, per_stage in raw["sections"].items():
             sp = NAME_TO_SPECIES.get(t["name"])
             for mv in t["moves"]:
                 const = MOVE_BY_NAME.get(mv["name"])
-                if const and const in scarce and sp not in owned.get(const, set()):
+                if not const or const not in scarce: continue
+                # a level-up copy of the move spends nothing
+                if (mv.get("src") or "").split()[0] in ("start", "Lv"): continue
+                ss = scarce[const].get("shopStage")
+                if ss is not None and int(st) >= ss: continue   # buyable now
+                if sp not in owned.get(const, set()):
                     unassigned.append((starter, int(st), t["name"], mv["name"]))
 check("no party knows a single-use TM move it was not given",
       not unassigned, str(unassigned[:4]))
@@ -319,6 +324,7 @@ want = collections.Counter((n["kind"], n["what"], n["map"]) for n in route_nodes
 got = collections.Counter()
 for st in routej["stages"]:
     for s in st["steps"]:
+        if s["kind"] == "heal": continue    # deliberate Center detours, not harvest nodes
         got[(s["kind"], s["what"], s["map"])] += 1
 check("the route visits every stop exactly once", want == got,
       str(list(((want - got) + (got - want)).items())[:3]))
@@ -435,6 +441,29 @@ for starter, per_stage in raw["sections"].items():
             _short.append((starter, int(st), sorted(_ever)))
 check("no party uses more Moon Stone evolutions than stones held",
       not _short, str(_short[:4]))
+
+# ------------------------------------------------------------------ TM supply
+# A single-use TM can only be taught to as many Pokemon as copies exist -- and
+# a Dept.-store TM (Dig, Brick Break, Secret Power) has only its finite gift
+# copies until the Celadon shop opens at stage 15. The `tm` marker on a team
+# move means "this run spends that TM here", already gated to the scarce window.
+import tms as _TM
+_scarce_tm = _TM.scarce_moves(json.load(open(f"{OUT}/tmSupply.json")))
+_copies_of = {r["item"]: r["copies"] for r in _scarce_tm.values()}
+_over = []
+for run, per_stage in raw["sections"].items():
+    _spent = collections.defaultdict(set)
+    for st, sec in per_stage.items():
+        if not sec: continue
+        for t in sec["team"]:
+            for mv in t["moves"]:
+                if mv.get("tm"): _spent[mv["tm"]].add(t["species"])
+    for item, sps in _spent.items():
+        cop = _copies_of.get(item)
+        if cop is not None and len(sps) > cop:
+            _over.append((run, item, sorted(sps), cop))
+check("no run spends more copies of a single-use TM than it holds",
+      not _over, str(_over[:4]))
 
 # ------------------------------------------------------------------ graph sanity
 graph = json.load(open(f"{OUT}/encounters.json"))

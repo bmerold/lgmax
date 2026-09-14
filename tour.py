@@ -455,6 +455,101 @@ def corners(path):
     if len(path) > 1: out.append(path[-1])
     return out
 
+# ------------------------------------------------------------------ deliberate heals
+# The walk only records a heal when it happens to pass a Pokémon Center; it
+# never *seeks* one. A player does: after a fight arc, heal in town before the
+# next one. So each stage that opens with fights still owed gets one cheap
+# detour — the walk to its first trainer is re-routed past the nearest open
+# Center door when that costs at most HEAL_DETOUR_MAX extra steps (the full
+# round trip through the Center runs 40-ish steps even for a door en route).
+HEAL_DETOUR_MAX = 60
+
+_CENTER_DOORS = None
+def center_doors():
+    """Outdoor door tile of every Pokémon Center, per map."""
+    global _CENTER_DOORS
+    if _CENTER_DOORS is None:
+        _CENTER_DOORS = {}
+        for nm, mj in R.maps().items():
+            for w in mj.get("warp_events", []):
+                dm = w.get("dest_map") or ""
+                if "_POKEMON_CENTER" in dm and dm.endswith("_1F"):
+                    _CENTER_DOORS.setdefault(nm, []).append((w.get("x", 0), w.get("y", 0)))
+    return _CENTER_DOORS
+
+def _passes_heal(step):
+    """Mirror of sections._step_heal, on this route step: a flight, a Center
+    interior, or any walked tile within 4 of a Center door."""
+    if step.get("fly"): return True
+    doors = center_doors()
+    prev = None
+    for m, x, y in step["path"]:
+        if "PokemonCenter" in m: return True
+        if prev and prev[0] == m:
+            n = max(abs(x - prev[1]), abs(y - prev[2]), 1)
+            pts = [(round(prev[1] + (x - prev[1]) * t / n),
+                    round(prev[2] + (y - prev[2]) * t / n)) for t in range(n + 1)]
+        else:
+            pts = [(x, y)]
+        for px, py in pts:
+            for wx, wy in doors.get(m, ()):
+                if max(abs(px - wx), abs(py - wy)) <= 4: return True
+        prev = (m, x, y)
+    return False
+
+def insert_heal(steps, stage, start_pos, fought_in):
+    """Re-route one hop of this stage's walk past a Center door, if the stage
+    has a trainer coming, the party has fought since its last heal, and the
+    detour is cheap. Returns the added step count (0 if nothing changed)."""
+    ft = next((k for k, s in enumerate(steps) if s["kind"] == "trainer"), None)
+    if ft is None: return 0
+    fought = fought_in
+    for s in steps[:ft]:
+        if _passes_heal(s): fought = False
+        if s["kind"] in ("trainer", "catch"): fought = True
+    if not fought: return 0
+
+    door_tiles = [(m, x, y) for m, xys in center_doors().items()
+                  if WD._open_map(m, stage) for x, y in xys]
+    if not door_tiles: return 0
+    best = None       # (detour, k, door)
+    for k in range(ft + 1):
+        s = steps[k]
+        if s.get("fly"): continue          # flying already lands at a Center
+        a = start_pos if k == 0 else (steps[k-1]["map"],
+                                      steps[k-1]["at"][0], steps[k-1]["at"][1])
+        a = WD.reach_tile(a, stage)
+        b = WD.reach_tile((s["map"], s["at"][0], s["at"][1]), stage)
+        da = WD.bfs(a, stage, targets=set(door_tiles))
+        near = sorted((d, t) for t, d in ((t, da[t]) for t in door_tiles if t in da))[:3]
+        for d_at, door in near:
+            db = WD.bfs(door, stage, targets={b})
+            if b not in db: continue
+            detour = d_at + db[b] - s["walk"]
+            if detour >= 0 and (best is None or detour < best[0]):
+                best = (detour, k, door)
+    if best is None or best[0] > HEAL_DETOUR_MAX: return 0
+
+    detour, k, door = best
+    s = steps[k]
+    a = start_pos if k == 0 else (steps[k-1]["map"],
+                                  steps[k-1]["at"][0], steps[k-1]["at"][1])
+    a = WD.reach_tile(a, stage)
+    b = WD.reach_tile((s["map"], s["at"][0], s["at"][1]), stage)
+    p1 = WD.path_between(a, door, stage)
+    p2 = WD.path_between(door, b, stage)
+    if not p1 or not p2: return 0
+    # the heal is its own stop, so the guide can say "heal here" out loud
+    steps.insert(k, {
+        "kind": "heal",
+        "what": f"Heal up — {G.pretty_location(door[0])} Pokémon Center",
+        "map": door[0], "at": [door[1], door[2]],
+        "walk": len(p1) - 1,
+        "path": [[m, x, y] for m, x, y in corners(p1)]})
+    s["path"] = [[m, x, y] for m, x, y in corners(p2)]
+    s["walk"] = len(p2) - 1
+    return detour
+
 # ------------------------------------------------------------------ the run
 INF = 1 << 30
 
@@ -465,6 +560,7 @@ def solve(max_stage=34, verbose=True):
     pending = list(nodes)
     pos = WD.spawn()
     route, total = [], 0
+    fought_since_heal = False
 
     for stage in range(0, max_stage + 1):
         due = [n for n in pending if n["_st"] <= stage]
@@ -553,6 +649,10 @@ def solve(max_stage=34, verbose=True):
             if n.get("species"): step["species"] = n["species"]
             steps.append(step)
             cur, prev_idx = tgt, oi
+        cost += insert_heal(steps, stage, pos, fought_since_heal)
+        for s in steps:
+            if _passes_heal(s): fought_since_heal = False
+            if s["kind"] in ("trainer", "catch"): fought_since_heal = True
         route.append({"stage": stage, "steps": steps,
                       "stepTotal": int(cost),
                       "startsAt": [pos[0], pos[1], pos[2]],

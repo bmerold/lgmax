@@ -560,12 +560,15 @@ RELEARNER_STAGE = 28        # the Move Maniac, Two Island House
 HM_HELD = defaultdict(set)  # species -> HM moves it is stuck with, this run
 def reset_hm_held(): HM_HELD.clear()
 
-REPEATABLE_TM = {}          # move const -> item, for TMs you can buy again
+REPEATABLE_TM = {}          # move const -> (item, stage the shop opens)
 def set_repeatable(supply):
     REPEATABLE_TM.clear()
     for item, v in (supply or {}).items():
         if v.get("obtainable") and v.get("repeatable") and v.get("move"):
-            REPEATABLE_TM[v["move"]] = item
+            shops = [s["stage"] for s in v.get("sources", [])
+                     if s.get("kind") in ("shop", "Game Corner")
+                     and s.get("stage") is not None]
+            REPEATABLE_TM[v["move"]] = (item, min(shops) if shops else 0)
 
 def move_recovery(species, move, level, stage):
     """If an HM takes this move's slot, can you ever get the move back?
@@ -581,8 +584,9 @@ def move_recovery(species, move, level, stage):
     levelup = move in E.learnable_by(species, level)
     if levelup and stage >= RELEARNER_STAGE:
         return (0, "relearnable now from the Move Maniac on Two Island")
-    if move in REPEATABLE_TM:
-        return (1, f"{REPEATABLE_TM[move].replace('ITEM_', '')} can be bought again")
+    rep = REPEATABLE_TM.get(move)
+    if rep and stage >= rep[1]:
+        return (1, f"{rep[0].replace('ITEM_', '')} can be bought again")
     if levelup:
         return (2, "a level-up move — the Move Maniac on Two Island can put it "
                    "back once you reach the Sevii Islands")
@@ -945,7 +949,7 @@ def plan_vs(team, opp, badges, active):
     return best
 
 def run_section(team, battles, badges, heal_after_idx, tm_value=None,
-                carry=None):
+                carry=None, stage=None):
     """Walk the section with one party, no items. Returns a full ledger.
     `carry` seeds members with the HP and PP they ended the previous section
     on, for the stage boundaries the game leaves unhealed."""
@@ -1007,7 +1011,8 @@ def run_section(team, battles, badges, heal_after_idx, tm_value=None,
                     active = m
                 total_turns += turns
                 if enc["kind"] == "wild": wild_turns += turns
-                if tm_value is not None and p["move"] in SCARCE:
+                if (tm_value is not None and p["move"] in SCARCE
+                        and scarce_spend(p["move"], stage)):
                     a = alt_turns(m, opp, badges, p["move"])
                     # no fallback at all means the TM is the only answer here
                     gain = (12.0 if a is None else max(0.0, a - p["turns"]))
@@ -1062,6 +1067,16 @@ def score(res):
 
 # ------------------------------------------------------------------ solve one section
 SCARCE = {}       # move const -> supply record; filled in from tms.py
+
+def scarce_spend(mv, stage):
+    """The TM item this move spends at this stage, or None once the Celadon
+    shop makes more copies purchasable (a repeatable TM stops being scarce
+    the stage its shop opens)."""
+    rec = SCARCE.get(mv)
+    if not rec: return None
+    ss = rec.get("shopStage")
+    if ss is not None and stage is not None and stage >= ss: return None
+    return rec["item"]
 
 def collapse_wild(log):
     """Dozens of one-Pokemon wild rows read as noise; one row per map reads as
@@ -1167,7 +1182,9 @@ def _leg_member(m, md, avail, stage):
         "obtainedAt": rec["stage"], "obtainedVia": rec["source"],
         "newHere": rec["stage"] == stage,
         "moves": [{"name": E.MOVES[mv]["name"],
-                   "tm": SCARCE.get(mv, {}).get("item"),
+                   "tm": (None if move_origin(m.species, m.level, mv)
+                          .split()[0] in ("start", "Lv")
+                          else scarce_spend(mv, stage)),
                    "src": move_origin(m.species, m.level, mv),
                    "type": E.move_type_for(m.mon, mv),
                    "power": E.nominal_power(m.mon, mv),
@@ -1337,7 +1354,8 @@ def solve_section(stage, encs, starter, avail, tm_value=None, carry=None):
                                    starter, held_roots, held_groups, chosen)
     for m in hm_extra:
         team.append(m); chosen.append(m.species)
-    final = run_section(team, battles, badges, heal_idx, tm_value, carry=carry)
+    final = run_section(team, battles, badges, heal_idx, tm_value, carry=carry,
+                        stage=stage)
 
     # ---- bench: strong candidates that didn't make the cut
     bench = []
@@ -1375,7 +1393,9 @@ def solve_section(stage, encs, starter, avail, tm_value=None, carry=None):
             "obtainedAt": rec["stage"], "obtainedVia": rec["source"],
             "newHere": rec["stage"] == stage,
             "moves": [{"name": E.MOVES[mv]["name"],
-                       "tm": SCARCE.get(mv, {}).get("item"),
+                       "tm": (None if move_origin(m.species, m.level, mv)
+                              .split()[0] in ("start", "Lv")
+                              else scarce_spend(mv, stage)),
                        "src": move_origin(m.species, m.level, mv),
                        "type": E.move_type_for(m.mon, mv),
                        "power": E.nominal_power(m.mon, mv),
@@ -1521,6 +1541,7 @@ def assign_tms(tm_value, scarce):
                 "move": mv, "name": scarce[mv]["name"], "item": scarce[mv]["item"],
                 "copies": copies, "earliest": scarce[mv]["earliest"],
                 "coinCost": scarce[mv]["coinCost"],
+                "shopStage": scarce[mv].get("shopStage"),
                 "teach": [{"species": sp, "name": E.SPECIES[sp]["name"], "value": v}
                           for sp, v in picked],
                 "runnersUp": [{"name": n, "value": v} for n, v in runners],
