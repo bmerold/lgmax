@@ -251,6 +251,7 @@ def team_sprites():
             for sec in per.values():
                 if not sec: continue
                 for t in sec.get("team", []): species.add(t["species"])
+                for p in sec.get("partyPlan", []): species.add(p["species"])
                 for leg in sec.get("legs", []):
                     for t in leg.get("team", []): species.add(t["species"])
     sdir = os.path.join(ART, "sprites")

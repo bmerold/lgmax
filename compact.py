@@ -363,6 +363,12 @@ def main():
                 "keep": [[S(k["name"]), k["next"], S(k["nextName"]), k["nextLevel"],
                           k["gap"], k["times"], S(k["why"]), S(k.get("becomes"))]
                          for k in sec.get("keep", [])],
+                # full six-slot party: [name, role 0 fight/1 hm/2 next,
+                #                       hmMoves, nextStage, level, becomes]
+                "pp": [[S(p["name"]), {"fight": 0, "hm": 1, "next": 2}[p["role"]],
+                        [S(h) for h in p["hms"]], p.get("nextStage", 0), p["level"],
+                        S(p.get("becomes"))]
+                       for p in sec.get("partyPlan", [])],
                 "bench": [bench_row(b) for b in sec["bench"]],
                 "legs": leg_rows(sec, int(stage)),
             }

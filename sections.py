@@ -1164,6 +1164,44 @@ def _pre_evo(species):
                 _PRE_EVO.setdefault(ev["to"], frm)
     return _PRE_EVO.get(species)
 
+def build_party_plans(per_stage, avail):
+    """A full six-slot party for every section: the section's own roster first
+    (fighters, then pure HM carriers), then the seats filled with the already-
+    caught Pokémon the run will need soonest, so nothing that matters later
+    sits in the PC. Attached to each section as `partyPlan`."""
+    hm_names = {E.MOVES[mv]["name"] for mv in HM.HM_MOVE.values()}
+    ids = sorted(per_stage)
+    for i, st in enumerate(ids):
+        sec = per_stage[st]
+        if not sec: continue
+        plan, seen = [], set()
+        for m in sec["team"]:
+            used = sum(mv["used"] for mv in m["moves"])
+            hms = [mv["name"] for mv in m["moves"] if mv["name"] in hm_names]
+            plan.append({"species": m["species"], "name": m["name"],
+                         "level": m["level"], "hms": hms,
+                         "role": "hm" if hms and used == 0 else "fight"})
+            seen.add(m["species"])
+        for st2 in ids[i + 1:]:
+            if len(plan) >= 6: break
+            sec2 = per_stage[st2]
+            if not sec2: continue
+            for m2 in sec2["team"]:
+                if len(plan) >= 6: break
+                sp = m2["species"]
+                # the future form may not exist yet -- you carry the form you
+                # actually own (Spearow now, because it becomes Fearow)
+                form = sp
+                while form and avail.get(form, {}).get("stage", 99) > st:
+                    form = _pre_evo(form)
+                if not form or form in seen or sp in seen: continue
+                seen.add(sp); seen.add(form)
+                plan.append({"species": form, "name": E.SPECIES[form]["name"],
+                             "level": m2["level"], "hms": [],
+                             "role": "next", "nextStage": st2,
+                             "becomes": m2["name"] if form != sp else None})
+        sec["partyPlan"] = plan
+
 def move_origin(species, level, mv):
     """Where this specimen got the move: its own level-up learnset first
     (that is how move_pool found it too), else the TM/HM that teaches it,
@@ -1833,6 +1871,7 @@ if __name__ == "__main__":
                     stage, sections.get(stage, []), starter, avail,
                     carry=carry if stage in cold_stage_starts() else None)
                 carry = (result[starter][stage] or {}).get("carryOut") or carry
+            build_party_plans(result[starter], avail)
             print(f"  {starter}: re-solved — {sum(len(p['teach']) for p in plan)} "
                   f"single-use TMs spent ({time.time()-t0:.0f}s)", flush=True)
         O.set_tm_plan(SCARCE, None)

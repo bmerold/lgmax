@@ -240,6 +240,12 @@ button{font:inherit;color:inherit}
 
 /* ---------- party ---------- */
 .party{display:grid;grid-template-columns:repeat(auto-fill,minmax(268px,1fr));gap:12px;padding:14px 16px}
+.pp-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:0 16px 14px}
+.pp-chip{font-size:12px;font-weight:600;border:1px solid var(--line);border-radius:99px;
+  padding:3px 10px;background:var(--surface-2)}
+.pp-chip span{font-weight:500;color:var(--ink-2);font-size:11px}
+.pp-chip.r0{border-color:var(--accent)}
+.pp-chip.r2{opacity:.75}
 .pm{border:1px solid var(--line);border-radius:9px;background:var(--surface-2);
     padding:12px 13px;display:flex;flex-direction:column;gap:9px}
 .pm-h{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
@@ -435,6 +441,14 @@ button{font:inherit;color:inherit}
 .pt-mon img{width:48px;height:48px;image-rendering:pixelated;display:block;margin:0 auto}
 .pt-mon .pt-left{display:flex;flex-direction:column;align-items:center;flex-shrink:0}
 .pt-mon .pt-l{font-size:10px;color:var(--ink-2);font-weight:600;display:block;margin-top:-4px}
+.pt-mon.fgt{background:var(--surface-2);box-shadow:inset 0 0 0 1.5px var(--accent)}
+.pt-mon.hm img{filter:saturate(.55)}
+.pt-mon.nxt{opacity:.72}
+.pt-mon.nxt img{filter:grayscale(.7)}
+.pt-tag{font-size:8px;font-weight:700;letter-spacing:.06em;color:#fff;
+  background:var(--ink-2);border-radius:4px;padding:1px 4px;margin-top:1px}
+.pt-tag.nxt{background:var(--accent)}
+.pt-role{font-size:9.5px;color:var(--ink-2);white-space:nowrap}
 .pt-mon .pt-mv{display:flex;flex-direction:column;gap:1px}
 .pt-mon .pt-m{font-size:10px;color:var(--ink);white-space:nowrap;line-height:1.25;
   display:flex;align-items:baseline;gap:4px;justify-content:space-between}
@@ -1250,7 +1264,17 @@ function renderSecPanel(id, leg){
       <span class="note">${size < 6
         ? size + " is enough to clear this section; more bodies don't make it faster"
         : "all six earn their slot here"}</span></div>
-    <div class="party">${L.team.map(partyCard).join("")}</div></section>` + prep;
+    <div class="party">${L.team.map(partyCard).join("")}</div>
+    ${(d.pp || []).length ? `<div class="pp-row"><span class="note">Full six-slot party for this stretch:</span>
+      ${(d.pp || []).map(p => {
+        const nm = str(p[0]), role = p[1];
+        const lab = role === 1 ? `HM: ${(p[2] || []).map(x => str(x)).join(", ")}`
+                  : role === 2 ? `next — section ${p[3]}` : "fights here";
+        return `<span class="pp-chip r${role}" title="${role === 2
+          ? esc(`not needed here; next used in ${p[3]}. ${(STAGE_BY_ID[p[3]] || {}).name || ""} at L${p[4]}`)
+          : role === 1 ? esc(`${nm} only carries field moves this stretch`)
+          : esc(`${nm} answers opponents this section`)}">${esc(nm)} <span>${esc(lab)}</span></span>`;
+      }).join("")}</div>` : ""}</section>` + prep;
 
   /* ---- one set of maps: the route's walk plus every numbered stop ---- */
   const pinsByMap = {};
@@ -2117,22 +2141,46 @@ function renderPlay(){
 
 function renderPlayTeam(ctx){
   const el = document.getElementById("playTeam");
-  el.innerHTML = (ctx.L.team || []).map((t, i) => {
-    const nm = str(t[0]);
+  const team = ctx.L.team || [];
+  // the full six-slot plan: this section's roster (fighters, then pure HM
+  // carriers), then the already-caught Pokémon the run needs soonest
+  const pp = (ctx.d && ctx.d.pp && ctx.d.pp.length)
+    ? ctx.d.pp : team.map(t => [t[0], 0, [], 0, t[2]]);
+  const byName = {};
+  team.forEach((t, i) => byName[str(t[0])] = i);
+  el.innerHTML = pp.map(p => {
+    const nm = str(p[0]), role = p[1], hms = (p[2] || []).map(x => str(x)),
+          nextSt = p[3], lvl = p[4];
+    const i = byName[nm], t = i != null ? team[i] : null;
     const spr = SPRITES[nm];
-    const moves = t[9] || [];
-    return `<button class="pt-mon" data-mem="${i}" title="${esc(nm)} — full PP and HP ledger">
+    const roleCls = role === 1 ? " hm" : role === 2 ? " nxt" : " fgt";
+    const moves = t ? (t[9] || []) : [];
+    const body = t
+      ? `<span class="pt-mv">${moves.map(m => {
+          const src = str(m[9] || "");
+          return `<span class="pt-m">${esc(str(m[0]))}${
+            src ? `<span class="msrc" title="${esc(moveSrcTitle(src))}">${esc(src)}</span>` : ""}</span>`;
+        }).join("")}</span>`
+      : role === 2
+      ? `<span class="pt-mv"><span class="pt-role">next: ${nextSt
+            ? esc(nextSt + ". " + ((STAGE_BY_ID[nextSt] || {}).name || "")) : "later"}</span>
+          <span class="pt-role">${str(p[5]) ? `becomes ${esc(str(p[5]))} · ` : "fights there at "}L${lvl}</span></span>`
+      : `<span class="pt-mv">${hms.map(h => `<span class="pt-m">${esc(h)}</span>`).join("")}
+          <span class="pt-role">${role === 1 ? "field moves only" : "reserve this stretch"}</span></span>`;
+    const tag = role === 1 ? `<span class="pt-tag">HM</span>`
+              : role === 2 ? `<span class="pt-tag nxt">SOON</span>` : "";
+    const title = role === 1
+      ? `${nm} — carried for ${hms.join(" + ") || "the field"}; it never fights here`
+      : role === 2
+      ? `${nm} — fills the party; ${str(p[5]) ? `evolves into ${str(p[5])} and ` : ""}next used in section ${nextSt} at L${lvl}`
+      : `${nm} — needed for this section's fights`;
+    return `<button class="pt-mon${roleCls}"${t ? ` data-mem="${i}"` : ""} title="${esc(title)}">
       <span class="pt-left">
         ${spr ? `<img src="data:image/png;base64,${spr}" alt="${esc(nm)}">`
               : `<span style="font-size:26px">◓</span>`}
-        <span class="pt-l">${esc(nm)} · L${t[2]}</span>
+        <span class="pt-l">${esc(nm)}${role === 2 ? "" : " · L" + lvl}</span>${tag}
       </span>
-      <span class="pt-mv">${moves.map(m => {
-        const src = str(m[9] || "");
-        return `<span class="pt-m">${esc(str(m[0]))}${
-          src ? `<span class="msrc" title="${esc(moveSrcTitle(src))}">${esc(src)}</span>` : ""}</span>`;
-      }).join("")}</span>
-    </button>`;
+      ${body}</button>`;
   }).join("") || `<span class="note" style="padding:6px">no party needed on this stretch</span>`;
 }
 
