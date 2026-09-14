@@ -388,7 +388,15 @@ RIVAL_ORDER = {
     "RIVAL_ROUTE22_LATE": 30, "CHAMPION": 32,
 }
 
+# Story gates the map alone can't express. The burgled house in Cerulean is
+# blocked by a policeman until FLAG_GOT_SS_TICKET is set (CeruleanCity's
+# OnTransition parks him on the door at (30,12) until Bill hands over the
+# ticket on Route 25), so the backyard Grunt cannot be fought on the first
+# visit -- only on the way back to the gym.
+TRAINER_STAGE_OVERRIDE = {"TRAINER_TEAM_ROCKET_GRUNT_5": 8}
+
 def trainer_stage(const, t):
+    if const in TRAINER_STAGE_OVERRIDE: return TRAINER_STAGE_OVERRIDE[const]
     for key, st in RIVAL_ORDER.items():
         if key in const: return st
     locs = t.get("locations") or []

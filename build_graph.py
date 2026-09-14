@@ -107,6 +107,15 @@ for k, v in ITEM_STAGE_OVERRIDES.items():
     if cur is None or v[0] < cur[0]:
         ITEM_STAGE[k] = v
 
+# Forced corrections that DELAY an item past its map's stage. The burgled
+# house in Cerulean is blocked by a policeman until Bill's S.S. Ticket is in
+# hand (FLAG_GOT_SS_TICKET), so the Grunt's TM28 does not exist on the first
+# Cerulean visit.
+ITEM_STAGE_CORRECTIONS = {
+    "ITEM_TM28": (8, "CeruleanCity — the burgled house, after the S.S. Ticket"),
+}
+ITEM_STAGE.update(ITEM_STAGE_CORRECTIONS)
+
 def tm_moves_by_stage(stage):
     """Every TM/HM move the player could have taught by `stage`."""
     out = {}

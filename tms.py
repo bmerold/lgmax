@@ -120,6 +120,8 @@ def extract():
             else:
                 st = P.location_stage(area)
                 if st is None: st = G._stage_from_area_name(area) if area else None
+                corr = G.ITEM_STAGE_CORRECTIONS.get(item)
+                if corr: st = corr[0]      # story-gated later than its map
                 sources.append({"kind": kind, "where": _pretty(area), "stage": st})
             copies += 1
         if gym and not gym_seen:
