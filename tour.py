@@ -26,6 +26,7 @@ import progression as P
 import sections as S
 import build_graph as G
 import engine as E
+import walking as WK
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 REPO = R.REPO
@@ -94,6 +95,7 @@ EVENTS = [
 # Story precedence inside a stage: the fetch has to happen before the stop
 # that spends it, even when the TSP would rather swing by the other way.
 EVENT_BEFORE = [
+    ("Super Nerd Miguel", "Helix or Dome Fossil (pick one)"),
     ("Oak's Parcel from the Mart clerk", "Deliver the Parcel — Pokédex from Oak"),
     ("Deliver the Parcel — Pokédex from Oak", "Town Map from Daisy"),
     ("Poké Flute from Mr. Fuji", "Wake Snorlax (Poké Flute)"),
@@ -185,20 +187,27 @@ def harvest():
                       "x": xy[0], "y": xy[1], "stage": stage})
 
     # catch stops: a species is caught the first stage it exists. Among the
-    # grounds that offer it then, prefer where the walk already goes -- maps
-    # whose trainers this stage fights (catching Weedle IN Viridian Forest,
-    # not on a detour back to Route 2) -- and fold species together so one
-    # patch of grass covers many.
+    # grounds that offer it then, the site is the one where the HUNT is
+    # cheapest: expected steps ~ steps-per-encounter / slot share, plus a
+    # penalty for ground the walk doesn't already cross (maps whose trainers
+    # this stage fights are free). A 1% Clefairy on Mt. Moon 1F is ~100
+    # encounters; the 6% slot on B2F is ~17 -- the stop goes to B2F.
     graph = json.load(open(f"{OUT}/encounters.json"))
     trainer_ground = {(e["stage"], e.get("locationRaw")) for e in graph
                       if e["kind"] not in ("wild", "rematch")}
-    first_gate, cands = {}, collections.defaultdict(set)
-    def offer(sp, gate, name, label):
+    OFF_ROUTE_PENALTY = 250          # steps-worth of "not on the way"
+    NON_LAND_SPE = 20                # surf/rod: nominal steps per encounter
+
+    first_gate = {}
+    cands = collections.defaultdict(dict)   # sp -> {(map,label): (share, spe)}
+    def offer(sp, gate, name, label, share, spe):
         cur = first_gate.get(sp)
         if cur is None or gate < cur:
-            first_gate[sp] = gate; cands[sp] = {(name, label)}
+            first_gate[sp] = gate; cands[sp] = {(name, label): (share, spe)}
         elif gate == cur:
-            cands[sp].add((name, label))
+            old = cands[sp].get((name, label))
+            if old is None or share > old[0]:
+                cands[sp][(name, label)] = (share, spe)
     for enc in E.WILD["encounters"]:
         if enc["version"] == "FireRed": continue
         name = WD._const_to_folder().get(enc["map"])
@@ -209,32 +218,44 @@ def harvest():
             if method == "fishing_mons":
                 for rod, idxs in E.WILD["fishingGroups"].items():
                     gate = max(ms, P.ROD_STAGE.get(rod, 0))
-                    for slot in tbl["slots"]:
-                        if slot["slot"] in idxs:
-                            offer(slot["species"], gate, name,
-                                  rod.replace("_", " "))
+                    slots = [x for x in tbl["slots"] if x["slot"] in idxs]
+                    tot = sum(x["rate"] for x in slots) or 1
+                    for slot in slots:
+                        offer(slot["species"], gate, name,
+                              rod.replace("_", " "),
+                              slot["rate"] / tot, NON_LAND_SPE)
             else:
                 gate = max(ms, P.METHOD_GATE.get(method, 0))
                 label = {"land_mons": "grass/cave", "water_mons": "surfing",
                          "rock_smash_mons": "Rock Smash"}.get(method, method)
+                tot = sum(x["rate"] for x in tbl["slots"]) or 1
+                spe = (WK.steps_per_encounter(tbl.get("encounterRate", 0))
+                       if method == "land_mons" else None) or NON_LAND_SPE
+                agg = collections.defaultdict(float)
                 for slot in tbl["slots"]:
-                    offer(slot["species"], gate, name, label)
-    by_gate = collections.defaultdict(set)
-    for sp, g in first_gate.items(): by_gate[g].add(sp)
+                    agg[slot["species"]] += slot["rate"] / tot
+                for sp, share in agg.items():
+                    offer(sp, gate, name, label, share, spe)
+
+    # each species goes where its hunt is cheapest; then stops group by site
+    grouped = collections.defaultdict(list)  # (gate,map,label) -> [(sp, share)]
+    for sp, gate in first_gate.items():
+        def cost(item):
+            (name, label), (share, spe) = item
+            hunt = spe / max(share, 1e-6)
+            free = (gate, name) in trainer_ground
+            return (hunt + (0 if free else OFF_ROUTE_PENALTY), name, label)
+        (name, label), (share, _) = min(cands[sp].items(), key=cost)
+        grouped[(gate, name, label)].append((sp, share))
     picked_stops = []
-    for gate in sorted(by_gate):
-        remaining = set(by_gate[gate])
-        while remaining:
-            cover = collections.defaultdict(set)
-            for sp in remaining:
-                for c in cands[sp]: cover[c].add(sp)
-            (name, label), got = sorted(cover.items(), key=lambda kv: (
-                -int((gate, kv[0][0]) in trainer_ground),
-                -len(kv[1]), kv[0][0], kv[0][1]))[0]
-            remaining -= got
-            picked_stops.append((gate, name, label,
-                                 sorted(E.SPECIES[sp]["name"] for sp in got)))
-    for gate, name, label, species in sorted(picked_stops):
+    for (gate, name, label), pairs in grouped.items():
+        pairs.sort(key=lambda x: x[1])
+        rare_share = pairs[0][1]
+        species = sorted(f"{E.SPECIES[sp]['name']} ({share*100:.0f}%)"
+                         for sp, share in pairs)
+        picked_stops.append((gate, name, label, species,
+                             int(round(1 / max(rare_share, 1e-6)))))
+    for gate, name, label, species, hunt in sorted(picked_stops):
         mode = ("water" if label == "surfing"
                 else "shore" if "rod" in label else "land")
         xy = WD.encounter_anchor(name, mode) or WD.encounter_anchor(name, "land")
@@ -242,9 +263,11 @@ def harvest():
             g = WD.grid(name)
             if not g.warps: continue
             xy = (g.warps[0][0], g.warps[0][1])
+        names_only = ", ".join(x.split(" (")[0] for x in species)
         nodes.append({"kind": "catch", "map": name, "x": xy[0], "y": xy[1],
                       "stage": gate, "species": species, "method": label,
-                      "what": f"Catch {', '.join(species)} ({label})"})
+                      "hunt": hunt,
+                      "what": f"Catch {names_only} ({label})"})
 
     # trainers: the same set the sections fight, on the tiles they stand on
     tiles = R.trainer_tiles()
@@ -487,6 +510,7 @@ def solve(max_stage=34, verbose=True):
             if n.get("enc"): step["enc"] = n["enc"]
             if n.get("underfoot"): step["underfoot"] = True
             if n.get("renewable"): step["renewable"] = n["renewable"]
+            if n.get("hunt"): step["hunt"] = n["hunt"]
             if n.get("species"): step["species"] = n["species"]
             steps.append(step)
             cur, prev_idx = tgt, oi

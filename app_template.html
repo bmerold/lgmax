@@ -1159,7 +1159,8 @@ function renderSecPanel(id, leg){
     (pinsByMap[mp] = pinsByMap[mp] || []).push(
       {n: i + 1, x: s[3], y: s[4], kind: str(s[0]), what: str(s[1]),
        walk: s[5], fly: s[6], species: (s[8] || []).length,
-       underfoot: s[9], renew: str(s[10]), key: keys[i], done: DONE.has(keys[i]),
+       underfoot: s[9], renew: str(s[10]), hunt: s[11] || 0,
+       key: keys[i], done: DONE.has(keys[i]),
        next: i === nextIdx, plan: planByStop[i + 1]});
   });
   const sideRow = p => {
@@ -1170,6 +1171,7 @@ function renderSecPanel(id, leg){
     else if (p.renew) bits.push(`renewable — there ${RENEW_ODDS[p.renew] || "?"} of the time`);
     else if (p.kind === "hidden") bits.push("invisible — press A");
     if (p.species > 1) bits.push(p.species + " species");
+    if (p.hunt > 3) bits.push(`~${p.hunt} encounters for the rarest`);
     return `<button class="side-row${p.done ? " done" : ""}${p.next ? " next" : ""}" data-n="${p.n}">
       <span class="side-n" style="background:${k.color}">${p.n}</span>
       <span><span class="side-t">${esc(p.what || "")}</span>
@@ -1367,7 +1369,7 @@ function partyCard(t){
 function rtRow(s, n, st){
   const kind = str(s[0]), what = str(s[1]), mp = s[2], walk = s[5],
         flyFrom = s[6], species = s[8] || [], underfoot = s[9],
-        renew = str(s[10]);
+        renew = str(s[10]), hunt = s[11] || 0;
   st = st || {};
   return `<div class="rt-row${st.done ? " done" : ""}${st.next ? " next" : ""}" id="fight-${n}">
     ${st.key ? `<span class="chk${st.done ? " on" : ""}" data-key="${esc(st.key)}" title="mark done">✓</span>` : ""}
@@ -1378,7 +1380,8 @@ function rtRow(s, n, st){
         : renew ? `<span class="note" title="the game re-rolls its renewable hidden items every ~1500 steps you take on this map; only one rarity tier exists at a time">renewable — there ${RENEW_ODDS[renew] || "?"} of the time, regrows as you walk; skip and re-check on later passes</span>`
         : kind === "hidden" ? `<span class="note" title="hidden items have no sprite — they're there from the start of the game">invisible — face the pinned tile, press A</span>` : ""}
       ${flyFrom ? `<div class="rt-fly">✈ Fly to ${esc(prettyMap(flyFrom))}, then walk</div>` : ""}
-      ${species.length > 1 ? `<div class="rt-species">${species.map(x => esc(str(x))).join(" · ")}</div>` : ""}
+      ${species.length ? `<div class="rt-species">${species.map(x => esc(str(x))).join(" · ")}${
+        hunt > 3 ? ` <span class="note">— expect ~${hunt} encounters for the rarest</span>` : ""}</div>` : ""}
     </span>
     <span class="rt-where">${esc(prettyMap(mp))}<br><span class="num">${walk} steps</span></span>
   </div>`;

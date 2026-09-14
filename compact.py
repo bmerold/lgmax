@@ -216,7 +216,7 @@ def main():
                 path_runs(s["path"]),
                 [S(x) for x in s.get("species", [])],
                 1 if s.get("underfoot") else 0,
-                S(s.get("renewable"))]
+                S(s.get("renewable")), s.get("hunt", 0)]
 
     def leg_rows(sec, stage):
         """A section split at its full heals. Each leg carries its own roster

@@ -75,8 +75,8 @@ MB_THIN_ICE = 0x26
 
 class Grid:
     """One map's tiles: walkability, behavior, and the events standing on it."""
-    __slots__ = ("name", "w", "h", "beh", "coll", "enc", "warps", "warp_tiles",
-                 "obstacles", "scripted_open")
+    __slots__ = ("name", "w", "h", "beh", "coll", "enc", "elev", "warps",
+                 "warp_tiles", "obstacles", "scripted_open")
     def __init__(self, name):
         mj = R.maps()[name]
         lay = _layouts()[ALT_LAYOUT.get(name) or mj["layout"]]
@@ -89,15 +89,17 @@ class Grid:
         beh = bytearray(self.w * self.h)
         coll = bytearray(self.w * self.h)
         enc = bytearray(self.w * self.h)
+        elev = bytearray(self.w * self.h)
         for i, cell in enumerate(cells):
             coll[i] = (cell >> 10) & 3
+            elev[i] = (cell >> 12) & 0xF
             mt = cell & 0x3FF
             attrs, idx = (pa, mt) if mt < NUM_METATILES_IN_PRIMARY else \
                          (sa, mt - NUM_METATILES_IN_PRIMARY)
             if idx < len(attrs):
                 beh[i] = attrs[idx] & 0xFF  # behaviors fit a byte
                 enc[i] = (attrs[idx] & 0x07000000) >> 24
-        self.beh, self.coll, self.enc = beh, coll, enc
+        self.beh, self.coll, self.enc, self.elev = beh, coll, enc, elev
         self.warps = [(w.get("x", 0), w.get("y", 0), w.get("dest_map", ""),
                        w.get("dest_warp_id", "0"))
                       for w in mj.get("warp_events", [])]
@@ -313,6 +315,15 @@ def _tile_open(g, x, y, stage, surf_ok):
         return surf_ok
     return g.c(x, y) == 0
 
+def _elev_ok(g, x, y, gn, nx, ny):
+    """The game blocks walking between mismatched elevations even where
+    collision is clear -- a raised platform's cliff edge (the Mt. Moon fossil
+    ridge) is a wall unless one side is a transition (0) or bridge (15)
+    tile. Ledge hops, warps and surf mounts have their own rules."""
+    a = g.elev[y * g.w + x]
+    b = gn.elev[ny * gn.w + nx]
+    return a == b or a in (0, 15) or b in (0, 15)
+
 def _surf_ok(g, stage):
     """Surf works here once you own HM03 + badge and the map is at/past it."""
     return stage >= P.HM_STAGE["SURF"]
@@ -369,7 +380,10 @@ def neighbours(node, stage):
             if slide: out.append((slide[0], 1 + slide[1]))
             continue
         if _tile_open(g, nx, ny, stage, surf):
-            out.append(((name, nx, ny), 1))
+            if (_elev_ok(g, x, y, g, nx, ny)
+                    or g.b(x, y) in SURFABLE or beh in SURFABLE
+                    or (nx, ny) in g.warp_tiles or (x, y) in g.warp_tiles):
+                out.append(((name, nx, ny), 1))
     return out
 
 def _spin_slide(g, x, y, stage, surf):
@@ -412,7 +426,10 @@ def _cross_connection(g, x, y, stage):
         else:
             continue
         if ng.inb(tx, ty) and _tile_open(ng, tx, ty, stage, _surf_ok(ng, stage)):
-            return (nb, tx, ty)
+            sx = min(max(x, 0), g.w - 1); sy = min(max(y, 0), g.h - 1)
+            if (_elev_ok(g, sx, sy, ng, tx, ty)
+                    or g.b(sx, sy) in SURFABLE or ng.b(tx, ty) in SURFABLE):
+                return (nb, tx, ty)
     return None
 
 @functools.lru_cache(maxsize=None)
