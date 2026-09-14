@@ -1141,6 +1141,21 @@ def _title_legs(legs):
         leg["title"] = titles[i]
         leg.pop("_span", None)
 
+def move_origin(species, level, mv):
+    """Where this specimen got the move: its own level-up learnset first
+    (that is how move_pool found it too), else the TM/HM that teaches it,
+    else the Two Island tutor."""
+    lvls = [lv for lv, m2 in E.LEVELUP.get(species, []) if m2 == mv and lv <= level]
+    if lvls:
+        lv = max(lvls)
+        return "start" if lv <= 1 else f"Lv {lv}"
+    item = G.MOVE_TO_TM.get(mv)
+    if item:
+        return item.replace("ITEM_", "")
+    if mv.replace("MOVE_", "") in E.TUTOR.get(species, []):
+        return "Tutor"
+    return ""
+
 def _leg_member(m, md, avail, stage):
     """One party member's ledger for one leg: PP and HP spent on this stretch
     alone, out of a single (unrefilled) PP bar — a leg never spans a heal."""
@@ -1153,6 +1168,7 @@ def _leg_member(m, md, avail, stage):
         "newHere": rec["stage"] == stage,
         "moves": [{"name": E.MOVES[mv]["name"],
                    "tm": SCARCE.get(mv, {}).get("item"),
+                   "src": move_origin(m.species, m.level, mv),
                    "type": E.move_type_for(m.mon, mv),
                    "power": E.nominal_power(m.mon, mv),
                    "pp": E.MOVES[mv]["pp"], "basePP": E.MOVES[mv]["pp"],
@@ -1360,6 +1376,7 @@ def solve_section(stage, encs, starter, avail, tm_value=None, carry=None):
             "newHere": rec["stage"] == stage,
             "moves": [{"name": E.MOVES[mv]["name"],
                        "tm": SCARCE.get(mv, {}).get("item"),
+                       "src": move_origin(m.species, m.level, mv),
                        "type": E.move_type_for(m.mon, mv),
                        "power": E.nominal_power(m.mon, mv),
                        "pp": E.MOVES[mv]["pp"] * (1 + m.refills),

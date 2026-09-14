@@ -100,9 +100,10 @@ def main():
 
     # ---- per-section party recommendations, one set per starter
     def move_row(m):
-        # [name, type, power, poolPP, used, left, basePP, refills, tmItem]
+        # [name, type, power, poolPP, used, left, basePP, refills, tmItem, src]
         return [S(m["name"]), S(m["type"]), m["power"], m["pp"], m["used"], m["left"],
-                m.get("basePP", m["pp"]), m.get("refills", 0), S(m.get("tm"))]
+                m.get("basePP", m["pp"]), m.get("refills", 0), S(m.get("tm")),
+                S(m.get("src"))]
 
     def member_row(t):
         # [name, types, level, hp, lowestHpPct, fainted, obtainedAt, via, newHere, moves]

@@ -426,11 +426,16 @@ button{font:inherit;color:inherit}
 #playTeam{display:flex;gap:6px;align-items:flex-end;justify-content:center;
   padding:6px 10px 4px;background:var(--surface);border-bottom:1px solid var(--line);
   flex-shrink:0;overflow-x:auto}
-.pt-mon{border:0;background:none;cursor:pointer;text-align:center;padding:2px 6px;
-  font-family:inherit;border-radius:8px}
+.pt-mon{border:0;background:none;cursor:pointer;text-align:left;padding:2px 8px 2px 4px;
+  font-family:inherit;border-radius:8px;display:flex;align-items:center;gap:2px;flex-shrink:0}
 .pt-mon:hover{background:var(--surface-2)}
 .pt-mon img{width:48px;height:48px;image-rendering:pixelated;display:block;margin:0 auto}
+.pt-mon .pt-left{display:flex;flex-direction:column;align-items:center;flex-shrink:0}
 .pt-mon .pt-l{font-size:10px;color:var(--ink-2);font-weight:600;display:block;margin-top:-4px}
+.pt-mon .pt-mv{display:flex;flex-direction:column;gap:1px}
+.pt-mon .pt-m{font-size:10px;color:var(--ink);white-space:nowrap;line-height:1.25;
+  display:flex;align-items:baseline;gap:4px;justify-content:space-between}
+.pt-mon .msrc{font-size:8.5px;color:var(--ink-2);font-weight:600;letter-spacing:.02em}
 #playMap{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;
   overflow:hidden;background:#101014}
 #playFit{position:relative;flex-shrink:0}
@@ -1458,12 +1463,13 @@ function partyCard(t){
     <div class="pp">${moves.map(m => {
       const mn = m[0], power = m[2], pp = m[3], used = m[4],
             basePP = m[6] != null ? m[6] : m[3], refills = m[7] || 0,
-            tmItem = m[8] != null ? m[8] : -1;
+            tmItem = m[8] != null ? m[8] : -1, src = str(m[9] || "");
       const pct = pp ? Math.min(100, used / pp * 100) : 0;
       /* `pp` is what the section actually affords: the move's own PP, once per
          refill at an in-game healing spot. */
       return `<div class="pprow">
         <span class="ppn">${esc(str(mn))}${power ? ` <span class="ppv">${power} BP</span>` : ""}${
+          src ? ` <span class="ppv" title="${esc(moveSrcTitle(src))}">· ${esc(src)}</span>` : ""}${
           tmItem !== -1 ? `<span class="tmtag" title="single-use ${esc(str(tmItem).replace("ITEM_",""))} — this run spends it here">TM</span>` : ""}</span>
         <span class="ppv">${used.toFixed(0)}/${pp} PP${refills
           ? `<span title="${basePP} PP, refilled ${refills === 1 ? "once" : refills + "×"} mid-section"> ✦</span>` : ""}</span>
@@ -2039,12 +2045,29 @@ function renderPlayTeam(ctx){
   el.innerHTML = (ctx.L.team || []).map((t, i) => {
     const nm = str(t[0]);
     const spr = SPRITES[nm];
-    return `<button class="pt-mon" data-mem="${i}" title="${esc(nm)} — moves and PP">
-      ${spr ? `<img src="data:image/png;base64,${spr}" alt="${esc(nm)}">`
-            : `<span style="font-size:26px">◓</span>`}
-      <span class="pt-l">${esc(nm)} · L${t[2]}</span>
+    const moves = t[9] || [];
+    return `<button class="pt-mon" data-mem="${i}" title="${esc(nm)} — full PP and HP ledger">
+      <span class="pt-left">
+        ${spr ? `<img src="data:image/png;base64,${spr}" alt="${esc(nm)}">`
+              : `<span style="font-size:26px">◓</span>`}
+        <span class="pt-l">${esc(nm)} · L${t[2]}</span>
+      </span>
+      <span class="pt-mv">${moves.map(m => {
+        const src = str(m[9] || "");
+        return `<span class="pt-m">${esc(str(m[0]))}${
+          src ? `<span class="msrc" title="${esc(moveSrcTitle(src))}">${esc(src)}</span>` : ""}</span>`;
+      }).join("")}</span>
     </button>`;
   }).join("") || `<span class="note" style="padding:6px">no party needed on this stretch</span>`;
+}
+
+function moveSrcTitle(src){
+  if (src === "start") return "in its starting moveset";
+  if (src.startsWith("Lv")) return "learned by level-up at " + src;
+  if (src.startsWith("TM")) return "taught with " + src;
+  if (src.startsWith("HM")) return "taught with " + src + " (can't be overwritten before the Move Deleter)";
+  if (src === "Tutor") return "from the Two Island move tutor";
+  return src;
 }
 
 function renderPlayMap(ctx){
