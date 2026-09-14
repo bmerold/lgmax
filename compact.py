@@ -209,6 +209,74 @@ def main():
             seen |= set(comp)
         return out
 
+    # ---- heal stops: the leg-ending heals as explicit, tickable nodes,
+    # pinned at the Center door (or the spa / Purified Zone tile) the walk
+    # actually passes. Synthesized here; the route itself is untouched.
+    import route_order as _R
+    import world as _W
+    import build_graph as _BG
+    center_door = {}
+    for _nm, _mj in _R.maps().items():
+        for _w in _mj.get("warp_events", []):
+            _dm = _w.get("dest_map") or ""
+            if "_POKEMON_CENTER" in _dm and _dm.endswith("_1F"):
+                center_door.setdefault(_nm, (_w.get("x", 0), _w.get("y", 0)))
+    pretty2map = {_BG.pretty_location(m): m for m in center_door}
+    special_spot = {}
+    for _nm, _key in (("PokemonTower_5F", "Purified"),
+                      ("OneIsland_KindleRoad_EmberSpa", "")):
+        _mj = _R.maps().get(_nm) or {}
+        _pick = None
+        for _ce in _mj.get("coord_events") or []:
+            if _key in (_ce.get("script") or ""):
+                _pick = (_ce.get("x", 0), _ce.get("y", 0)); break
+        if not _pick and (_mj.get("warp_events") or []):
+            _w0 = _mj["warp_events"][0]
+            _pick = (_w0.get("x", 0), _w0.get("y", 0))
+        special_spot[_nm] = _pick or (0, 0)
+
+    def heal_site(hz):
+        if "Purified" in hz:
+            return ("PokemonTower_5F",) + special_spot["PokemonTower_5F"]
+        if "Ember Spa" in hz:
+            return ("OneIsland_KindleRoad_EmberSpa",) + special_spot["OneIsland_KindleRoad_EmberSpa"]
+        core = hz.split("you land at the ", 1)[-1]
+        core = core.replace(" Pokémon Center", "").strip()
+        mp = pretty2map.get(core)
+        return ((mp,) + center_door[mp]) if mp else None
+
+    def mini_corners(path):
+        if not path: return []
+        out = [path[0]]
+        for i in range(1, len(path) - 1):
+            (m0, x0, y0), (m1, x1, y1), (m2, x2, y2) = path[i-1], path[i], path[i+1]
+            if m0 != m1 or m1 != m2 or (x1-x0, y1-y0) != (x2-x1, y2-y1):
+                out.append(path[i])
+        if len(path) > 1: out.append(path[-1])
+        return out
+
+    def heal_stop_for(leg, stops, stage):
+        hz = leg.get("endsAt")
+        if not hz: return None
+        site = heal_site(hz)
+        if not site: return None
+        mp_h, hx, hy = site
+        hpath, hwalk = [], 0
+        if "flying" not in hz and stops:
+            last = stops[-1]
+            try:
+                pth = _W.path_between(
+                    _W.reach_tile((last["map"], last["at"][0], last["at"][1]), stage),
+                    (mp_h, hx, hy), stage)
+                if pth:
+                    hwalk = max(0, len(pth) - 1)
+                    hpath = mini_corners(pth)
+            except Exception:
+                pass
+        return {"kind": "heal", "what": f"Heal up — {hz}", "map": mp_h,
+                "at": [hx, hy], "walk": hwalk,
+                "path": [[m, x, y] for m, x, y in hpath]}
+
     def pack_stop(s):
         # [kind, what, map, x, y, walk, flyLanding, pathRuns, species, buried]
         return [S(s["kind"]), S(s["what"]), s["map"], s["at"][0], s["at"][1],
@@ -240,6 +308,8 @@ def main():
                 end += 1
             if li == len(legs) - 1: end = len(steps)
             stops = steps[cursor:end]; cursor = end
+            hs = heal_stop_for(leg, stops, stage)
+            if hs: stops = stops + [hs]
             # this leg's maps in the order the walk meets them, with the
             # walk itself as polyline runs per map
             seq, segs = [], _c.defaultdict(list)
@@ -253,6 +323,7 @@ def main():
             used_maps.update(seq)
             out.append({
                 "ti": S(leg["title"]), "hz": S(leg.get("endsAt")),
+                "cold": 1 if leg.get("cold") else 0,
                 "b": leg["battles"], "om": leg["opposingMons"],
                 "wb": leg["wildBattles"], "t": leg["turns"],
                 "wt": leg["wildTurns"], "f": leg["faints"],

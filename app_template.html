@@ -1069,7 +1069,8 @@ function renderSecPanel(id, leg){
       <span><b>${L.b}</b> fight${L.b === 1 ? "" : "s"} · <b>${(L.st || 0).toLocaleString()}</b> steps
         · <b>${L.t}</b> turns${L.f ? ` · <b class="bad">${L.f} faint${L.f === 1 ? "" : "s"}</b>` : ""}</span>
       ${stops.length ? `<span class="prog"><b>${doneCount}</b> of <b>${stops.length}</b> done</span>` : ""}</div>
-    ${arrive || ends ? `<div class="enc-meta">${
+    ${arrive || ends || L.cold ? `<div class="enc-meta">${
+        L.cold ? `<span class="bad">No Pokémon Center since the previous section — HP and PP carry over</span>` : ""}${
         arrive ? `<span>You start fully healed — ${esc(arrive)}</span>` : ""}${
         ends ? `<span>Ends with a full heal at <b>${esc(ends)}</b></span>` : ""}</div>` : ""}
     ${size ? `<div class="enc-meta"><span>Party: ${L.team.map(t =>
@@ -1378,6 +1379,7 @@ function rtRow(s, n, st){
       <span class="rt-what">${esc(what || "")}</span>
       ${underfoot ? `<span class="tmtag" title="buried — only the Itemfinder digs it up">Itemfinder</span>`
         : renew ? `<span class="note" title="the game re-rolls its renewable hidden items every ~1500 steps you take on this map; only one rarity tier exists at a time">renewable — there ${RENEW_ODDS[renew] || "?"} of the time, regrows as you walk; skip and re-check on later passes</span>`
+        : kind === "heal" ? `<span class="note">HP and PP fully restored — the next section budgets from full bars</span>`
         : kind === "hidden" ? `<span class="note" title="hidden items have no sprite — they're there from the start of the game">invisible — face the pinned tile, press A</span>` : ""}
       ${flyFrom ? `<div class="rt-fly">✈ Fly to ${esc(prettyMap(flyFrom))}, then walk</div>` : ""}
       ${species.length ? `<div class="rt-species">${species.map(x => esc(str(x))).join(" · ")}${
@@ -1454,8 +1456,11 @@ function secNotes(d, L, multi){
         Tower 5F and the Ember Spa on One Island. So every PP bar above is honest for this
         stretch: nothing shown here spans a heal. Rocket Hideout, Silph Co. and Victory Road
         have no healing spot, and the Elite Four is one unbroken gauntlet from the Indigo
-        Plateau Center.${multi ? " This section is one such stretch; its neighbours in the" +
-        " list are the rest of the same stage, on the far side of a full heal." : ""}</li>
+        Plateau Center. The one boundary the game leaves unhealed — Route 23 into Victory
+        Road — carries HP and PP forward instead of resetting, and beating the Champion
+        counts as a heal because you respawn at home.${multi ? " This section is one such" +
+        " stretch; its neighbours in the list are the rest of the same stage, on the far" +
+        " side of a full heal." : ""}</li>
       <li><strong>Switching mid-fight costs a turn and a hit</strong>, both charged. But the
         game's default battle style is <strong>Shift</strong>: before a trainer battle the lead
         is free, and every time a trainer's Pokémon goes down you are offered a free switch
@@ -1529,6 +1534,7 @@ function secNotes(d, L, multi){
 /* ---------------- route helpers (used by the guide) ---------------- */
 const RENEW_ODDS = {common: "60%", uncommon: "30%", rare: "10%"};
 const RKIND = {
+  heal:   {color:"#2E7D46", label:"full heal"},
   item:   {color:"#9A7A00", label:"item ball"},
   hidden: {color:"#3E8E96", label:"hidden item"},
   trainer:{color:"#8A4A3A", label:"fight"},

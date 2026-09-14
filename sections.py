@@ -288,6 +288,36 @@ def route_order_battles(battles):
             if why: heal_after[a["id"]] = why
     return battles, heal_after
 
+_COLD = None
+
+def cold_stage_starts():
+    """Stages whose start has NO heal: between the previous stage's last
+    battle and this stage's first, the walk passes no Pokémon Center and no
+    flight home. Beating the Champion respawns you at home fully healed, so
+    the post-game boundary is warm by definition. For a cold start the party
+    carries its HP and PP forward instead of resetting."""
+    global _COLD
+    if _COLD is not None: return _COLD
+    _COLD = set()
+    path = f"{OUT}/route.json"
+    if not os.path.exists(path): return _COLD
+    rt = json.load(open(path))
+    centers = R.center_maps()
+    for i in range(len(rt["stages"]) - 1):
+        a, b = rt["stages"][i], rt["stages"][i + 1]
+        if a["stage"] == 32:               # Champion -> respawn at home
+            continue
+        steps = []
+        tb = [j for j, x in enumerate(a["steps"]) if x["kind"] == "trainer"]
+        steps += a["steps"][tb[-1] + 1:] if tb else a["steps"]
+        nb = [j for j, x in enumerate(b["steps"]) if x["kind"] == "trainer"]
+        steps += b["steps"][:nb[0] + 1] if nb else b["steps"]
+        healed = any(st.get("fly") for st in steps) or any(
+            "PokemonCenter" in m or m in centers
+            for st in steps for m, _x, _y in st["path"])
+        if not healed: _COLD.add(b["stage"])
+    return _COLD
+
 def route_stage_of(enc):
     """The stage the route actually fights this battle in, if known."""
     hit = route_positions().get(R.battle_key(enc["trainerConst"]))
@@ -872,9 +902,19 @@ def plan_vs(team, opp, badges, active):
                              fin / mB.obey)]
     return best
 
-def run_section(team, battles, badges, heal_after_idx, tm_value=None):
-    """Walk the section with one party, no items. Returns a full ledger."""
-    for m in team: m.reset()
+def run_section(team, battles, badges, heal_after_idx, tm_value=None,
+                carry=None):
+    """Walk the section with one party, no items. Returns a full ledger.
+    `carry` seeds members with the HP and PP they ended the previous section
+    on, for the stage boundaries the game leaves unhealed."""
+    for m in team:
+        m.reset()
+        c = carry.get(m.species) if carry else None
+        if c:
+            for mv in m.pp:
+                if mv in c["pp"]: m.pp[mv] = c["pp"][mv]
+            m.hp = m.maxhp * c["hpPct"]
+            m.leg_mark()
     log, total_turns, faints, failed = [], 0.0, 0, 0
     wild_turns = 0.0
     leads = {}          # map -> the Pokemon you are walking around with
@@ -1111,7 +1151,7 @@ def build_legs(battles, final, avail, stage):
     _title_legs(legs)
     return legs, sec_log
 
-def solve_section(stage, encs, starter, avail, tm_value=None):
+def solve_section(stage, encs, starter, avail, tm_value=None, carry=None):
     st = P.STAGE_BY_ID[stage]
     level, badges = st["level"], O.badges_for(stage)
     encs = encs or []
@@ -1202,7 +1242,7 @@ def solve_section(stage, encs, starter, avail, tm_value=None):
             if sp in chosen: continue
             if C.conflicts(sp, held_roots, held_groups): continue
             trial = team + [Member(pm, mvs, pool, ob)]
-            res = run_section(trial, battles, badges, heal_idx)
+            res = run_section(trial, battles, badges, heal_idx, carry=carry)
             k = pick_key(res, sp)
             if best is None or k < best:
                 best, bestsp, bestres = k, sp, res
@@ -1231,13 +1271,14 @@ def solve_section(stage, encs, starter, avail, tm_value=None):
                                    starter, held_roots, held_groups, chosen)
     for m in hm_extra:
         team.append(m); chosen.append(m.species)
-    final = run_section(team, battles, badges, heal_idx, tm_value)
+    final = run_section(team, battles, badges, heal_idx, tm_value, carry=carry)
 
     # ---- bench: strong candidates that didn't make the cut
     bench = []
     for sp, (pm, mvs, pool, ob) in members.items():
         if sp in chosen: continue
-        res = run_section([Member(pm, mvs, pool, ob)], battles, badges, heal_idx)
+        res = run_section([Member(pm, mvs, pool, ob)], battles, badges,
+                          heal_idx, carry=carry)
         if res["failed"]: continue      # can't clear it, so not an alternative
         bench.append(((res["faints"], round(res["turns"], 2),
                        round(res.get("hpLost", 0.0), 3), -USAGE.get(sp, 0),
@@ -1280,7 +1321,12 @@ def solve_section(stage, encs, starter, avail, tm_value=None):
         })
     wild_only = [e for e in battles if e["kind"] == "wild"]
     legs, sec_log = build_legs(battles, final, avail, stage)
+    if legs and stage in cold_stage_starts():
+        legs[0]["cold"] = True
     return {
+        "carryOut": {m.species: {"pp": dict(m.pp),
+                                 "hpPct": max(0.0, m.hp) / m.maxhp}
+                     for m in final["team"]},
         "stage": stage, "starter": starter, "level": level,
         "badges": badges["count"],
         "battles": len(trainer_battles),
@@ -1633,9 +1679,13 @@ if __name__ == "__main__":
             result[starter] = {}
             tm_value[starter] = defaultdict(float)
             reset_hm_held()
+            carry = None
             for stage in sorted(st["id"] for st in P.STAGES):
                 result[starter][stage] = solve_section(
-                    stage, sections.get(stage, []), starter, avail, tm_value[starter])
+                    stage, sections.get(stage, []), starter, avail,
+                    tm_value[starter],
+                    carry=carry if stage in cold_stage_starts() else None)
+                carry = (result[starter][stage] or {}).get("carryOut") or carry
             print(f"  {starter}: pass 1 done ({time.time()-t0:.0f}s)", flush=True)
 
     # the reference starter for the non-starter choices is whichever clears the
@@ -1671,9 +1721,12 @@ if __name__ == "__main__":
             tm_plans[starter] = plan
             O.set_tm_plan(SCARCE, owners)
             result[starter] = {}
+            carry = None
             for stage in sorted(st["id"] for st in P.STAGES):
-                result[starter][stage] = solve_section(stage, sections.get(stage, []),
-                                                       starter, avail)
+                result[starter][stage] = solve_section(
+                    stage, sections.get(stage, []), starter, avail,
+                    carry=carry if stage in cold_stage_starts() else None)
+                carry = (result[starter][stage] or {}).get("carryOut") or carry
             print(f"  {starter}: re-solved — {sum(len(p['teach']) for p in plan)} "
                   f"single-use TMs spent ({time.time()-t0:.0f}s)", flush=True)
         O.set_tm_plan(SCARCE, None)
