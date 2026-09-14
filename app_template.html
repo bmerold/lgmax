@@ -314,8 +314,8 @@ button{font:inherit;color:inherit}
   font:700 11px/16px "IBM Plex Mono",monospace;box-shadow:0 1px 5px rgba(0,0,0,.55)}
 .mark:hover{transform:translate(-50%,-50%) scale(1.25);z-index:2}
 .mark.flash{animation:markpulse 1.3s ease-out}
-@keyframes markpulse{0%{box-shadow:0 0 0 0 rgba(196,73,28,.95)}
-  70%{box-shadow:0 0 0 16px rgba(196,73,28,0)}100%{box-shadow:0 1px 5px rgba(0,0,0,.55)}}
+@keyframes markpulse{0%{box-shadow:0 0 0 0 rgba(15,138,60,.95)}
+  70%{box-shadow:0 0 0 16px rgba(15,138,60,0)}100%{box-shadow:0 1px 5px rgba(0,0,0,.55)}}
 
 /* ---------- map side list: the stops beside the map, not below it ---------- */
 .mapblock{display:flex;gap:12px;margin:0 16px 14px;align-items:flex-start}
@@ -391,13 +391,13 @@ button{font:inherit;color:inherit}
   .mapside{position:static;flex:auto;width:100%;max-height:300px}}
 .mapbox svg{position:absolute;left:0;top:0;pointer-events:none}
 .rpath{fill:none;stroke:#fff;stroke-width:5;stroke-linejoin:round;stroke-linecap:round;opacity:.55}
-.rpath2{fill:none;stroke:#C4491C;stroke-width:2.5;stroke-linejoin:round;stroke-linecap:round}
-.rarrow0{fill:none;stroke:#7A2D10;stroke-width:4;stroke-linecap:round;stroke-linejoin:round}
+.rpath2{fill:none;stroke:#111111;stroke-width:2.5;stroke-linejoin:round;stroke-linecap:round}
+.rarrow0{fill:none;stroke:#111111;stroke-width:4;stroke-linecap:round;stroke-linejoin:round}
 .rarrow{fill:none;stroke:#fff;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 /* the stretch you are walking RIGHT NOW: last ticked stop -> next stop,
-   marching gold over a dark underlay so it reads on any terrain */
-.rnow0{fill:none;stroke:#3A1A05;stroke-width:6.5;stroke-linejoin:round;stroke-linecap:round;opacity:.85}
-.rnow{fill:none;stroke:#FFD84D;stroke-width:3.2;stroke-linejoin:round;stroke-linecap:round;
+   marching signal green over a white underlay so it reads on any terrain */
+.rnow0{fill:none;stroke:#FFFFFF;stroke-width:6.5;stroke-linejoin:round;stroke-linecap:round;opacity:.95}
+.rnow{fill:none;stroke:#0F8A3C;stroke-width:3.2;stroke-linejoin:round;stroke-linecap:round;
   stroke-dasharray:10 8;animation:antsy .9s linear infinite}
 @keyframes antsy{to{stroke-dashoffset:-18}}
 @media (prefers-reduced-motion: reduce){.rnow{animation:none}}
@@ -1149,7 +1149,7 @@ function renderSecPanel(id, leg){
   const doneCount = keys.filter(kk => DONE.has(kk)).length;
   /* "next" means the stop after the FURTHEST one you've ticked -- a skipped
      stop earlier (an absent renewable, a fight saved for later) must not
-     drag the gold stretch backwards */
+     drag the green stretch backwards */
   let hiDone = -1;
   keys.forEach((kk, i) => { if (DONE.has(kk)) hiDone = i; });
   const nextIdx = hiDone + 1 < stops.length ? hiDone + 1 : -1;
@@ -1321,7 +1321,7 @@ function renderSecPanel(id, leg){
     const nextRuns = nextIdx >= 0 ? (stops[nextIdx][7] || []) : [];
     const clusters = (L.cl && L.cl.length) ? L.cl : L.mp.map(m => [[m[0], 0, 0]]);
     html += `<section class="card"><div class="card-h"><h2>The ground you cover</h2>
-        <span class="note">the walk in orange; your NEXT stretch marches in gold — stops match the checklist below</span>
+        <span class="note">the walk in black; your NEXT stretch marches in green — stops match the checklist below</span>
         <span class="zoomctl">
           <button class="zoomb" data-zoom="fit" title="scale each map to fit the panel">fit</button>
           <button class="zoomb" data-zoom="1" title="one pixel per game pixel">1×</button>
@@ -2066,11 +2066,11 @@ function playDesc(ctx, row){
       counts as a full heal, then walk on from there.${nextBit}`;
   if (node.t === "move"){
     const l = node.label, to = node.to ? prettyMap(node.to) : "";
-    let how = `Follow the gold path across into ${esc(to)}.`;
-    if (l.startsWith("Descend")) how = `Take the ladder down at the end of the gold path — the route continues on ${esc(to)}.`;
-    else if (l.startsWith("Climb")) how = `Take the ladder up at the end of the gold path — the route continues on ${esc(to)}.`;
+    let how = `Follow the green path across into ${esc(to)}.`;
+    if (l.startsWith("Descend")) how = `Take the ladder down at the end of the green path — the route continues on ${esc(to)}.`;
+    else if (l.startsWith("Climb")) how = `Take the ladder up at the end of the green path — the route continues on ${esc(to)}.`;
     else if (l.startsWith("Take the Seagallop")) how = `Board the Seagallop at the harbor — it sails straight there.`;
-    else if (l.startsWith("Enter")) how = `Walk the gold path to the door and head inside.`;
+    else if (l.startsWith("Enter")) how = `Walk the green path to the door and head inside.`;
     else if (l.startsWith("Exit")) how = `Head back out through the door.`;
     return how + nextBit;
   }
@@ -2082,7 +2082,7 @@ function playDesc(ctx, row){
     const names = opps.slice(0, 4).map(s => `${esc(str(s[0]))} L${s[1]}`).join(", ");
     const link = row ? ` — <button class="fightlink" data-enc="${esc(row[1])}"
       data-n="${node.stopIdx + 1}">full matchup analysis ↗</button>` : "";
-    return `Walk the ${walk}-step gold path to the pin and battle: ${opps.length}
+    return `Walk the ${walk}-step green path to the pin and battle: ${opps.length}
       Pokémon${names ? ` (${names}${opps.length > 4 ? "…" : ""})` : ""}. The plan
       below answers each in order${link}.`;
   }
@@ -2260,7 +2260,7 @@ function renderPlayDetail(ctx){
   const node = ctx.node;
   if (!node){ el.innerHTML = ""; return; }
   if (!node.stop){
-    el.innerHTML = `<div class="pd-note">${esc(node.label)} — just travel. The gold
+    el.innerHTML = `<div class="pd-note">${esc(node.label)} — just travel. The green
       stretch shows the way; the next objective is one step ahead.</div>`;
     return;
   }
