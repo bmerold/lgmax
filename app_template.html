@@ -418,6 +418,9 @@ button{font:inherit;color:inherit}
 #playObj .po-leg{font-size:11px;color:var(--ink-3);letter-spacing:.05em;text-transform:uppercase}
 #playObj .po-what{font-weight:700;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #playObj .po-plan{font-size:12px;color:var(--accent);font-weight:600}
+#playObj .po-desc{font-size:12.5px;color:var(--ink-2);line-height:1.45;max-width:860px}
+#playObj .po-desc b{color:var(--ink)}
+#playObj .po-desc .fightlink{color:var(--accent);font-weight:600;text-decoration:underline dotted}
 #playPrev,#playNext,#playOutlineBtn{border:1px solid var(--line);border-radius:9px;
   background:var(--surface-2);color:var(--ink);font:600 13px/1 inherit;font-family:inherit;
   padding:10px 14px;cursor:pointer;flex-shrink:0}
@@ -1695,9 +1698,11 @@ function svgArrows(coords){
 /* Jump from a fight in the guide to its per-encounter matchup analysis,
    and remember the way back. */
 let guideReturn = null;      // fight number to land on when returning
+let guideReturnView = "sec"; // which view the matchup was opened from
 function openEncounter(id, fromN){
   const e = ENC.find(x => x.id === id);
   if (!e) return;
+  const from = view;
   selected = id; view = "enc";
   document.querySelectorAll("[data-view]").forEach(x =>
     x.setAttribute("aria-current", x.dataset.view === "enc"));
@@ -1707,9 +1712,10 @@ function openEncounter(id, fromN){
   renderPanel(e);
   if (fromN != null){
     guideReturn = fromN;
+    guideReturnView = from === "play" ? "play" : "sec";
     try { history.pushState({lgmaxGuide: true}, ""); } catch (er) {}
     document.getElementById("panel").insertAdjacentHTML("afterbegin",
-      `<button class="backguide">← Back to the guide</button>`);
+      `<button class="backguide">← Back to the ${guideReturnView === "play" ? "route" : "guide"}</button>`);
   }
   saveUi();
   window.scrollTo({top: 0});
@@ -1717,12 +1723,14 @@ function openEncounter(id, fromN){
   if (row) row.scrollIntoView({block: "center"});
 }
 function backToGuide(){
-  view = "sec";
+  const dest = guideReturnView || "sec";
+  view = dest;
   document.querySelectorAll("[data-view]").forEach(x =>
-    x.setAttribute("aria-current", x.dataset.view === "sec"));
+    x.setAttribute("aria-current", x.dataset.view === dest));
   ["enc","sec","tm","cho","play"].forEach(v =>
-    document.getElementById("view-" + v).hidden = v !== "sec");
+    document.getElementById("view-" + v).hidden = v !== dest);
   saveUi();
+  if (dest === "play"){ guideReturn = null; renderPlay(); return; }
   if (guideReturn != null){
     const row = document.getElementById("fight-" + guideReturn);
     if (row){ row.scrollIntoView({block: "center"}); flashEl(row); }
@@ -1963,7 +1971,7 @@ function playNodes(L){
     if (st[6]) nodes.push({t: "fly", map: (runs[0] || [st[2]])[0],
       label: "✈ Fly to " + prettyMap(st[6]), seg: null, stop: null});
     for (let ri = 0; ri < runs.length - 1; ri++)
-      nodes.push({t: "move", map: runs[ri][0], seg: runs[ri][1],
+      nodes.push({t: "move", map: runs[ri][0], seg: runs[ri][1], to: runs[ri + 1][0],
         label: moveVerb(runs[ri][0], runs[ri + 1][0]), stop: null});
     const lastRun = runs.length ? runs[runs.length - 1] : null;
     nodes.push({t: "stop", map: st[2],
@@ -1995,6 +2003,83 @@ function playCtx(){
                                                 : `${PLAY.sec}. ${(STAGE_BY_ID[PLAY.sec] || {}).name || ""}`};
 }
 
+/* the ledger row for a trainer stop node (opponents, plan, encounter id) */
+function playFightRow(L, node){
+  if (!node || !node.stop || str(node.stop[0]) !== "trainer") return null;
+  const ord = (L.rt || []).slice(0, node.stopIdx + 1)
+    .filter(x => str(x[0]) === "trainer").length;
+  let seen = 0;
+  for (const l of L.log){
+    if (str(l[2]) === "wild") continue;
+    seen++; if (seen === ord) return l;
+  }
+  return null;
+}
+
+/* the next actual stop after node index i, for "what this walk is for" links */
+function nextStopAfter(nodes, i){
+  for (let j = i + 1; j < nodes.length; j++)
+    if (nodes[j].stop) return {idx: j, node: nodes[j]};
+  return null;
+}
+
+function playDesc(ctx, row){
+  const {L, nodes, node} = ctx;
+  if (!node) return "";
+  const jump = ref => ref ? `<button class="fightlink" data-jumpnode="${ref.idx}">${
+    ref.node.stopIdx + 1}. ${esc(ref.node.label)}</button>` : "";
+  const nxt = nextStopAfter(nodes, PLAY.node);
+  const nextBit = nxt ? ` Next up: ${jump(nxt)}${
+    (RKIND[str(nxt.node.stop[0])] || {}).label ? ` (${esc((RKIND[str(nxt.node.stop[0])] || {}).label)})` : ""}.` : "";
+
+  if (node.t === "fly")
+    return `Use Fly from the party menu — you land at the Pokémon Center, which
+      counts as a full heal, then walk on from there.${nextBit}`;
+  if (node.t === "move"){
+    const l = node.label, to = node.to ? prettyMap(node.to) : "";
+    let how = `Follow the gold path across into ${esc(to)}.`;
+    if (l.startsWith("Descend")) how = `Take the ladder down at the end of the gold path — the route continues on ${esc(to)}.`;
+    else if (l.startsWith("Climb")) how = `Take the ladder up at the end of the gold path — the route continues on ${esc(to)}.`;
+    else if (l.startsWith("Take the Seagallop")) how = `Board the Seagallop at the harbor — it sails straight there.`;
+    else if (l.startsWith("Enter")) how = `Walk the gold path to the door and head inside.`;
+    else if (l.startsWith("Exit")) how = `Head back out through the door.`;
+    return how + nextBit;
+  }
+  const st = node.stop, kind = str(st[0]), what = str(st[1]) || "",
+        walk = st[5], species = (st[8] || []).map(x => esc(str(x))),
+        hunt = st[11] || 0;
+  if (kind === "trainer"){
+    const opps = row ? row[4] : [];
+    const names = opps.slice(0, 4).map(s => `${esc(str(s[0]))} L${s[1]}`).join(", ");
+    const link = row ? ` — <button class="fightlink" data-enc="${esc(row[1])}"
+      data-n="${node.stopIdx + 1}">full matchup analysis ↗</button>` : "";
+    return `Walk the ${walk}-step gold path to the pin and battle: ${opps.length}
+      Pokémon${names ? ` (${names}${opps.length > 4 ? "…" : ""})` : ""}. The plan
+      below answers each in order${link}.`;
+  }
+  if (kind === "item")
+    return `Walk ${walk} steps to the pinned item ball and pick it up — it holds
+      <b>${esc(what)}</b>.${nextBit}`;
+  if (kind === "hidden")
+    return st[9]
+      ? `<b>${esc(what)}</b> is buried at the pin — nothing shows on screen and
+         only the Itemfinder digs it up. Stand there and use it.${nextBit}`
+      : `<b>${esc(what)}</b> is hidden at the pin — no sprite marks it. Walk over
+         (${walk} steps), face the tile and press A.${nextBit}`;
+  if (kind === "catch")
+    return `New wild Pokémon live here: hunt this spot until you've caught
+      ${species.join(", ") || "them"}${hunt > 3 ? ` — expect around ${hunt}
+      encounters for the rarest` : ""}. The party plan already budgets the
+      wild damage.`;
+  if (kind === "heal")
+    return `Step inside and heal at the counter — HP and PP fully restore, and
+      every fight plan after this point budgets from full bars.${nextBit}`;
+  if (kind === "event")
+    return `Walk ${walk} steps to the pin and trigger it — ${esc(what)}. Talk to
+      the NPC or interact with the spot to collect it before moving on.${nextBit}`;
+  return "";
+}
+
 function renderPlay(){
   const el = document.getElementById("playObj");
   const ctx = playCtx();
@@ -2005,33 +2090,23 @@ function renderPlay(){
   const doneCount = keys2.filter(kk => DONE.has(kk)).length;
 
   // objective
+  const row = playFightRow(L, node);
   let planLine = "";
-  if (node && node.stop){
-    const kind = str(node.stop[0]);
-    if (kind === "trainer"){
-      // compressed plan straight from the ledger
-      const ord = (L.rt || []).slice(0, node.stopIdx + 1)
-        .filter(x => str(x[0]) === "trainer").length;
-      let li3 = 0, row = null, seen = 0;
-      for (const l of L.log){
-        if (str(l[2]) === "wild") continue;
-        seen++; if (seen === ord){ row = l; break; }
-      }
-      if (row){
-        const segs2 = [];
-        for (const st2 of row[4]){
-          const lbl = (str(st2[2]) || "?") + " · " + (str(st2[3]) || "?");
-          if (segs2.length && segs2[segs2.length-1][0] === lbl) segs2[segs2.length-1][1]++;
-          else segs2.push([lbl, 1]);
-        }
-        planLine = segs2.slice(0, 3).map(([l2, n2]) => l2 + (n2 > 1 ? " ×" + n2 : "")).join(", ");
-      }
+  if (row){
+    const segs2 = [];
+    for (const st2 of row[4]){
+      const lbl = (str(st2[2]) || "?") + " · " + (str(st2[3]) || "?");
+      if (segs2.length && segs2[segs2.length-1][0] === lbl) segs2[segs2.length-1][1]++;
+      else segs2.push([lbl, 1]);
     }
+    planLine = segs2.slice(0, 3).map(([l2, n2]) => l2 + (n2 > 1 ? " ×" + n2 : "")).join(", ");
   }
   const kindLbl = node && node.stop ? (RKIND[str(node.stop[0])] || {}).label || "" : "travel";
+  const desc = playDesc(ctx, row);
   el.innerHTML = `<div class="po-leg">${esc(label)} · step ${PLAY.node + 1}/${nodes.length}
       · ${doneCount}/${keys2.length} done · ${esc(kindLbl)}</div>
     <div class="po-what">${node && node.stop ? `${node.stopIdx + 1}. ` : ""}${esc(node ? node.label : "")}</div>
+    ${desc ? `<div class="po-desc">${desc}</div>` : ""}
     ${planLine ? `<div class="po-plan">${esc(planLine)}</div>` : ""}`;
 
   renderPlayTeam(ctx);
@@ -2177,6 +2252,13 @@ function playAdvance(dir){
 }
 document.getElementById("playNext").addEventListener("click", () => playAdvance(1));
 document.getElementById("playPrev").addEventListener("click", () => playAdvance(-1));
+/* links inside the objective description: fight matchups and node jumps */
+document.getElementById("playTop").addEventListener("click", ev => {
+  const j = ev.target.closest("[data-jumpnode]");
+  if (j){ PLAY.node = +j.dataset.jumpnode; renderPlay(); return; }
+  const f = ev.target.closest(".fightlink");
+  if (f && f.dataset.enc) openEncounter(f.dataset.enc, +f.dataset.n || null);
+});
 document.addEventListener("keydown", ev => {
   if (view !== "play" || !document.getElementById("playDrawer").hidden
       || !document.getElementById("playModal").hidden) return;
