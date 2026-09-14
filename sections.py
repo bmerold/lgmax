@@ -1156,14 +1156,32 @@ def _title_legs(legs):
         leg["title"] = titles[i]
         leg.pop("_span", None)
 
+_PRE_EVO = {}
+def _pre_evo(species):
+    if not _PRE_EVO:
+        for frm, evs in E.EVOS.items():
+            for ev in evs:
+                _PRE_EVO.setdefault(ev["to"], frm)
+    return _PRE_EVO.get(species)
+
 def move_origin(species, level, mv):
     """Where this specimen got the move: its own level-up learnset first
     (that is how move_pool found it too), else the TM/HM that teaches it,
-    else the Two Island tutor."""
+    else the Two Island tutor. A move an evolved form only lists at Lv 1
+    was really learned lower down the line, so name the form and level
+    that learned it."""
     lvls = [lv for lv, m2 in E.LEVELUP.get(species, []) if m2 == mv and lv <= level]
     if lvls:
         lv = max(lvls)
-        return "start" if lv <= 1 else f"Lv {lv}"
+        if lv > 1: return f"Lv {lv}"
+        pre = _pre_evo(species)
+        while pre:
+            plv = [l for l, m2 in E.LEVELUP.get(pre, [])
+                   if m2 == mv and 1 < l <= level]
+            if plv:
+                return f"Lv {max(plv)} ({E.SPECIES[pre]['name']})"
+            pre = _pre_evo(pre)
+        return "start"
     item = G.MOVE_TO_TM.get(mv)
     if item:
         return item.replace("ITEM_", "")
