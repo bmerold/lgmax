@@ -358,8 +358,9 @@ def scc_groups(mat, n, start_row=0):
 
 def order_tour(mat, start_i, end_i, idxs):
     """Open tour from start over `idxs`, optionally pinned to end at end_i.
-    Nearest-neighbour seed, then Or-opt and 2-opt (asymmetric-safe: every
-    candidate is scored with the real directed matrix)."""
+    Nearest-neighbour seed, then Or-opt (segments of 1..6, both orientations,
+    O(1) deltas -- a four-stop pocket left for a late backtrack relocates as
+    one piece) and 2-opt, all scored with the real directed matrix."""
     todo = [i for i in idxs if i != end_i]
     tour, cur = [], start_i
     while todo:
@@ -373,37 +374,58 @@ def order_tour(mat, start_i, end_i, idxs):
             c += mat[prev][j]; prev = j
         return c
 
-    best, best_c = tour, cost(tour)
-    improved, rounds = True, 0
+    best = tour
     fixed_tail = 1 if end_i is not None else 0
-    while improved and rounds < 12:
+    improved, rounds = True, 0
+    while improved and rounds < 24:
         improved = False; rounds += 1
         n = len(best)
-        # Or-opt: move a run of 1-3 nodes somewhere better
-        for size in (1, 2, 3):
-            for i in range(0, n - fixed_tail - size + 1):
-                seg = best[i:i + size]
-                rest = best[:i] + best[i + size:]
-                for j in range(0, len(rest) - fixed_tail + 1):
-                    if j == i: continue
-                    cand = rest[:j] + seg + rest[j:]
-                    cc = cost(cand)
-                    if cc < best_c - 1e-9:
-                        best, best_c, improved = cand, cc, True
-                        break
-                if improved: break
+        # ---- Or-opt: relocate a run of 1..6 stops, forwards or reversed
+        for L in range(1, 7):
             if improved: break
+            for i in range(0, n - fixed_tail - L + 1):
+                seg = best[i:i + L]
+                prev = best[i - 1] if i > 0 else start_i
+                nxt = best[i + L] if i + L < n else None
+                gain = mat[prev][seg[0]]
+                if nxt is not None:
+                    gain += mat[seg[-1]][nxt] - mat[prev][nxt]
+                if gain <= 1e-9: continue
+                fwd = sum(mat[seg[k]][seg[k + 1]] for k in range(L - 1))
+                rev = sum(mat[seg[k + 1]][seg[k]] for k in range(L - 1))
+                rest = best[:i] + best[i + L:]
+                m = len(rest)
+                hit = None
+                for j in range(0, m - fixed_tail + 1):
+                    if fixed_tail and j == m: break
+                    P = rest[j - 1] if j > 0 else start_i
+                    Q = rest[j] if j < m else None
+                    base = mat[P][Q] if Q is not None else 0
+                    for flip in (0, 1):
+                        s0 = seg[-1] if flip else seg[0]
+                        s1 = seg[0] if flip else seg[-1]
+                        add = mat[P][s0] - base + ((rev if flip else fwd) - fwd)
+                        if Q is not None: add += mat[s1][Q]
+                        if add < gain - 1e-9:
+                            hit = (j, flip); break
+                    if hit: break
+                if hit:
+                    j, flip = hit
+                    piece = seg[::-1] if flip else seg
+                    best = rest[:j] + piece + rest[j:]
+                    improved = True
+                    break
         if improved: continue
-        # 2-opt: reverse a middle segment
+        # ---- 2-opt: reverse a middle segment
+        base_c = cost(best)
         for i in range(0, n - fixed_tail - 1):
             for j in range(i + 2, n - fixed_tail + 1):
                 cand = best[:i] + best[i:j][::-1] + best[j:]
-                cc = cost(cand)
-                if cc < best_c - 1e-9:
-                    best, best_c, improved = cand, cc, True
+                if cost(cand) < base_c - 1e-9:
+                    best = cand; improved = True
                     break
             if improved: break
-    return best, best_c
+    return best, cost(best)
 
 def corners(path):
     """A tile path compressed to its turning points."""
