@@ -230,6 +230,54 @@ def variant_ok(enc, starter):
 # the same line the player walks, so the guide's checklist, its maps and its
 # ledger all agree. A Fly mid-stage lands at a Pokémon Center, which is a
 # full heal, and is treated as one.
+def _center_doors():
+    """Outdoor map -> Pokémon Center door tiles, from the warps themselves."""
+    doors = {}
+    for name, mj in R.maps().items():
+        for w in mj.get("warp_events", []):
+            dm = w.get("dest_map") or ""
+            if "_POKEMON_CENTER" in dm and dm.endswith("_1F"):
+                doors.setdefault(name, []).append((w.get("x", 0), w.get("y", 0)))
+    return doors
+
+def _heal_zones():
+    """The two in-dungeon healing spots, as trigger tiles."""
+    out = {}
+    for name, why in (("PokemonTower_5F", "the Purified Zone on Pokémon Tower 5F"),
+                      ("OneIsland_KindleRoad_EmberSpa", "the Ember Spa on Kindle Road")):
+        mj = R.maps().get(name) or {}
+        tiles = [(c.get("x", 0), c.get("y", 0)) for c in mj.get("coord_events") or []]
+        if tiles: out[name] = (why, tiles)
+    return out
+
+def _step_heal(step, doors, zones):
+    """Does this route step's walk pass a heal? Path tiles within 4 tiles of
+    a Center door, inside a Center, on a heal-zone trigger, or a flight."""
+    if step.get("fly"):
+        return (f"flying — you land at the {G.pretty_location(step['fly'])} "
+                "Pokémon Center")
+    prev = None
+    for m, x, y in step["path"]:
+        if "PokemonCenter" in m:
+            town = m.split("_PokemonCenter")[0]
+            return G.pretty_location(town) + " Pokémon Center"
+        if prev and prev[0] == m:
+            n = max(abs(x - prev[1]), abs(y - prev[2]), 1)
+            pts = [(round(prev[1] + (x - prev[1]) * t / n),
+                    round(prev[2] + (y - prev[2]) * t / n)) for t in range(n + 1)]
+        else:
+            pts = [(x, y)]
+        for dx_, dy_ in pts:
+            for wxy in doors.get(m, ()):
+                if max(abs(dx_ - wxy[0]), abs(dy_ - wxy[1])) <= 4:
+                    return G.pretty_location(m) + " Pokémon Center"
+            z = zones.get(m)
+            if z and any(max(abs(dx_ - zx), abs(dy_ - zy)) <= 1
+                         for zx, zy in z[1]):
+                return z[0]
+        prev = (m, x, y)
+    return None
+
 _ROUTE_POS = None
 
 def route_positions():
@@ -243,15 +291,16 @@ def route_positions():
     path = f"{OUT}/route.json"
     if not os.path.exists(path): return _ROUTE_POS
     rt = json.load(open(path))
+    doors, zones = _center_doors(), _heal_zones()
     i, last_key = 0, None
     for st in rt["stages"]:
         last_key = None                    # heals don't cross stage ends
         for s in st["steps"]:
-            if s.get("fly") and last_key is not None:
-                idx, _, rs = _ROUTE_POS[last_key]
-                _ROUTE_POS[last_key] = (
-                    idx, f"flying — you land at the {G.pretty_location(s['fly'])} "
-                         "Pokémon Center", rs)
+            why = _step_heal(s, doors, zones)
+            if why and last_key is not None:
+                idx, old_why, rs = _ROUTE_POS[last_key]
+                if not old_why:
+                    _ROUTE_POS[last_key] = (idx, why, rs)
             if s["kind"] != "trainer": continue
             const = (s.get("enc") or "").split(":")[-1]
             key = R.battle_key(const)
@@ -277,15 +326,10 @@ def route_order_battles(battles):
                                   else 1 << 30, i))
     battles = [battles[i] for i in order]
     heal_after = {}
-    for a, b in zip(battles, battles[1:]):
+    for a in battles:
         hit = pos.get(R.battle_key(a["trainerConst"]))
         if hit and hit[1]:
             heal_after[a["id"]] = hit[1]
-            continue
-        ma, mb = a.get("locationRaw"), b.get("locationRaw")
-        if ma and mb and ma != mb:
-            why = R.center_between(ma, mb)
-            if why: heal_after[a["id"]] = why
     return battles, heal_after
 
 _COLD = None
@@ -302,7 +346,6 @@ def cold_stage_starts():
     path = f"{OUT}/route.json"
     if not os.path.exists(path): return _COLD
     rt = json.load(open(path))
-    centers = R.center_maps()
     for i in range(len(rt["stages"]) - 1):
         a, b = rt["stages"][i], rt["stages"][i + 1]
         if a["stage"] == 32:               # Champion -> respawn at home
@@ -312,10 +355,9 @@ def cold_stage_starts():
         steps += a["steps"][tb[-1] + 1:] if tb else a["steps"]
         nb = [j for j, x in enumerate(b["steps"]) if x["kind"] == "trainer"]
         steps += b["steps"][:nb[0] + 1] if nb else b["steps"]
-        healed = any(st.get("fly") for st in steps) or any(
-            "PokemonCenter" in m or m in centers
-            for st in steps for m, _x, _y in st["path"])
-        if not healed: _COLD.add(b["stage"])
+        doors, zones = _center_doors(), _heal_zones()
+        if not any(_step_heal(st, doors, zones) for st in steps):
+            _COLD.add(b["stage"])
     return _COLD
 
 def route_stage_of(enc):
@@ -1189,12 +1231,20 @@ def solve_section(stage, encs, starter, avail, tm_value=None, carry=None):
     # trainer standing on it -- so heal after the LAST battle there. (The Purified
     # Zone can in fact be re-walked at will, which makes this the conservative
     # reading rather than an optimistic one.)
-    heal_idx = heal_points(battles)
-    # plus the Centers you walk PAST between one map and the next -- the one at
-    # Mt. Moon's entrance is on Route 4, which holds no stage-5 battle at all
-    for i, e in enumerate(battles):
-        if e["id"] in path_heals and i < len(battles) - 1:
-            heal_idx.setdefault(i, path_heals[e["id"]])
+    # heals are anchored where the ROUTE's walked tiles actually pass a
+    # Center door, a heal zone, or a flight home -- heal_points' map-level
+    # guess produced phantom heals (a "Route 4 Center" cut on a walk that
+    # never went near its door) and zero-battle legs
+    heal_idx = {}
+    if route_positions():
+        for i, e in enumerate(battles):
+            if e["id"] in path_heals and i < len(battles) - 1:
+                heal_idx.setdefault(i, path_heals[e["id"]])
+    else:
+        heal_idx = heal_points(battles)
+        for i, e in enumerate(battles):
+            if e["id"] in path_heals and i < len(battles) - 1:
+                heal_idx.setdefault(i, path_heals[e["id"]])
 
     # candidate pool: everything obtainable by now, minus the other two starters'
     # entire evolution lines -- excluding only the base forms let Ivysaur and
