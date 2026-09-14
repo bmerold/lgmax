@@ -408,6 +408,66 @@ button{font:inherit;color:inherit}
 .rt-species{color:var(--ink-2);font-size:11.5px}
 .rt-row.flash{animation:rowflash 1.6s ease-out}
 
+
+/* ================= play mode: one screen, the map in charge ============= */
+#view-play{position:fixed;inset:0;z-index:60;display:flex;flex-direction:column;
+  background:var(--bg)}
+#playTop{display:flex;gap:10px;align-items:center;padding:10px 14px;
+  background:var(--surface);border-bottom:1px solid var(--line);flex-shrink:0}
+#playObj{flex:1;min-width:0;line-height:1.35}
+#playObj .po-leg{font-size:11px;color:var(--ink-3);letter-spacing:.05em;text-transform:uppercase}
+#playObj .po-what{font-weight:700;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#playObj .po-plan{font-size:12px;color:var(--accent);font-weight:600}
+#playPrev,#playNext,#playOutlineBtn{border:1px solid var(--line);border-radius:9px;
+  background:var(--surface-2);color:var(--ink);font:600 13px/1 inherit;font-family:inherit;
+  padding:10px 14px;cursor:pointer;flex-shrink:0}
+#playNext{background:var(--good);border-color:var(--good);color:#fff}
+#playPrev:hover,#playOutlineBtn:hover{border-color:var(--accent);color:var(--accent)}
+#playTeam{display:flex;gap:6px;align-items:flex-end;justify-content:center;
+  padding:6px 10px 4px;background:var(--surface);border-bottom:1px solid var(--line);
+  flex-shrink:0;overflow-x:auto}
+.pt-mon{border:0;background:none;cursor:pointer;text-align:center;padding:2px 6px;
+  font-family:inherit;border-radius:8px}
+.pt-mon:hover{background:var(--surface-2)}
+.pt-mon img{width:48px;height:48px;image-rendering:pixelated;display:block;margin:0 auto}
+.pt-mon .pt-l{font-size:10px;color:var(--ink-2);font-weight:600;display:block;margin-top:-4px}
+#playMap{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;
+  overflow:hidden;background:#101014}
+#playFit{position:relative;flex-shrink:0}
+#playFit .mapbox{position:relative}
+#playDetail{flex-shrink:0;max-height:26vh;overflow-y:auto;background:var(--surface);
+  border-top:1px solid var(--line);padding:8px 14px}
+#playDetail .logrow{border:0;padding:4px 0}
+#playDetail .pd-note{font-size:12.5px;color:var(--ink-2);padding:4px 0}
+#playDetail .pd-note b{color:var(--ink)}
+.mark.cur{z-index:4;outline:2px solid #fff;box-shadow:0 0 0 5px var(--accent),0 1px 5px rgba(0,0,0,.6);
+  animation:markpulse 1.6s ease-out infinite}
+#playDrawer{position:fixed;inset:0 auto 0 0;width:min(430px,92vw);z-index:70;
+  background:var(--surface);border-right:1px solid var(--line);
+  box-shadow:6px 0 24px rgba(0,0,0,.25);display:flex;flex-direction:column}
+.drawer-h{display:flex;gap:8px;align-items:center;padding:12px 14px;
+  border-bottom:1px solid var(--line);flex-shrink:0}
+.drawer-links{display:flex;gap:6px;margin-left:auto}
+.drawer-links button,#drawerClose{border:1px solid var(--line);border-radius:7px;
+  background:var(--surface-2);color:var(--ink-2);font:600 11px/1 inherit;font-family:inherit;
+  padding:6px 8px;cursor:pointer}
+.drawer-links button:hover,#drawerClose:hover{color:var(--accent);border-color:var(--accent)}
+#drawerBody{overflow-y:auto;flex:1}
+.dr-sec{width:100%;text-align:left;border:0;background:none;font:inherit;cursor:pointer;
+  padding:8px 14px;border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:baseline}
+.dr-sec:hover{background:var(--surface-2)}
+.dr-sec.cur{box-shadow:inset 3px 0 0 var(--accent)}
+.dr-sec .num{margin-left:auto}
+.dr-node{width:100%;text-align:left;border:0;background:var(--surface-2);font:inherit;
+  font-size:12px;cursor:pointer;padding:5px 14px 5px 30px;display:flex;gap:8px}
+.dr-node:hover{background:var(--surface-3)}
+.dr-node.done{opacity:.5;text-decoration:line-through}
+.dr-node.cur{box-shadow:inset 3px 0 0 var(--accent);font-weight:700}
+#playModal{position:fixed;inset:0;z-index:80;background:rgba(0,0,0,.45);
+  display:flex;align-items:center;justify-content:center}
+#playModalBox{max-width:min(430px,92vw);max-height:84vh;overflow-y:auto;
+  background:var(--surface);border-radius:14px;padding:14px;box-shadow:0 12px 40px rgba(0,0,0,.4)}
+
 /* ---------- choices ---------- */
 .choice-h{padding:16px 18px 14px}
 .choice-h h3{font-size:18px;font-weight:700}
@@ -474,12 +534,37 @@ details.notes[open] summary::after{content:"−"}
       </div>
     </div>
     <nav class="nav" id="nav">
-      <button class="navb" data-view="enc" aria-current="true">Encounters</button>
+      <button class="navb" data-view="play" aria-current="true">Play</button>
+      <button class="navb" data-view="enc" aria-current="false">Encounters</button>
       <button class="navb" data-view="sec" aria-current="false">The guide</button>
       <button class="navb" data-view="tm" aria-current="false">TM plan</button>
       <button class="navb" data-view="cho" aria-current="false">Choices</button>
     </nav>
   </header>
+
+  <div id="view-play" hidden>
+    <div id="playTop">
+      <button id="playPrev" title="previous step (←)">‹</button>
+      <div id="playObj"></div>
+      <button id="playNext" title="mark done, next step (→)">done, next ›</button>
+      <button id="playOutlineBtn" title="the whole journey">▤ journey</button>
+    </div>
+    <div id="playTeam"></div>
+    <div id="playMap"><div id="playFit"></div></div>
+    <div id="playDetail"></div>
+    <div id="playDrawer" hidden>
+      <div class="drawer-h"><b>The journey</b>
+        <span class="drawer-links">
+          <button data-view="sec">full guide</button>
+          <button data-view="tm">TM plan</button>
+          <button data-view="cho">choices</button>
+          <button data-view="enc">encounters</button>
+        </span>
+        <button id="drawerClose">✕</button></div>
+      <div id="drawerBody"></div>
+    </div>
+    <div id="playModal" hidden><div id="playModalBox"></div></div>
+  </div>
 
   <div id="view-enc">
     <div class="shell">
@@ -542,6 +627,8 @@ const SECTIONS_BY = DATA.sections, CHOICES_BY = DATA.choices;
 const MAPART = DATA.mapart || {};
 /* The completionist route: per stage, ordered stops with real tile paths. */
 const ROUTE = DATA.route || {total: 0, stages: []};
+/* The game's own front sprites, keyed by display name. */
+const SPRITES = DATA.sprites || {};
 /* Choices the run makes once and keeps; the section parties are solved with
    these locked, so a single Eevee can't become a Vaporeon in one town and a
    Jolteon in the next. */
@@ -584,7 +671,7 @@ const effLabel = e => e === 0 ? "immune" : e + "×";
 const costColor = p => p < 40 ? "var(--good)" : (p < 100 ? "var(--warn)" : "var(--bad)");
 const hpColor = p => p > 50 ? "var(--good)" : (p > 15 ? "var(--warn)" : "var(--bad)");
 
-let starter = "Bulbasaur", view = "enc";
+let starter = "Bulbasaur", view = "play";
 let selected = null, selectedSec = 18, selectedLeg = 0, tab = "team";
 
 /* ---- play-through progress + where-you-were, kept in this browser ---- */
@@ -605,7 +692,7 @@ try {
     trading = !!u.trading;
     if (typeof u.sec === "number") selectedSec = u.sec;
     if (typeof u.leg === "number") selectedLeg = u.leg;
-    if (["enc","sec","tm","cho"].includes(u.view)) view = u.view;
+    if (["enc","sec","tm","cho","play"].includes(u.view)) view = u.view;
     if (typeof u.enc === "string") selected = u.enc;
   }
 } catch (e) {}
@@ -667,7 +754,7 @@ document.getElementById("nav").addEventListener("click", ev => {
   view = b.dataset.view;
   document.querySelectorAll("[data-view]").forEach(x =>
     x.setAttribute("aria-current", x.dataset.view === view));
-  ["enc","sec","tm","cho"].forEach(v =>
+  ["enc","sec","tm","cho","play"].forEach(v =>
     document.getElementById("view-" + v).hidden = v !== view);
   updateSticky();
   saveUi();
@@ -1608,7 +1695,7 @@ function openEncounter(id, fromN){
   selected = id; view = "enc";
   document.querySelectorAll("[data-view]").forEach(x =>
     x.setAttribute("aria-current", x.dataset.view === "enc"));
-  ["enc","sec","tm","cho"].forEach(v =>
+  ["enc","sec","tm","cho","play"].forEach(v =>
     document.getElementById("view-" + v).hidden = v !== "enc");
   renderList();
   renderPanel(e);
@@ -1627,7 +1714,7 @@ function backToGuide(){
   view = "sec";
   document.querySelectorAll("[data-view]").forEach(x =>
     x.setAttribute("aria-current", x.dataset.view === "sec"));
-  ["enc","sec","tm","cho"].forEach(v =>
+  ["enc","sec","tm","cho","play"].forEach(v =>
     document.getElementById("view-" + v).hidden = v !== "sec");
   saveUi();
   if (guideReturn != null){
@@ -1834,6 +1921,343 @@ function notesHTML(e, heals){
   </div></details>`;
 }
 
+
+/* ================= play mode ================= */
+let PLAY = {sec: 0, leg: 0, node: 0};
+try {
+  const pp = JSON.parse(localStorage.getItem("lgmax-play") || "null");
+  if (pp && typeof pp.sec === "number") PLAY = pp;
+} catch (e) {}
+const savePlay = () => { try { localStorage.setItem("lgmax-play", JSON.stringify(PLAY)); } catch (e) {} };
+
+const FLOOR_RE = /_(B?\d+F)$/;
+function floorVal(m){
+  const f = (m.match(FLOOR_RE) || [])[1];
+  if (!f) return null;
+  return f[0] === "B" ? -parseInt(f.slice(1)) : parseInt(f);
+}
+function moveVerb(a, b){
+  const fa = floorVal(a), fb = floorVal(b);
+  const baseA = a.replace(FLOOR_RE, ""), baseB = b.replace(FLOOR_RE, "");
+  if (fa !== null && fb !== null && baseA === baseB)
+    return (fb < fa ? "Descend to " : "Climb to ") + prettyMap(b);
+  if (a.endsWith("_Harbor") || b.endsWith("_Harbor"))
+    return "Take the Seagallop ferry to " + prettyMap(b);
+  if (b.startsWith(a + "_")) return "Enter " + prettyMap(b);
+  if (a.startsWith(b + "_")) return "Exit to " + prettyMap(b);
+  return "Head into " + prettyMap(b);
+}
+
+/* the linear node list for a leg: every stop, with a distinct node for each
+   screen change (floor, door, ferry, flight) along the way */
+function playNodes(L){
+  const nodes = [];
+  (L.rt || []).forEach((st, i) => {
+    const runs = (st[7] || []).filter(r => MAPART[r[0]]);
+    if (st[6]) nodes.push({t: "fly", map: (runs[0] || [st[2]])[0],
+      label: "✈ Fly to " + prettyMap(st[6]), seg: null, stop: null});
+    for (let ri = 0; ri < runs.length - 1; ri++)
+      nodes.push({t: "move", map: runs[ri][0], seg: runs[ri][1],
+        label: moveVerb(runs[ri][0], runs[ri + 1][0]), stop: null});
+    const lastRun = runs.length ? runs[runs.length - 1] : null;
+    nodes.push({t: "stop", map: st[2],
+      seg: lastRun && lastRun[0] === st[2] ? lastRun[1] : null,
+      label: str(st[1]) || "", stop: st, stopIdx: i});
+  });
+  return nodes;
+}
+
+const LEG_ORDER = [];
+function legOrder(){
+  if (LEG_ORDER.length) return LEG_ORDER;
+  STAGES.forEach(sg => legsOf(secData(sg.id)).forEach((L, k) =>
+    LEG_ORDER.push([sg.id, k])));
+  return LEG_ORDER;
+}
+
+function playCtx(){
+  const d = secData(PLAY.sec);
+  if (!d) return null;
+  const legs = legsOf(d);
+  const k = Math.min(PLAY.leg, legs.length - 1);
+  const L = legs[k];
+  if (!L) return null;
+  const nodes = playNodes(L);
+  const node = nodes[Math.min(PLAY.node, nodes.length - 1)] || null;
+  return {d, L, k, legs, nodes, node,
+          label: (legs.length > 1 && str(L.ti)) ? `${PLAY.sec}${legLetter(k)}. ${str(L.ti)}`
+                                                : `${PLAY.sec}. ${(STAGE_BY_ID[PLAY.sec] || {}).name || ""}`};
+}
+
+function renderPlay(){
+  const el = document.getElementById("playObj");
+  const ctx = playCtx();
+  if (!ctx){ el.innerHTML = "No data."; return; }
+  const {L, nodes, node, label} = ctx;
+  PLAY.node = Math.min(PLAY.node, nodes.length - 1);
+  const keys2 = (L.rt || []).map(stopKey);
+  const doneCount = keys2.filter(kk => DONE.has(kk)).length;
+
+  // objective
+  let planLine = "";
+  if (node && node.stop){
+    const kind = str(node.stop[0]);
+    if (kind === "trainer"){
+      // compressed plan straight from the ledger
+      const ord = (L.rt || []).slice(0, node.stopIdx + 1)
+        .filter(x => str(x[0]) === "trainer").length;
+      let li3 = 0, row = null, seen = 0;
+      for (const l of L.log){
+        if (str(l[2]) === "wild") continue;
+        seen++; if (seen === ord){ row = l; break; }
+      }
+      if (row){
+        const segs2 = [];
+        for (const st2 of row[4]){
+          const lbl = (str(st2[2]) || "?") + " · " + (str(st2[3]) || "?");
+          if (segs2.length && segs2[segs2.length-1][0] === lbl) segs2[segs2.length-1][1]++;
+          else segs2.push([lbl, 1]);
+        }
+        planLine = segs2.slice(0, 3).map(([l2, n2]) => l2 + (n2 > 1 ? " ×" + n2 : "")).join(", ");
+      }
+    }
+  }
+  const kindLbl = node && node.stop ? (RKIND[str(node.stop[0])] || {}).label || "" : "travel";
+  el.innerHTML = `<div class="po-leg">${esc(label)} · step ${PLAY.node + 1}/${nodes.length}
+      · ${doneCount}/${keys2.length} done · ${esc(kindLbl)}</div>
+    <div class="po-what">${node && node.stop ? `${node.stopIdx + 1}. ` : ""}${esc(node ? node.label : "")}</div>
+    ${planLine ? `<div class="po-plan">${esc(planLine)}</div>` : ""}`;
+
+  renderPlayTeam(ctx);
+  renderPlayMap(ctx);
+  renderPlayDetail(ctx);
+  savePlay();
+}
+
+function renderPlayTeam(ctx){
+  const el = document.getElementById("playTeam");
+  el.innerHTML = (ctx.L.team || []).map((t, i) => {
+    const nm = str(t[0]);
+    const spr = SPRITES[nm];
+    return `<button class="pt-mon" data-mem="${i}" title="${esc(nm)} — moves and PP">
+      ${spr ? `<img src="data:image/png;base64,${spr}" alt="${esc(nm)}">`
+            : `<span style="font-size:26px">◓</span>`}
+      <span class="pt-l">${esc(nm)} · L${t[2]}</span>
+    </button>`;
+  }).join("") || `<span class="note" style="padding:6px">no party needed on this stretch</span>`;
+}
+
+function renderPlayMap(ctx){
+  const holder = document.getElementById("playFit");
+  const node = ctx.node;
+  const art = node && MAPART[node.map];
+  if (!art){ holder.innerHTML = `<p class="empty" style="color:#ccc">No map for this step.</p>`; return; }
+  const [W, H, b64] = art;
+  const L = ctx.L;
+  const segsByMap = Object.fromEntries((L.mp || []).map(m => [m[0], m[1] || []]));
+  const dim = segsByMap[node.map] || [];
+  // pins: every stop of this leg on this map
+  let pins = "";
+  (L.rt || []).forEach((st, i) => {
+    if (st[2] !== node.map) return;
+    const key = stopKey(st);
+    const cur = node.stop && node.stopIdx === i;
+    pins += `<button class="mark${DONE.has(key) ? " done" : ""}${cur ? " cur" : ""}"
+      data-jump="${i}" style="left:${(st[3] + 0.5) * 16}px;top:${(st[4] + 0.5) * 16}px;
+      background:${(RKIND[str(st[0])] || RKIND.event).color}"
+      title="${i + 1}. ${esc(str(st[1]) || "")}">${i + 1}</button>`;
+  });
+  (L.amb || []).filter(a => a[0] === node.map).forEach(a => {
+    pins += `<span class="mark amb" style="left:${(a[1] + 0.5) * 16}px;top:${(a[2] + 0.5) * 16}px"
+      title="${esc(str(a[3]))} — renewable spawn (${RENEW_ODDS[str(a[4])] || "?"})">✦</span>`;
+  });
+  holder.innerHTML = `<div class="mapbox" style="width:${W}px;height:${H}px">
+    <img src="data:image/png;base64,${b64}" width="${W}" height="${H}" alt="">
+    <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
+      ${dim.map(c => `<polyline class="rpath" points="${svgPath(c)}"/>`).join("")}
+      ${dim.map(c => `<polyline class="rpath2" points="${svgPath(c)}"/>`).join("")}
+      ${dim.map(c => svgArrows(c)).join("")}
+      ${node.seg ? `<polyline class="rnow0" points="${svgPath(node.seg)}"/>
+                    <polyline class="rnow" points="${svgPath(node.seg)}"/>` : ""}
+    </svg>
+    ${pins}
+  </div>`;
+  fitPlayMap(W, H);
+}
+function fitPlayMap(W, H){
+  const wrap = document.getElementById("playMap");
+  const holder = document.getElementById("playFit");
+  const scale = Math.min((wrap.clientWidth - 16) / W, (wrap.clientHeight - 16) / H, 2.5);
+  holder.style.width = Math.round(W * scale) + "px";
+  holder.style.height = Math.round(H * scale) + "px";
+  const box = holder.querySelector(".mapbox");
+  if (box){ box.style.transformOrigin = "0 0"; box.style.transform = `scale(${scale})`; }
+}
+window.addEventListener("resize", () => {
+  if (view !== "play") return;
+  const ctx = playCtx();
+  if (ctx && ctx.node && MAPART[ctx.node.map]){
+    const [W, H] = MAPART[ctx.node.map];
+    fitPlayMap(W, H);
+  }
+});
+
+function renderPlayDetail(ctx){
+  const el = document.getElementById("playDetail");
+  const node = ctx.node;
+  if (!node){ el.innerHTML = ""; return; }
+  if (!node.stop){
+    el.innerHTML = `<div class="pd-note">${esc(node.label)} — just travel. The gold
+      stretch shows the way; the next objective is one step ahead.</div>`;
+    return;
+  }
+  const st = node.stop, kind = str(st[0]);
+  const key = stopKey(st), state = {key, done: DONE.has(key), next: false};
+  if (kind === "trainer"){
+    const ord = (ctx.L.rt || []).slice(0, node.stopIdx + 1)
+      .filter(x => str(x[0]) === "trainer").length;
+    let seen = 0, row = null;
+    for (const l of ctx.L.log){
+      if (str(l[2]) === "wild") continue;
+      seen++; if (seen === ord){ row = l; break; }
+    }
+    el.innerHTML = row ? logRow(row, node.stopIdx + 1, state)
+                       : `<div class="pd-note">${esc(str(st[1]) || "")}</div>`;
+  } else {
+    el.innerHTML = rtRow(st, node.stopIdx + 1, state);
+  }
+}
+
+/* ---- navigation ---- */
+function playAdvance(dir){
+  const ctx = playCtx();
+  if (!ctx) return;
+  if (dir > 0 && ctx.node && ctx.node.stop){
+    const key = stopKey(ctx.node.stop);
+    if (!DONE.has(key)){ DONE.add(key); saveDone(); renderSecList(); }
+  }
+  let n = PLAY.node + dir;
+  if (n >= ctx.nodes.length || n < 0){
+    const order = legOrder();
+    const at = order.findIndex(([sc, lg]) => sc === PLAY.sec && lg === PLAY.leg);
+    const nxt = order[at + (dir > 0 ? 1 : -1)];
+    if (!nxt) { n = Math.max(0, Math.min(PLAY.node, ctx.nodes.length - 1)); }
+    else {
+      PLAY.sec = nxt[0]; PLAY.leg = nxt[1];
+      selectedSec = nxt[0]; selectedLeg = nxt[1];
+      const c2 = playCtx();
+      n = dir > 0 ? 0 : (c2 ? c2.nodes.length - 1 : 0);
+    }
+  }
+  PLAY.node = n;
+  renderPlay();
+}
+document.getElementById("playNext").addEventListener("click", () => playAdvance(1));
+document.getElementById("playPrev").addEventListener("click", () => playAdvance(-1));
+document.addEventListener("keydown", ev => {
+  if (view !== "play" || !document.getElementById("playDrawer").hidden
+      || !document.getElementById("playModal").hidden) return;
+  if (ev.key === "ArrowRight"){ ev.preventDefault(); playAdvance(1); }
+  if (ev.key === "ArrowLeft"){ ev.preventDefault(); playAdvance(-1); }
+});
+
+/* pin click jumps to that stop's node */
+document.getElementById("playMap").addEventListener("click", ev => {
+  const m = ev.target.closest(".mark[data-jump]");
+  if (!m) return;
+  const ctx = playCtx();
+  if (!ctx) return;
+  const idx = ctx.nodes.findIndex(nd => nd.stop && nd.stopIdx === +m.dataset.jump);
+  if (idx >= 0){ PLAY.node = idx; renderPlay(); }
+});
+
+/* team member modal */
+document.getElementById("playTeam").addEventListener("click", ev => {
+  const b = ev.target.closest(".pt-mon");
+  if (!b) return;
+  const ctx = playCtx();
+  const t = ctx && ctx.L.team[+b.dataset.mem];
+  if (!t) return;
+  document.getElementById("playModalBox").innerHTML =
+    `<div class="party" style="grid-template-columns:1fr">${partyCard(t)}</div>`;
+  document.getElementById("playModal").hidden = false;
+});
+document.getElementById("playModal").addEventListener("click", ev => {
+  if (!ev.target.closest("#playModalBox"))
+    document.getElementById("playModal").hidden = true;
+});
+
+/* checkbox + fight link inside the detail panel */
+document.getElementById("playDetail").addEventListener("click", ev => {
+  const c = ev.target.closest(".chk");
+  if (c){
+    const key = c.dataset.key;
+    if (DONE.has(key)) DONE.delete(key); else DONE.add(key);
+    saveDone(); renderSecList(); renderPlay();
+    return;
+  }
+  const f = ev.target.closest(".fightlink");
+  if (f){ openEncounter(f.dataset.enc, +f.dataset.n || null); }
+});
+
+/* ---- the journey drawer ---- */
+function renderDrawer(){
+  const body = document.getElementById("drawerBody");
+  let html = "";
+  STAGES.forEach(sg => {
+    const legs = legsOf(secData(sg.id));
+    legs.forEach((L, k) => {
+      const rt = (L && L.rt) || [];
+      const dn = rt.filter(x => DONE.has(stopKey(x))).length;
+      const cur = sg.id === PLAY.sec && k === PLAY.leg;
+      const label = legs.length > 1 && L && str(L.ti)
+        ? `${sg.id}${legLetter(k)}. ${str(L.ti)}` : `${sg.id}. ${sg.name}`;
+      html += `<button class="dr-sec${cur ? " cur" : ""}" data-dsec="${sg.id}" data-dleg="${k}">
+        <b>${esc(label)}</b>
+        <span class="num">${rt.length ? `${dn}/${rt.length}` : ""}</span></button>`;
+      if (cur){
+        const ctx = playCtx();
+        (ctx ? ctx.nodes : []).forEach((nd, ni) => {
+          const done = nd.stop && DONE.has(stopKey(nd.stop));
+          html += `<button class="dr-node${done ? " done" : ""}${ni === PLAY.node ? " cur" : ""}"
+            data-dnode="${ni}">${nd.stop ? (nd.stopIdx + 1) + ". " : "· "}${esc(nd.label)}</button>`;
+        });
+      }
+    });
+  });
+  body.innerHTML = html;
+  const curEl = body.querySelector(".dr-node.cur, .dr-sec.cur");
+  if (curEl) curEl.scrollIntoView({block: "center"});
+}
+document.getElementById("playOutlineBtn").addEventListener("click", () => {
+  renderDrawer();
+  document.getElementById("playDrawer").hidden = false;
+});
+document.getElementById("drawerClose").addEventListener("click", () =>
+  document.getElementById("playDrawer").hidden = true);
+document.getElementById("drawerBody").addEventListener("click", ev => {
+  const n = ev.target.closest("[data-dnode]");
+  if (n){ PLAY.node = +n.dataset.dnode;
+    document.getElementById("playDrawer").hidden = true; renderPlay(); return; }
+  const sc = ev.target.closest("[data-dsec]");
+  if (sc){
+    PLAY.sec = +sc.dataset.dsec; PLAY.leg = +sc.dataset.dleg; PLAY.node = 0;
+    selectedSec = PLAY.sec; selectedLeg = PLAY.leg;
+    renderDrawer();
+  }
+});
+document.querySelector("#playDrawer .drawer-links").addEventListener("click", ev => {
+  const b = ev.target.closest("[data-view]");
+  if (!b) return;
+  document.getElementById("playDrawer").hidden = true;
+  view = b.dataset.view;
+  document.querySelectorAll("#nav [data-view]").forEach(x =>
+    x.setAttribute("aria-current", x.dataset.view === view));
+  ["enc","sec","tm","cho","play"].forEach(v =>
+    document.getElementById("view-" + v).hidden = v !== view);
+  saveUi();
+});
+
 /* ---------------- boot ---------------- */
 renderMast();
 renderList();
@@ -1854,10 +2278,11 @@ document.querySelectorAll("[data-trade]").forEach(x =>
   x.setAttribute("aria-pressed", String((x.dataset.trade === "yes") === trading)));
 document.querySelectorAll("#nav [data-view]").forEach(x =>
   x.setAttribute("aria-current", x.dataset.view === view));
-["enc","sec","tm","cho"].forEach(v =>
+["enc","sec","tm","cho","play"].forEach(v =>
   document.getElementById("view-" + v).hidden = v !== view);
 const _selRow = document.querySelector(`.sec-row[data-sec="${selectedSec}"][data-leg="${selectedLeg}"]`);
 if (_selRow) _selRow.scrollIntoView({block: "center"});
 window.scrollTo(0, 0);
+renderPlay();
 })();
 </script>

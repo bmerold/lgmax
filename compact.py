@@ -394,8 +394,15 @@ def main():
             open(f"{OUT}/mapart/{mp}.png", "rb").read()).decode()
         art[mp] = [meta["w"], meta["h"], b64, S(_G.pretty_location(mp))]
 
+    sprites = {}
+    for _nm, _rel in (mapart.get("sprites") or {}).items():
+        _fp = f"{OUT}/mapart/{_rel}"
+        if os.path.exists(_fp):
+            sprites[_nm] = base64.b64encode(open(_fp, "rb").read()).decode()
+
     payload = {"pool": pool, "stages": stages, "encounters": out_encs,
-               "mapart": art, "route": {"total": route["stepTotal"]},
+               "mapart": art, "sprites": sprites,
+               "route": {"total": route["stepTotal"]},
                "sections": out_sections, "choices": choices,
                "commitments": secs.get("tradeCommitments", {}),
                "tmPlans": secs.get("tmPlans", {}),

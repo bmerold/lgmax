@@ -75,8 +75,9 @@ def read_indexed_png(path):
                 px.append(byte >> 4 if x % 2 == 0 else byte & 0xF)
     return w, h, px
 
-def write_indexed_png(path, w, h, pixels, palette):
-    """pixels: flat palette indices; palette: [(r,g,b), ...]."""
+def write_indexed_png(path, w, h, pixels, palette, transparent0=False):
+    """pixels: flat palette indices; palette: [(r,g,b), ...]. With
+    transparent0, palette entry 0 renders fully transparent (sprites)."""
     def chunk(typ, body):
         return (struct.pack(">I", len(body)) + typ + body
                 + struct.pack(">I", zlib.crc32(typ + body)))
@@ -87,9 +88,11 @@ def write_indexed_png(path, w, h, pixels, palette):
     plte = b"".join(bytes(c) for c in palette)
     out = (b"\x89PNG\r\n\x1a\n"
            + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 3, 0, 0, 0))
-           + chunk(b"PLTE", plte)
-           + chunk(b"IDAT", zlib.compress(bytes(raw), 9))
-           + chunk(b"IEND", b""))
+           + chunk(b"PLTE", plte))
+    if transparent0:
+        out += chunk(b"tRNS", b"\x00")
+    out += (chunk(b"IDAT", zlib.compress(bytes(raw), 9))
+            + chunk(b"IEND", b""))
     open(path, "wb").write(out)
 
 # ------------------------------------------------------------------ tilesets
@@ -235,6 +238,41 @@ def maps_needed():
                 need.add(s["map"])
     return sorted(m for m in need if m in R.maps())
 
+def team_sprites():
+    """Front sprites for every Pokémon any leg's team fields, recolored with
+    the game's own normal.pal, keyed by display name."""
+    import engine as _E
+    path = f"{OUT}/sections.json"
+    if not os.path.exists(path): return {}
+    secs = json.load(open(path))["sections"]
+    species = set()
+    for mode in secs.values():
+        for per in mode.values():
+            for sec in per.values():
+                if not sec: continue
+                for t in sec.get("team", []): species.add(t["species"])
+                for leg in sec.get("legs", []):
+                    for t in leg.get("team", []): species.add(t["species"])
+    sdir = os.path.join(ART, "sprites")
+    os.makedirs(sdir, exist_ok=True)
+    out = {}
+    for sp in sorted(species):
+        folder = sp.replace("SPECIES_", "").lower()
+        base = f"{REPO}/graphics/pokemon/{folder}"
+        if not os.path.isdir(base): continue
+        name = _E.SPECIES[sp]["name"]
+        dest = os.path.join(sdir, f"{sp}.png")
+        try:
+            w, h, px = read_indexed_png(os.path.join(base, "front.png"))
+            vals = [int(x) for x in
+                    open(os.path.join(base, "normal.pal")).read().split()[3:3 + 48]]
+            pal = [tuple(vals[i:i + 3]) for i in range(0, 48, 3)]
+            write_indexed_png(dest, w, h, px, pal, transparent0=True)
+            out[name] = f"sprites/{sp}.png"
+        except Exception as ex:
+            print(f"  sprite skip {sp}: {ex}")
+    return out
+
 def main():
     force = "--force" in sys.argv
     os.makedirs(ART, exist_ok=True)
@@ -266,12 +304,14 @@ def main():
             if nb in index:
                 rows.append([c["direction"], int(c.get("offset", 0)), nb])
         if rows: conns[m] = rows
+    sprites = team_sprites()
     with open(os.path.join(ART, "index.json"), "w") as f:
         json.dump({"maps": index, "trainers": trainers,
-                   "connections": conns}, f)
+                   "connections": conns, "sprites": sprites}, f)
     size = sum(os.path.getsize(os.path.join(ART, f"{m}.png")) for m in index)
     print(f"maps: {len(index)} ({drawn} drawn, {kept} kept), "
-          f"{size/1e6:.2f} MB of PNG; trainers placed: {len(trainers)}")
+          f"{size/1e6:.2f} MB of PNG; trainers placed: {len(trainers)}; "
+          f"sprites: {len(sprites)}")
 
 if __name__ == "__main__":
     main()

@@ -31,6 +31,7 @@ file, ~6 MB, no server needed.
 | **Section parties** | the smallest party that clears each section, simulated end to end **with no items** — HP and PP spent across the whole stretch, HMs carried, and a running list of what to keep levelled for later. Sections are presented cut at every full heal (a Pokémon Center walked past, or an in-dungeon healing spot), so a PP bar never quietly spans a heal |
 | **TM plan** | 43 of the 49 TMs exist in exactly one copy; this decides who gets each one, judged over the whole run rather than the first fight it helps |
 | **Choices** | starter, fossil, Fighting Dojo, Eevee stone, Game Corner prize — each ranked on whole evolution lines |
+| **Play mode** | the default screen: one viewport, no scrolling — the current objective on top, the party (game sprites, tap for moves and PP), the current map fitted to fill the view with the walk and numbered stops, and this step's battle plan below; floor changes, doors, ferries and flights are their own steps |
 | **The route** | one continuous ~25,000-step walk through the whole game — every item ball, hidden item, trainer, one-off and first-catch, ordered by a travelling-salesman pass over the real tile graph and drawn onto the maps |
 
 Toggles for **starter** and **trading on/off** re-solve the recommendations rather than filtering
