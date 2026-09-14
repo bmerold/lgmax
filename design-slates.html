@@ -1,0 +1,419 @@
+<meta charset="utf-8">
+<title>Maximizer Design Slates</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800;900&family=Press+Start+2P&family=Pixelify+Sans:wght@400;600&family=Space+Mono:wght@400;700&family=Nunito:wght@700;900&family=Chakra+Petch:wght@500;700&family=IBM+Plex+Sans:wght@400;600&family=IBM+Plex+Mono:wght@400;600&family=Crimson+Pro:wght@500;700&family=Sora:wght@400;700&display=swap">
+<style>
+:root{
+  --bg:#f2f1ec; --panel:#ffffff; --ink:#1c1e1a; --mut:#6a6d64; --line:#dcdbd2;
+  --acc:#3e7a3e; --chipbg:#e9e8e0;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#171814; --panel:#1f211c; --ink:#e8e7df; --mut:#96998e; --line:#32352d;
+    --acc:#7fb96f; --chipbg:#262822;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#171814; --panel:#1f211c; --ink:#e8e7df; --mut:#96998e; --line:#32352d;
+  --acc:#7fb96f; --chipbg:#262822;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:16px/1.55 Archivo,system-ui,sans-serif}
+.wrap{max-width:1180px;margin:0 auto;padding:48px 28px 80px}
+header{max-width:70ch;margin-bottom:14px}
+.eyebrow{font-size:12px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--acc)}
+h1{font-size:clamp(30px,4.5vw,44px);font-weight:900;letter-spacing:-.02em;line-height:1.05;
+  margin:8px 0 14px;text-wrap:balance}
+.lede{color:var(--mut);font-size:17px;max-width:62ch}
+.legend{display:flex;flex-wrap:wrap;gap:8px;margin:22px 0 34px}
+.lg{font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
+  border:1px solid var(--line);border-radius:99px;padding:4px 12px;color:var(--mut)}
+.lg i{display:inline-block;width:8px;height:8px;border-radius:99px;margin-right:6px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(500px,1fr));gap:26px}
+@media(max-width:560px){.grid{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden;
+  display:flex;flex-direction:column}
+.card-h{display:flex;align-items:baseline;gap:12px;padding:16px 18px 12px}
+.no{font:700 13px/1 "Space Mono",monospace;color:var(--mut)}
+.card-h h2{font-size:20px;font-weight:800;letter-spacing:-.01em;margin:0;flex:1}
+.tag{font-size:10.5px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;
+  border-radius:99px;padding:3px 10px;color:#fff}
+.t-subject{background:#3e7a3e}.t-retro{background:#8a5a2b}.t-trend{background:#4756c4}.t-timeless{background:#5c5f66}
+.mock{margin:0 18px;border-radius:10px;overflow:hidden;flex-shrink:0;
+  box-shadow:0 1px 3px rgba(0,0,0,.18)}
+.meta{padding:14px 18px 18px;display:flex;flex-direction:column;gap:10px}
+.why{font-size:14.5px;color:var(--mut);margin:0}
+.why b{color:var(--ink)}
+.specs{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.sw{display:inline-flex;align-items:center;gap:6px;font:600 11.5px/1 "Space Mono",monospace;
+  background:var(--chipbg);border-radius:6px;padding:4px 8px 4px 4px;color:var(--mut)}
+.sw i{width:16px;height:16px;border-radius:4px;display:inline-block;border:1px solid rgba(0,0,0,.15)}
+.fonts{font-size:12.5px;color:var(--mut)}
+.fonts b{color:var(--ink);font-weight:700}
+
+/* ---------- shared mock anatomy; every slate restyles via tokens ---------- */
+.mock{--mbg:#fff;--mpanel:#f5f5f5;--mink:#222;--mmut:#888;--mline:#ddd;--macc:#3e7a3e;
+  --mgold:#e6b023;--mpath:#c96b3c;--mfont:Archivo,sans-serif;--mrad:8px;
+  background:var(--mbg);color:var(--mink);font-family:var(--mfont);font-size:10px}
+.m-top{display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--mpanel);
+  border-bottom:1px solid var(--mline)}
+.m-tt{flex:1;min-width:0}
+.m-eyebrow{display:block;font-size:6.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--mmut)}
+.m-title{display:block;font-size:11px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.m-btn{font-size:8px;font-weight:700;padding:5px 8px;border-radius:calc(var(--mrad)*.75);
+  background:var(--macc);color:var(--mbtnink,#fff);white-space:nowrap}
+.m-call{margin:7px 10px;padding:6px 9px;border-radius:calc(var(--mrad)*.75);font-size:8.5px;line-height:1.45;
+  background:var(--mcall,var(--mpanel));border:1px solid var(--mline);border-left:3px solid var(--macc)}
+
+.m-team{display:flex;gap:5px;justify-content:center;padding:0 10px 7px}
+.m-chip{display:flex;align-items:center;gap:4px;padding:3px 6px;border-radius:calc(var(--mrad)*.75);
+  background:var(--mpanel);border:1px solid var(--mline);font-size:7px;font-weight:700}
+.m-chip.on{box-shadow:inset 0 0 0 1.5px var(--macc)}
+.m-chip.dim{opacity:.6}
+.m-dot{width:10px;height:10px;border-radius:99px;background:var(--macc);opacity:.55}
+.m-map{position:relative;height:120px;background:var(--mmap,#20241f)}
+.m-map .seg{position:absolute;background:var(--mpath);opacity:.55;border-radius:2px}
+.m-map .seg.gold{background:var(--mgold);opacity:1}
+.m-map .pin{position:absolute;width:9px;height:9px;border-radius:99px;background:var(--mpath);opacity:.7}
+.m-map .pin.cur{width:12px;height:12px;background:var(--mgold);border:2px solid var(--mbg);opacity:1}
+.m-call .lnk{color:var(--macc);font-weight:700;text-decoration:underline dotted}
+.m-det{display:flex;align-items:center;gap:6px;padding:6px 10px;font-size:8px;
+  background:var(--mpanel);border-top:1px solid var(--mline)}
+.m-det b{color:var(--macc)}
+.m-no{display:inline-flex;align-items:center;justify-content:center;width:12px;height:12px;
+  border-radius:99px;background:var(--mpath);color:#fff;font-size:7px;font-weight:800}
+
+/* 1 · Cartridge */
+.mk-1{--mbg:#eef4e4;--mpanel:#ffffff;--mink:#20341c;--mmut:#6f8567;--mline:#cfdcc2;
+  --macc:#4c9a41;--mgold:#f2b807;--mpath:#37806b;--mmap:#a8d494;--mrad:12px;
+  --mfont:Nunito,Archivo,sans-serif;--mcall:#f4fbee}
+.mk-1 .m-btn{border-radius:99px}
+/* 2 · Pokédex */
+.mk-2{--mbg:#b6231f;--mpanel:#9c1b18;--mink:#ffe9e6;--mmut:#e2a49f;--mline:#7c1210;
+  --macc:#35d0e8;--mgold:#ffd23e;--mpath:#ffd23e;--mmap:#241416;--mrad:6px;
+  --mfont:"Chakra Petch",Archivo,sans-serif;--mcall:#8a1512;--mbtnink:#082a30}
+.mk-2 .m-call{border-left-width:4px}
+/* 3 · In-Game Menu */
+.mk-3{--mbg:#f8f8e8;--mpanel:#ffffff;--mink:#575757;--mmut:#a8a090;--mline:#68a0b8;
+  --macc:#d84848;--mgold:#e8a010;--mpath:#5878c8;--mmap:#c8e0a8;--mrad:4px;
+  --mfont:"Pixelify Sans",monospace;--mcall:#ffffff}
+.mk-3 .m-call,.mk-3 .m-chip,.mk-3 .m-btn{border:2px solid #68a0b8;box-shadow:inset 0 0 0 1px #fff, inset 0 0 0 2px #a8c8d8}
+.mk-3 .m-btn{background:#fff;color:#575757}
+/* 4 · DMG Matrix */
+.mk-4{--mbg:#0f380f;--mpanel:#306230;--mink:#9bbc0f;--mmut:#8bac0f;--mline:#0f380f;
+  --macc:#9bbc0f;--mgold:#cadc9f;--mpath:#8bac0f;--mmap:#1d4a1d;--mrad:0px;
+  --mfont:"Press Start 2P",monospace;--mcall:#306230;--mbtnink:#0f380f;
+  font-size:8px;position:relative}
+.mk-4 .m-title{font-size:8px}.mk-4 .m-call{font-size:6px;line-height:1.7}
+.mk-4::after{content:"";position:absolute;inset:0;pointer-events:none;
+  background:repeating-linear-gradient(0deg,transparent 0 2px,rgba(15,56,15,.22) 2px 3px)}
+/* 5 · Player's Guide */
+.mk-5{--mbg:#f6efdd;--mpanel:#efe5cb;--mink:#20242c;--mmut:#7c7460;--mline:#d8cdae;
+  --macc:#e0641e;--mgold:#e0a11e;--mpath:#28527c;--mmap:#dcd2b4;--mrad:2px;
+  --mfont:Archivo,sans-serif}
+.mk-5 .m-title{font-weight:900;text-transform:uppercase;letter-spacing:.02em}
+.mk-5 .m-map{background-image:radial-gradient(#c9bd99 1px,transparent 1px);background-size:6px 6px}
+/* 6 · Glass HUD */
+.mk-6{--mbg:#0b1016;--mpanel:rgba(255,255,255,.07);--mink:#eaf2f5;--mmut:#8fa3ad;
+  --mline:rgba(255,255,255,.14);--macc:#4fd6a5;--mgold:#ffd76e;--mpath:#4fa3d6;
+  --mmap:#0e1a22;--mrad:12px;--mfont:Sora,Archivo,sans-serif;--mcall:rgba(79,214,165,.1);
+  position:relative;--mbtnink:#06231a}
+.mk-6::before{content:"";position:absolute;width:130px;height:130px;border-radius:99px;
+  background:radial-gradient(circle,#1f7a5c 0%,transparent 70%);top:-30px;right:-20px;opacity:.7}
+.mk-6 .m-top,.mk-6 .m-call,.mk-6 .m-chip,.mk-6 .m-det{backdrop-filter:blur(6px)}
+/* 7 · Neo-Brutal */
+.mk-7{--mbg:#f5f2ea;--mpanel:#ffffff;--mink:#0a0a0a;--mmut:#4a4a4a;--mline:#0a0a0a;
+  --macc:#ccff00;--mgold:#ff006e;--mpath:#0a0a0a;--mmap:#8ee000;--mrad:0px;
+  --mfont:Archivo,sans-serif;--mcall:#ccff00;--mbtnink:#0a0a0a}
+.mk-7 .m-call,.mk-7 .m-chip,.mk-7 .m-btn{border:2px solid #0a0a0a;box-shadow:3px 3px 0 #0a0a0a}
+.mk-7 .m-call{border-left-width:2px}
+.mk-7 .m-title{font-weight:900;text-transform:uppercase}
+/* 8 · Bento Console */
+.mk-8{--mbg:#101214;--mpanel:#1a1e22;--mink:#dfe5e8;--mmut:#7d868c;--mline:#262c31;
+  --macc:#5cb87a;--mgold:#d9a53f;--mpath:#5c86b8;--mmap:#161a1d;--mrad:10px;
+  --mfont:"IBM Plex Sans",Archivo,sans-serif;--mcall:#1e2429;--mbtnink:#0c1a10}
+.mk-8 .m-call,.mk-8 .m-chip{border-radius:10px}
+.mk-8 .m-eyebrow{font-family:"IBM Plex Mono",monospace}
+/* 9 · Swiss Route Card */
+.mk-9{--mbg:#fafaf7;--mpanel:#fafaf7;--mink:#111;--mmut:#8b8b86;--mline:#e2e2dc;
+  --macc:#0f8a3c;--mgold:#111111;--mpath:#0f8a3c;--mmap:#efefe9;--mrad:0px;
+  --mfont:Archivo,Helvetica,sans-serif}
+.mk-9 .m-call{border:0;border-left:3px solid #0f8a3c;background:transparent;padding-left:9px}
+.mk-9 .m-title{font-weight:800;letter-spacing:-.02em}
+/* 10 · Trail Atlas */
+.mk-10{--mbg:#f3ead7;--mpanel:#ecdfc4;--mink:#3a2f1d;--mmut:#8a7a5c;--mline:#d6c6a2;
+  --macc:#356848;--mgold:#b0742a;--mpath:#7c4a2d;--mmap:#e7dab9;--mrad:3px;
+  --mfont:"Crimson Pro",Georgia,serif;font-size:11px;--mcall:#f8f1e0}
+.mk-10 .m-eyebrow{font-family:"IBM Plex Mono",monospace}
+.mk-10 .m-map{background-image:repeating-radial-gradient(circle at 70% 30%,transparent 0 14px,#d8c9a3 14px 15px)}
+.endnote{margin-top:44px;color:var(--mut);font-size:13.5px;max-width:72ch}
+.endnote b{color:var(--ink)}
+</style>
+<div class="wrap">
+<header>
+  <div class="eyebrow">LeafGreen Maximizer · design review</div>
+  <h1>Ten slates, one screen</h1>
+  <p class="lede">Every slate below re-skins the same play-mode screen — objective bar,
+  instruction callout, party strip, map, fight ledger — so they compare honestly.
+  Pick by number; any of them can become the app's theme (or a selectable set).</p>
+  <div class="legend">
+    <span class="lg"><i style="background:#3e7a3e"></i>Subject</span>
+    <span class="lg"><i style="background:#8a5a2b"></i>Retro</span>
+    <span class="lg"><i style="background:#4756c4"></i>Trend</span>
+    <span class="lg"><i style="background:#5c5f66"></i>Timeless</span>
+  </div>
+</header>
+<div class="grid">
+<article class="card">
+  <div class="card-h"><span class="no">01</span>
+    <h2>Cartridge</h2><span class="tag t-subject">Subject</span></div>
+  <div class="mock mk-1">
+  <div class="m-top"><div class="m-tt">
+    <span class="m-eyebrow">5B · Mt. Moon · step 29/47 · fight</span>
+    <b class="m-title">19. Hiker Marcos</b></div>
+    <span class="m-btn">done, next ›</span></div>
+  <div class="m-call">Walk the 13-step gold path to the pin and battle: 3 Pokémon
+    (Geodude L10, Geodude L10, Onix L10). <span class="lnk">full matchup ↗</span></div>
+  <div class="m-team">
+    <span class="m-chip on"><span class="m-dot"></span>Mankey · L15</span>
+    <span class="m-chip on"><span class="m-dot"></span>Geodude · L15</span>
+    <span class="m-chip dim"><span class="m-dot"></span>Spearow</span>
+    <span class="m-chip dim"><span class="m-dot"></span>Nidoran♂</span></div>
+  <div class="m-map"><span class="seg" style="left:6%;top:50%;width:2.5%;height:33%"></span><span class="seg" style="left:6%;top:47%;width:31%;height:5%"></span><span class="seg" style="left:37%;top:22%;width:2.5%;height:30%"></span><span class="seg" style="left:37%;top:22%;width:31%;height:5%"></span><span class="seg" style="left:68%;top:22%;width:2.5%;height:38%"></span><span class="seg" style="left:68%;top:55%;width:24%;height:5%"></span><span class="seg gold" style="left:37%;top:22%;width:2.5%;height:30%"></span><span class="seg gold" style="left:37%;top:22%;width:19%;height:5%"></span><span class="pin" style="left:6%;top:80%"></span><span class="pin cur" style="left:55%;top:22%"></span><span class="pin" style="left:91%;top:55%"></span></div>
+  <div class="m-det"><span class="m-no">19</span><b>Hiker Marcos</b>
+    &nbsp;Geodude L10 · Mankey · Karate Chop ×2, Onix · Low Kick</div>
+ </div>
+  <div class="meta">
+    <p class="why"><b>The LeafGreen box itself.</b> Leaf and vine greens, rounded friendly shapes, cream panels — reads instantly as this game without imitating its UI.</p>
+    <div class="specs"><span class="sw"><i style="background:#4c9a41"></i>#4c9a41</span><span class="sw"><i style="background:#a8d494"></i>#a8d494</span><span class="sw"><i style="background:#eef4e4"></i>#eef4e4</span><span class="sw"><i style="background:#20341c"></i>#20341c</span><span class="sw"><i style="background:#f2b807"></i>#f2b807</span></div>
+    <div class="fonts">Type: <b>Nunito 900 · Archivo</b></div>
+  </div>
+</article>
+<article class="card">
+  <div class="card-h"><span class="no">02</span>
+    <h2>Pokédex</h2><span class="tag t-subject">Subject</span></div>
+  <div class="mock mk-2">
+  <div class="m-top"><div class="m-tt">
+    <span class="m-eyebrow">5B · Mt. Moon · step 29/47 · fight</span>
+    <b class="m-title">19. Hiker Marcos</b></div>
+    <span class="m-btn">done, next ›</span></div>
+  <div class="m-call">Walk the 13-step gold path to the pin and battle: 3 Pokémon
+    (Geodude L10, Geodude L10, Onix L10). <span class="lnk">full matchup ↗</span></div>
+  <div class="m-team">
+    <span class="m-chip on"><span class="m-dot"></span>Mankey · L15</span>
+    <span class="m-chip on"><span class="m-dot"></span>Geodude · L15</span>
+    <span class="m-chip dim"><span class="m-dot"></span>Spearow</span>
+    <span class="m-chip dim"><span class="m-dot"></span>Nidoran♂</span></div>
+  <div class="m-map"><span class="seg" style="left:6%;top:50%;width:2.5%;height:33%"></span><span class="seg" style="left:6%;top:47%;width:31%;height:5%"></span><span class="seg" style="left:37%;top:22%;width:2.5%;height:30%"></span><span class="seg" style="left:37%;top:22%;width:31%;height:5%"></span><span class="seg" style="left:68%;top:22%;width:2.5%;height:38%"></span><span class="seg" style="left:68%;top:55%;width:24%;height:5%"></span><span class="seg gold" style="left:37%;top:22%;width:2.5%;height:30%"></span><span class="seg gold" style="left:37%;top:22%;width:19%;height:5%"></span><span class="pin" style="left:6%;top:80%"></span><span class="pin cur" style="left:55%;top:22%"></span><span class="pin" style="left:91%;top:55%"></span></div>
+  <div class="m-det"><span class="m-no">19</span><b>Hiker Marcos</b>
+    &nbsp;Geodude L10 · Mankey · Karate Chop ×2, Onix · Low Kick</div>
+ </div>
+  <div class="meta">
+    <p class="why"><b>The device, not the game.</b> Signal-red chassis, dark lens of a screen, cyan readouts and a yellow route line — the guide as an instrument you carry.</p>
+    <div class="specs"><span class="sw"><i style="background:#b6231f"></i>#b6231f</span><span class="sw"><i style="background:#241416"></i>#241416</span><span class="sw"><i style="background:#35d0e8"></i>#35d0e8</span><span class="sw"><i style="background:#ffd23e"></i>#ffd23e</span><span class="sw"><i style="background:#ffe9e6"></i>#ffe9e6</span></div>
+    <div class="fonts">Type: <b>Chakra Petch · system</b></div>
+  </div>
+</article>
+<article class="card">
+  <div class="card-h"><span class="no">03</span>
+    <h2>In-Game Menu</h2><span class="tag t-subject">Subject</span></div>
+  <div class="mock mk-3">
+  <div class="m-top"><div class="m-tt">
+    <span class="m-eyebrow">5B · Mt. Moon · step 29/47 · fight</span>
+    <b class="m-title">19. Hiker Marcos</b></div>
+    <span class="m-btn">done, next ›</span></div>
+  <div class="m-call">Walk the 13-step gold path to the pin and battle: 3 Pokémon
+    (Geodude L10, Geodude L10, Onix L10). <span class="lnk">full matchup ↗</span></div>
+  <div class="m-team">
+    <span class="m-chip on"><span class="m-dot"></span>Mankey · L15</span>
+    <span class="m-chip on"><span class="m-dot"></span>Geodude · L15</span>
+    <span class="m-chip dim"><span class="m-dot"></span>Spearow</span>
+    <span class="m-chip dim"><span class="m-dot"></span>Nidoran♂</span></div>
+  <div class="m-map"><span class="seg" style="left:6%;top:50%;width:2.5%;height:33%"></span><span class="seg" style="left:6%;top:47%;width:31%;height:5%"></span><span class="seg" style="left:37%;top:22%;width:2.5%;height:30%"></span><span class="seg" style="left:37%;top:22%;width:31%;height:5%"></span><span class="seg" style="left:68%;top:22%;width:2.5%;height:38%"></span><span class="seg" style="left:68%;top:55%;width:24%;height:5%"></span><span class="seg gold" style="left:37%;top:22%;width:2.5%;height:30%"></span><span class="seg gold" style="left:37%;top:22%;width:19%;height:5%"></span><span class="pin" style="left:6%;top:80%"></span><span class="pin cur" style="left:55%;top:22%"></span><span class="pin" style="left:91%;top:55%"></span></div>
+  <div class="m-det"><span class="m-no">19</span><b>Hiker Marcos</b>
+    &nbsp;Geodude L10 · Mankey · Karate Chop ×2, Onix · Low Kick</div>
+ </div>
+  <div class="meta">
+    <p class="why"><b>FRLG's own windows.</b> White boxes, the blue bevel frame, gray text, red cursor — the app looks like a menu the game forgot to ship. Highest nostalgia per pixel.</p>
+    <div class="specs"><span class="sw"><i style="background:#f8f8e8"></i>#f8f8e8</span><span class="sw"><i style="background:#68a0b8"></i>#68a0b8</span><span class="sw"><i style="background:#575757"></i>#575757</span><span class="sw"><i style="background:#d84848"></i>#d84848</span><span class="sw"><i style="background:#c8e0a8"></i>#c8e0a8</span></div>
+    <div class="fonts">Type: <b>Pixelify Sans</b></div>
+  </div>
+</article>
+<article class="card">
+  <div class="card-h"><span class="no">04</span>
+    <h2>DMG Matrix</h2><span class="tag t-retro">Retro</span></div>
+  <div class="mock mk-4">
+  <div class="m-top"><div class="m-tt">
+    <span class="m-eyebrow">5B · Mt. Moon · step 29/47 · fight</span>
+    <b class="m-title">19. Hiker Marcos</b></div>
+    <span class="m-btn">done, next ›</span></div>
+  <div class="m-call">Walk the 13-step gold path to the pin and battle: 3 Pokémon
+    (Geodude L10, Geodude L10, Onix L10). <span class="lnk">full matchup ↗</span></div>
+  <div class="m-team">
+    <span class="m-chip on"><span class="m-dot"></span>Mankey · L15</span>
+    <span class="m-chip on"><span class="m-dot"></span>Geodude · L15</span>
+    <span class="m-chip dim"><span class="m-dot"></span>Spearow</span>
+    <span class="m-chip dim"><span class="m-dot"></span>Nidoran♂</span></div>
+  <div class="m-map"><span class="seg" style="left:6%;top:50%;width:2.5%;height:33%"></span><span class="seg" style="left:6%;top:47%;width:31%;height:5%"></span><span class="seg" style="left:37%;top:22%;width:2.5%;height:30%"></span><span class="seg" style="left:37%;top:22%;width:31%;height:5%"></span><span class="seg" style="left:68%;top:22%;width:2.5%;height:38%"></span><span class="seg" style="left:68%;top:55%;width:24%;height:5%"></span><span class="seg gold" style="left:37%;top:22%;width:2.5%;height:30%"></span><span class="seg gold" style="left:37%;top:22%;width:19%;height:5%"></span><span class="pin" style="left:6%;top:80%"></span><span class="pin cur" style="left:55%;top:22%"></span><span class="pin" style="left:91%;top:55%"></span></div>
+  <div class="m-det"><span class="m-no">19</span><b>Hiker Marcos</b>
+    &nbsp;Geodude L10 · Mankey · Karate Chop ×2, Onix · Low Kick</div>
+ </div>
+  <div class="meta">
+    <p class="why"><b>Four shades of Game Boy green</b>, scanlines, a pixel face. Fully committed, single-theme, unmistakable — best as an optional skin rather than the daily driver.</p>
+    <div class="specs"><span class="sw"><i style="background:#0f380f"></i>#0f380f</span><span class="sw"><i style="background:#306230"></i>#306230</span><span class="sw"><i style="background:#8bac0f"></i>#8bac0f</span><span class="sw"><i style="background:#9bbc0f"></i>#9bbc0f</span><span class="sw"><i style="background:#cadc9f"></i>#cadc9f</span></div>
+    <div class="fonts">Type: <b>Press Start 2P</b></div>
+  </div>
+</article>
+<article class="card">
+  <div class="card-h"><span class="no">05</span>
+    <h2>Player's Guide</h2><span class="tag t-retro">Retro</span></div>
+  <div class="mock mk-5">
+  <div class="m-top"><div class="m-tt">
+    <span class="m-eyebrow">5B · Mt. Moon · step 29/47 · fight</span>
+    <b class="m-title">19. Hiker Marcos</b></div>
+    <span class="m-btn">done, next ›</span></div>
+  <div class="m-call">Walk the 13-step gold path to the pin and battle: 3 Pokémon
+    (Geodude L10, Geodude L10, Onix L10). <span class="lnk">full matchup ↗</span></div>
+  <div class="m-team">
+    <span class="m-chip on"><span class="m-dot"></span>Mankey · L15</span>
+    <span class="m-chip on"><span class="m-dot"></span>Geodude · L15</span>
+    <span class="m-chip dim"><span class="m-dot"></span>Spearow</span>
+    <span class="m-chip dim"><span class="m-dot"></span>Nidoran♂</span></div>
+  <div class="m-map"><span class="seg" style="left:6%;top:50%;width:2.5%;height:33%"></span><span class="seg" style="left:6%;top:47%;width:31%;height:5%"></span><span class="seg" style="left:37%;top:22%;width:2.5%;height:30%"></span><span class="seg" style="left:37%;top:22%;width:31%;height:5%"></span><span class="seg" style="left:68%;top:22%;width:2.5%;height:38%"></span><span class="seg" style="left:68%;top:55%;width:24%;height:5%"></span><span class="seg gold" style="left:37%;top:22%;width:2.5%;height:30%"></span><span class="seg gold" style="left:37%;top:22%;width:19%;height:5%"></span><span class="pin" style="left:6%;top:80%"></span><span class="pin cur" style="left:55%;top:22%"></span><span class="pin" style="left:91%;top:55%"></span></div>
+  <div class="m-det"><span class="m-no">19</span><b>Hiker Marcos</b>
+    &nbsp;Geodude L10 · Mankey · Karate Chop ×2, Onix · Low Kick</div>
+ </div>
+  <div class="meta">
+    <p class="why"><b>A 2004 print strategy guide.</b> Halftone paper, shouting slab headlines, spot orange and navy, numbered callouts — the era's companion object to this exact game.</p>
+    <div class="specs"><span class="sw"><i style="background:#f6efdd"></i>#f6efdd</span><span class="sw"><i style="background:#20242c"></i>#20242c</span><span class="sw"><i style="background:#e0641e"></i>#e0641e</span><span class="sw"><i style="background:#28527c"></i>#28527c</span><span class="sw"><i style="background:#e0a11e"></i>#e0a11e</span></div>
+    <div class="fonts">Type: <b>Archivo 900 · Archivo</b></div>
+  </div>
+</article>
+<article class="card">
+  <div class="card-h"><span class="no">06</span>
+    <h2>Glass HUD</h2><span class="tag t-trend">Trend</span></div>
+  <div class="mock mk-6">
+  <div class="m-top"><div class="m-tt">
+    <span class="m-eyebrow">5B · Mt. Moon · step 29/47 · fight</span>
+    <b class="m-title">19. Hiker Marcos</b></div>
+    <span class="m-btn">done, next ›</span></div>
+  <div class="m-call">Walk the 13-step gold path to the pin and battle: 3 Pokémon
+    (Geodude L10, Geodude L10, Onix L10). <span class="lnk">full matchup ↗</span></div>
+  <div class="m-team">
+    <span class="m-chip on"><span class="m-dot"></span>Mankey · L15</span>
+    <span class="m-chip on"><span class="m-dot"></span>Geodude · L15</span>
+    <span class="m-chip dim"><span class="m-dot"></span>Spearow</span>
+    <span class="m-chip dim"><span class="m-dot"></span>Nidoran♂</span></div>
+  <div class="m-map"><span class="seg" style="left:6%;top:50%;width:2.5%;height:33%"></span><span class="seg" style="left:6%;top:47%;width:31%;height:5%"></span><span class="seg" style="left:37%;top:22%;width:2.5%;height:30%"></span><span class="seg" style="left:37%;top:22%;width:31%;height:5%"></span><span class="seg" style="left:68%;top:22%;width:2.5%;height:38%"></span><span class="seg" style="left:68%;top:55%;width:24%;height:5%"></span><span class="seg gold" style="left:37%;top:22%;width:2.5%;height:30%"></span><span class="seg gold" style="left:37%;top:22%;width:19%;height:5%"></span><span class="pin" style="left:6%;top:80%"></span><span class="pin cur" style="left:55%;top:22%"></span><span class="pin" style="left:91%;top:55%"></span></div>
+  <div class="m-det"><span class="m-no">19</span><b>Hiker Marcos</b>
+    &nbsp;Geodude L10 · Mankey · Karate Chop ×2, Onix · Low Kick</div>
+ </div>
+  <div class="meta">
+    <p class="why"><b>Liquid-glass gaming overlay.</b> Deep navy ground, frosted translucent panels over a soft green glow, mint accent — the current premium-dashboard look.</p>
+    <div class="specs"><span class="sw"><i style="background:#0b1016"></i>#0b1016</span><span class="sw"><i style="background:#4fd6a5"></i>#4fd6a5</span><span class="sw"><i style="background:#4fa3d6"></i>#4fa3d6</span><span class="sw"><i style="background:#ffd76e"></i>#ffd76e</span><span class="sw"><i style="background:#eaf2f5"></i>#eaf2f5</span></div>
+    <div class="fonts">Type: <b>Sora</b></div>
+  </div>
+</article>
+<article class="card">
+  <div class="card-h"><span class="no">07</span>
+    <h2>Neo-Brutal</h2><span class="tag t-trend">Trend</span></div>
+  <div class="mock mk-7">
+  <div class="m-top"><div class="m-tt">
+    <span class="m-eyebrow">5B · Mt. Moon · step 29/47 · fight</span>
+    <b class="m-title">19. Hiker Marcos</b></div>
+    <span class="m-btn">done, next ›</span></div>
+  <div class="m-call">Walk the 13-step gold path to the pin and battle: 3 Pokémon
+    (Geodude L10, Geodude L10, Onix L10). <span class="lnk">full matchup ↗</span></div>
+  <div class="m-team">
+    <span class="m-chip on"><span class="m-dot"></span>Mankey · L15</span>
+    <span class="m-chip on"><span class="m-dot"></span>Geodude · L15</span>
+    <span class="m-chip dim"><span class="m-dot"></span>Spearow</span>
+    <span class="m-chip dim"><span class="m-dot"></span>Nidoran♂</span></div>
+  <div class="m-map"><span class="seg" style="left:6%;top:50%;width:2.5%;height:33%"></span><span class="seg" style="left:6%;top:47%;width:31%;height:5%"></span><span class="seg" style="left:37%;top:22%;width:2.5%;height:30%"></span><span class="seg" style="left:37%;top:22%;width:31%;height:5%"></span><span class="seg" style="left:68%;top:22%;width:2.5%;height:38%"></span><span class="seg" style="left:68%;top:55%;width:24%;height:5%"></span><span class="seg gold" style="left:37%;top:22%;width:2.5%;height:30%"></span><span class="seg gold" style="left:37%;top:22%;width:19%;height:5%"></span><span class="pin" style="left:6%;top:80%"></span><span class="pin cur" style="left:55%;top:22%"></span><span class="pin" style="left:91%;top:55%"></span></div>
+  <div class="m-det"><span class="m-no">19</span><b>Hiker Marcos</b>
+    &nbsp;Geodude L10 · Mankey · Karate Chop ×2, Onix · Low Kick</div>
+ </div>
+  <div class="meta">
+    <p class="why"><b>Thick black borders, hard offset shadows, electric lime.</b> Poster-loud and grid-sharp; checkboxes and buttons feel physically clicky. Very now.</p>
+    <div class="specs"><span class="sw"><i style="background:#f5f2ea"></i>#f5f2ea</span><span class="sw"><i style="background:#0a0a0a"></i>#0a0a0a</span><span class="sw"><i style="background:#ccff00"></i>#ccff00</span><span class="sw"><i style="background:#ff006e"></i>#ff006e</span><span class="sw"><i style="background:#8ee000"></i>#8ee000</span></div>
+    <div class="fonts">Type: <b>Archivo 900 · Space Mono</b></div>
+  </div>
+</article>
+<article class="card">
+  <div class="card-h"><span class="no">08</span>
+    <h2>Bento Console</h2><span class="tag t-trend">Trend</span></div>
+  <div class="mock mk-8">
+  <div class="m-top"><div class="m-tt">
+    <span class="m-eyebrow">5B · Mt. Moon · step 29/47 · fight</span>
+    <b class="m-title">19. Hiker Marcos</b></div>
+    <span class="m-btn">done, next ›</span></div>
+  <div class="m-call">Walk the 13-step gold path to the pin and battle: 3 Pokémon
+    (Geodude L10, Geodude L10, Onix L10). <span class="lnk">full matchup ↗</span></div>
+  <div class="m-team">
+    <span class="m-chip on"><span class="m-dot"></span>Mankey · L15</span>
+    <span class="m-chip on"><span class="m-dot"></span>Geodude · L15</span>
+    <span class="m-chip dim"><span class="m-dot"></span>Spearow</span>
+    <span class="m-chip dim"><span class="m-dot"></span>Nidoran♂</span></div>
+  <div class="m-map"><span class="seg" style="left:6%;top:50%;width:2.5%;height:33%"></span><span class="seg" style="left:6%;top:47%;width:31%;height:5%"></span><span class="seg" style="left:37%;top:22%;width:2.5%;height:30%"></span><span class="seg" style="left:37%;top:22%;width:31%;height:5%"></span><span class="seg" style="left:68%;top:22%;width:2.5%;height:38%"></span><span class="seg" style="left:68%;top:55%;width:24%;height:5%"></span><span class="seg gold" style="left:37%;top:22%;width:2.5%;height:30%"></span><span class="seg gold" style="left:37%;top:22%;width:19%;height:5%"></span><span class="pin" style="left:6%;top:80%"></span><span class="pin cur" style="left:55%;top:22%"></span><span class="pin" style="left:91%;top:55%"></span></div>
+  <div class="m-det"><span class="m-no">19</span><b>Hiker Marcos</b>
+    &nbsp;Geodude L10 · Mankey · Karate Chop ×2, Onix · Low Kick</div>
+ </div>
+  <div class="meta">
+    <p class="why"><b>Dark-default bento dashboard.</b> Modular tiles, mono eyebrows, tabular numerals, one desaturated green — the calm, data-first read for long sessions.</p>
+    <div class="specs"><span class="sw"><i style="background:#101214"></i>#101214</span><span class="sw"><i style="background:#1a1e22"></i>#1a1e22</span><span class="sw"><i style="background:#5cb87a"></i>#5cb87a</span><span class="sw"><i style="background:#d9a53f"></i>#d9a53f</span><span class="sw"><i style="background:#dfe5e8"></i>#dfe5e8</span></div>
+    <div class="fonts">Type: <b>IBM Plex Sans · Plex Mono</b></div>
+  </div>
+</article>
+<article class="card">
+  <div class="card-h"><span class="no">09</span>
+    <h2>Swiss Route Card</h2><span class="tag t-timeless">Timeless</span></div>
+  <div class="mock mk-9">
+  <div class="m-top"><div class="m-tt">
+    <span class="m-eyebrow">5B · Mt. Moon · step 29/47 · fight</span>
+    <b class="m-title">19. Hiker Marcos</b></div>
+    <span class="m-btn">done, next ›</span></div>
+  <div class="m-call">Walk the 13-step gold path to the pin and battle: 3 Pokémon
+    (Geodude L10, Geodude L10, Onix L10). <span class="lnk">full matchup ↗</span></div>
+  <div class="m-team">
+    <span class="m-chip on"><span class="m-dot"></span>Mankey · L15</span>
+    <span class="m-chip on"><span class="m-dot"></span>Geodude · L15</span>
+    <span class="m-chip dim"><span class="m-dot"></span>Spearow</span>
+    <span class="m-chip dim"><span class="m-dot"></span>Nidoran♂</span></div>
+  <div class="m-map"><span class="seg" style="left:6%;top:50%;width:2.5%;height:33%"></span><span class="seg" style="left:6%;top:47%;width:31%;height:5%"></span><span class="seg" style="left:37%;top:22%;width:2.5%;height:30%"></span><span class="seg" style="left:37%;top:22%;width:31%;height:5%"></span><span class="seg" style="left:68%;top:22%;width:2.5%;height:38%"></span><span class="seg" style="left:68%;top:55%;width:24%;height:5%"></span><span class="seg gold" style="left:37%;top:22%;width:2.5%;height:30%"></span><span class="seg gold" style="left:37%;top:22%;width:19%;height:5%"></span><span class="pin" style="left:6%;top:80%"></span><span class="pin cur" style="left:55%;top:22%"></span><span class="pin" style="left:91%;top:55%"></span></div>
+  <div class="m-det"><span class="m-no">19</span><b>Hiker Marcos</b>
+    &nbsp;Geodude L10 · Mankey · Karate Chop ×2, Onix · Low Kick</div>
+ </div>
+  <div class="meta">
+    <p class="why"><b>International typographic style.</b> Off-white, near-black, one signal green, a strict grid and nothing else. Will look right in ten years.</p>
+    <div class="specs"><span class="sw"><i style="background:#fafaf7"></i>#fafaf7</span><span class="sw"><i style="background:#111111"></i>#111111</span><span class="sw"><i style="background:#0f8a3c"></i>#0f8a3c</span><span class="sw"><i style="background:#e2e2dc"></i>#e2e2dc</span><span class="sw"><i style="background:#8b8b86"></i>#8b8b86</span></div>
+    <div class="fonts">Type: <b>Archivo / Helvetica</b></div>
+  </div>
+</article>
+<article class="card">
+  <div class="card-h"><span class="no">10</span>
+    <h2>Trail Atlas</h2><span class="tag t-timeless">Timeless</span></div>
+  <div class="mock mk-10">
+  <div class="m-top"><div class="m-tt">
+    <span class="m-eyebrow">5B · Mt. Moon · step 29/47 · fight</span>
+    <b class="m-title">19. Hiker Marcos</b></div>
+    <span class="m-btn">done, next ›</span></div>
+  <div class="m-call">Walk the 13-step gold path to the pin and battle: 3 Pokémon
+    (Geodude L10, Geodude L10, Onix L10). <span class="lnk">full matchup ↗</span></div>
+  <div class="m-team">
+    <span class="m-chip on"><span class="m-dot"></span>Mankey · L15</span>
+    <span class="m-chip on"><span class="m-dot"></span>Geodude · L15</span>
+    <span class="m-chip dim"><span class="m-dot"></span>Spearow</span>
+    <span class="m-chip dim"><span class="m-dot"></span>Nidoran♂</span></div>
+  <div class="m-map"><span class="seg" style="left:6%;top:50%;width:2.5%;height:33%"></span><span class="seg" style="left:6%;top:47%;width:31%;height:5%"></span><span class="seg" style="left:37%;top:22%;width:2.5%;height:30%"></span><span class="seg" style="left:37%;top:22%;width:31%;height:5%"></span><span class="seg" style="left:68%;top:22%;width:2.5%;height:38%"></span><span class="seg" style="left:68%;top:55%;width:24%;height:5%"></span><span class="seg gold" style="left:37%;top:22%;width:2.5%;height:30%"></span><span class="seg gold" style="left:37%;top:22%;width:19%;height:5%"></span><span class="pin" style="left:6%;top:80%"></span><span class="pin cur" style="left:55%;top:22%"></span><span class="pin" style="left:91%;top:55%"></span></div>
+  <div class="m-det"><span class="m-no">19</span><b>Hiker Marcos</b>
+    &nbsp;Geodude L10 · Mankey · Karate Chop ×2, Onix · Low Kick</div>
+ </div>
+  <div class="meta">
+    <p class="why"><b>A field atlas of Kanto.</b> Warm map-paper, contour lines, serif headings, trail-brown route and forest-green accent — the walk itself as cartography.</p>
+    <div class="specs"><span class="sw"><i style="background:#f3ead7"></i>#f3ead7</span><span class="sw"><i style="background:#3a2f1d"></i>#3a2f1d</span><span class="sw"><i style="background:#356848"></i>#356848</span><span class="sw"><i style="background:#7c4a2d"></i>#7c4a2d</span><span class="sw"><i style="background:#b0742a"></i>#b0742a</span></div>
+    <div class="fonts">Type: <b>Crimson Pro · Plex Mono</b></div>
+  </div>
+</article>
+</div>
+
+</div>
