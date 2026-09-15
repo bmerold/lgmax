@@ -280,6 +280,45 @@ def _step_heal(step, doors, zones):
 
 _ROUTE_POS = None
 
+_CATCH_JOINS = None
+def catch_joins():
+    """stage -> {species display name: trainer ordinal}: how many of the
+    stage's trainer fights the walk clears BEFORE that species' catch stop.
+    A Pokemon first caught mid-stage cannot answer the fights before its
+    grass -- Abra's patch is on the far side of Nugget Bridge, so nothing
+    of Abra's line exists for the six bridge trainers."""
+    global _CATCH_JOINS
+    if _CATCH_JOINS is not None: return _CATCH_JOINS
+    _CATCH_JOINS = {}
+    path = f"{OUT}/route.json"
+    if not os.path.exists(path): return _CATCH_JOINS
+    rt = json.load(open(path))
+    for st in rt["stages"]:
+        joins, seen = {}, 0
+        for s in st["steps"]:
+            if s["kind"] == "trainer":
+                seen += 1
+            elif s["kind"] == "catch":
+                for spec in s.get("species", []):
+                    joins.setdefault(spec.split(" (")[0], seen)
+        if joins: _CATCH_JOINS[st["stage"]] = joins
+    return _CATCH_JOINS
+
+JOIN_AT = {}    # species const -> trainer ordinal it becomes usable at, this section
+def set_join_at(stage, avail):
+    JOIN_AT.clear()
+    joins = catch_joins().get(stage)
+    if not joins: return
+    for sp in O.candidates(stage):
+        if (avail.get(sp) or {}).get("stage") != stage: continue
+        form = sp
+        while form:
+            j = joins.get(E.SPECIES[form]["name"])
+            if j is not None:
+                if j > 0: JOIN_AT[sp] = j
+                break
+            form = _pre_evo(form)
+
 def route_positions():
     """battle key -> (global index, heal-after reason or None, route stage).
     The route stage is where the walk actually fights it, which can be LATER
@@ -976,14 +1015,22 @@ def run_section(team, battles, badges, heal_after_idx, tm_value=None,
                                   for mv in m.moves},
                          "minHpPct": m.legMinHpPct,
                          "fainted": m.fainted - m.legFaints} for m in team]})
+    trainers_seen = 0
     for bi, enc in enumerate(battles):
+        # A Pokemon first caught mid-stage does not exist for the fights before
+        # its catch stop (Abra's grass is past Nugget Bridge, so its line sits
+        # out the bridge). JOIN_AT holds the trainer ordinal each newly-caught
+        # species becomes usable at, in this section's route order.
+        have = ([m for m in team if JOIN_AT.get(m.species, 0) <= trainers_seen]
+                if JOIN_AT else team)
         if enc["kind"] == "wild":
             # You cannot pick your lead against something you have not seen yet.
             # One Pokemon walks the route and meets whatever the grass sends;
             # anything else has to be switched in at the usual price.
-            active = pick_lead(team, enc, badges, leads)
+            active = pick_lead(have, enc, badges, leads)
         else:
             active = None          # party order is free to set before a trainer
+            trainers_seen += 1
         entries = []
         for oi, opp in enumerate(enc["_mons"]):
             # Gen 3's default battle style is SHIFT: when a trainer's Pokemon
@@ -993,7 +1040,7 @@ def run_section(team, battles, badges, heal_after_idx, tm_value=None,
             # switch tax. Wild leads still carry over unpriced choices.
             if enc["kind"] != "wild" and oi > 0:
                 active = None
-            plan = plan_vs(team, opp, badges, active)
+            plan = plan_vs(have, opp, badges, active)
             if plan is None:
                 failed += 1
                 entries.append({"opp": opp["name"], "lvl": opp["level"],
@@ -1286,6 +1333,7 @@ def solve_section(stage, encs, starter, avail, tm_value=None, carry=None):
     st = P.STAGE_BY_ID[stage]
     level, badges = st["level"], O.badges_for(stage)
     encs = encs or []
+    set_join_at(stage, avail)   # mid-stage catches sit out the fights before their grass
     # In the order you actually meet them: by where each trainer stands on the
     # map, and by the order you walk the maps -- not by party level, which is
     # only a proxy for "further in" and is not even monotonic along a route.
@@ -1470,6 +1518,8 @@ def solve_section(stage, encs, starter, avail, tm_value=None, carry=None):
         "carryOut": {m.species: {"pp": dict(m.pp),
                                  "hpPct": max(0.0, m.hp) / m.maxhp}
                      for m in final["team"]},
+        # the join constraints actually applied, for the verify guard
+        "joins": {E.SPECIES[sp]["name"]: j for sp, j in JOIN_AT.items()},
         "stage": stage, "starter": starter, "level": level,
         "badges": badges["count"],
         "battles": len(trainer_battles),

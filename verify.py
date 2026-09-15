@@ -442,6 +442,27 @@ for starter, per_stage in raw["sections"].items():
 check("no party uses more Moon Stone evolutions than stones held",
       not _short, str(_short[:4]))
 
+# ------------------------------------------------------------------ mid-stage catches
+# A species first caught mid-stage does not exist for the fights before its
+# catch stop: nothing of Abra's line may answer a Nugget Bridge trainer, since
+# the grass is on the far side of the bridge.
+_early_by = []
+for run, per_stage in raw["sections"].items():
+    for stg, sec in per_stage.items():
+        if not sec: continue
+        _j = sec.get("joins") or {}
+        if not _j: continue
+        t = 0
+        for row in sec["log"]:
+            if row["kind"] == "wild": continue
+            for x in row["steps"]:
+                by = x.get("by")
+                if by and _j.get(by, 0) > t:
+                    _early_by.append((run, int(stg), by, row.get("enc")))
+            t += 1
+check("no fight is answered by a Pokémon not yet caught at that point",
+      not _early_by, str(_early_by[:4]))
+
 # ------------------------------------------------------------------ TM supply
 # A single-use TM can only be taught to as many Pokemon as copies exist -- and
 # a Dept.-store TM (Dig, Brick Break, Secret Power) has only its finite gift
