@@ -439,16 +439,19 @@ button{font:inherit;color:inherit}
 #playTeam{display:flex;gap:6px;align-items:flex-end;justify-content:center;
   padding:6px 10px 4px;background:var(--surface);border-bottom:1px solid var(--line);
   flex-shrink:0;overflow-x:auto}
-.pt-mon{border:0;background:none;cursor:pointer;text-align:left;padding:2px 8px 2px 4px;
-  font-family:inherit;border-radius:0;display:flex;align-items:center;gap:2px;flex-shrink:0}
+.pt-mon{border:1px solid var(--line);background:var(--surface);text-align:left;padding:2px 8px 2px 4px;
+  font-family:inherit;border-radius:0;display:flex;align-items:center;gap:2px;flex-shrink:0;
+  min-height:86px}
 .pt-mon:hover{background:var(--surface-2)}
 .pt-mon img{width:48px;height:48px;image-rendering:pixelated;display:block;margin:0 auto}
 .pt-mon .pt-left{display:flex;flex-direction:column;align-items:center;flex-shrink:0}
 .pt-mon .pt-l{font-size:10px;color:var(--ink-2);font-weight:600;display:block;margin-top:-4px}
 .pt-mon.fgt{background:var(--surface-2);box-shadow:inset 0 0 0 1.5px var(--accent)}
 .pt-mon.hm img{filter:saturate(.55)}
-.pt-mon.nxt{opacity:.72}
+.pt-mon.nxt{opacity:.9}
 .pt-mon.nxt img{filter:grayscale(.7)}
+.pt-mon.nxt .pt-role{color:var(--accent);font-weight:600;font-size:8.5px;
+  white-space:normal;max-width:148px;line-height:1.3}
 .pt-tag{font-size:8px;font-weight:700;letter-spacing:.06em;color:#fff;
   background:var(--ink-2);border-radius:0;padding:1px 4px;margin-top:1px}
 .pt-tag.nxt{background:var(--accent)}
@@ -457,33 +460,6 @@ button{font:inherit;color:inherit}
 .pt-mon .pt-m{font-size:10px;color:var(--ink);white-space:nowrap;line-height:1.25;
   display:flex;align-items:baseline;gap:4px;justify-content:space-between}
 .pt-mon .msrc{font-size:8.5px;color:var(--ink-2);font-weight:600;letter-spacing:.02em}
-#ptDetail{flex-shrink:0;display:flex;justify-content:center;padding:6px 14px 8px;
-  background:var(--surface);border-bottom:1px solid var(--line);
-  max-height:34vh;overflow-y:auto}
-#ptDetail .ptd{width:min(1240px,96vw)}
-#ptDetail .ptd-h{display:flex;align-items:baseline;gap:10px;margin-bottom:4px}
-#ptDetail .ptd-h b{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-2)}
-#ptDetail .ptd-h .note{flex:1}
-#ptDetail .ptd-x{border:1px solid var(--line-strong);background:var(--surface);cursor:pointer;
-  font:600 10.5px/1 inherit;font-family:inherit;padding:3px 8px;flex-shrink:0}
-#ptDetail .ptd-x:hover{color:var(--accent);border-color:var(--accent)}
-#ptDetail .ptd-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(196px,1fr));gap:6px}
-#ptDetail .ptd-eyebrow{font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
-  color:var(--accent);margin-bottom:2px}
-/* compact: pull the card's vertical scale toward the strip's own cards */
-#ptDetail .pm{padding:6px 8px;gap:3px;display:flex;flex-direction:column}
-#ptDetail .pm-n{font-size:12px}
-#ptDetail .pm-slot{font-size:9.5px}
-#ptDetail .tw .type{font-size:8px;padding:1px 5px}
-#ptDetail .pm-new{font-size:8px}
-#ptDetail .pm-src{font-size:9.5px;line-height:1.3}
-#ptDetail .pprow{gap:1px 6px}
-#ptDetail .ppn{font-size:10.5px}
-#ptDetail .ppv{font-size:9.5px}
-#ptDetail .pptrack{height:3px}
-#ptDetail .pm-hp{gap:2px;margin-top:2px}
-#ptDetail .pm-hp .meter-t{font-size:9.5px}
-#ptDetail .track{height:4px}
 #playMap{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;
   overflow:hidden;background:#101014}
 #playFit{position:relative;flex-shrink:0}
@@ -613,7 +589,6 @@ details.notes[open] summary::after{content:"−"}
     <div id="playDesc" hidden></div>
     <div id="playDetail"></div>
     <div id="playTeam"></div>
-    <div id="ptDetail" hidden></div>
     <div id="playMap"><div id="playFit"></div></div>
     <div id="playDrawer" hidden>
       <div class="drawer-h"><b>The journey</b>
@@ -2177,7 +2152,6 @@ function renderPlay(){
   dEl.innerHTML = desc ? `<div class="po-desc">${desc}</div>` : "";
 
   renderPlayTeam(ctx);
-  renderPtDetail(ctx);
   renderPlayMap(ctx);
   renderPlayDetail(ctx);
   savePlay();
@@ -2192,39 +2166,49 @@ function renderPlayTeam(ctx){
     ? ctx.d.pp : team.map(t => [t[0], 0, [], 0, t[2]]);
   const byName = {};
   team.forEach((t, i) => byName[str(t[0])] = i);
+  const mvRows = ms => ms.map(m => {
+    const src = str(m[9] || "");
+    return `<span class="pt-m">${esc(str(m[0]))}${
+      src ? `<span class="msrc" title="${esc(moveSrcTitle(src))}">${esc(src)}</span>` : ""}</span>`;
+  }).join("");
   el.innerHTML = pp.map(p => {
     const nm = str(p[0]), role = p[1], hms = (p[2] || []).map(x => str(x)),
-          nextSt = p[3], lvl = p[4];
+          nextSt = p[3], lvl = p[4], becomes = str(p[5] || "");
     const i = byName[nm], t = i != null ? team[i] : null;
     const spr = SPRITES[nm];
     const roleCls = role === 1 ? " hm" : role === 2 ? " nxt" : " fgt";
-    const moves = t ? (t[9] || []) : [];
-    const body = t
-      ? `<span class="pt-mv">${moves.map(m => {
-          const src = str(m[9] || "");
-          return `<span class="pt-m">${esc(str(m[0]))}${
-            src ? `<span class="msrc" title="${esc(moveSrcTitle(src))}">${esc(src)}</span>` : ""}</span>`;
-        }).join("")}</span>`
-      : role === 2
-      ? `<span class="pt-mv"><span class="pt-role">next: ${nextSt
-            ? esc(nextSt + ". " + ((STAGE_BY_ID[nextSt] || {}).name || "")) : "later"}</span>
-          <span class="pt-role">${str(p[5]) ? `becomes ${esc(str(p[5]))} · ` : "fights there at "}L${lvl}</span></span>`
-      : `<span class="pt-mv">${hms.map(h => `<span class="pt-m">${esc(h)}</span>`).join("")}
-          <span class="pt-role">${role === 1 ? "field moves only" : "reserve this stretch"}</span></span>`;
-    const tag = role === 1 ? `<span class="pt-tag">HM</span>`
-              : role === 2 ? `<span class="pt-tag nxt">SOON</span>` : "";
-    const title = role === 1
-      ? `${nm} — carried for ${hms.join(" + ") || "the field"}; it never fights here. Click to fold out the party's setups.`
-      : role === 2
-      ? `${nm} — fills the party; ${str(p[5]) ? `evolves into ${str(p[5])} and ` : ""}next used in section ${nextSt} at L${lvl}. Click to fold out the party's setups.`
-      : `${nm} — needed for this section's fights. Click to fold out the party's setups.`;
-    return `<button class="pt-mon${roleCls}" data-nm="${esc(nm)}" title="${esc(title)}">
+    let body, title;
+    if (t){
+      body = `<span class="pt-mv">${mvRows(t[9] || [])}${role === 1
+        ? `<span class="pt-role">field moves only this stretch</span>` : ""}</span>`;
+      title = role === 1
+        ? `${nm} — carried for ${hms.join(" + ") || "the field"}; it never fights here`
+        : `${nm} — needed for this section's fights`;
+    } else {
+      // a fill slot: show its NEXT setup with the same density as the actives
+      let fut = null;
+      if (nextSt){
+        const want = becomes || nm;
+        for (const L2 of legsOf(secData(nextSt))){
+          fut = (L2.team || []).find(x => str(x[0]) === want);
+          if (fut) break;
+        }
+      }
+      const nextLbl = nextSt
+        ? `next: ${nextSt}. ${(STAGE_BY_ID[nextSt] || {}).name || ""}${
+            becomes ? ` · as ${esc(becomes)}` : ""} · L${lvl}` : "later";
+      body = `<span class="pt-mv">${fut ? mvRows(fut[9] || []) : ""}
+        <span class="pt-role">${nextLbl}</span></span>`;
+      title = `${nm} — fills the party; ${becomes ? `evolves into ${becomes} and ` : ""}next used in section ${nextSt} at L${lvl}`;
+    }
+    const tag = role === 1 ? `<span class="pt-tag">HM</span>` : "";
+    return `<span class="pt-mon${roleCls}" title="${esc(title)}">
       <span class="pt-left">
         ${spr ? `<img src="data:image/png;base64,${spr}" alt="${esc(nm)}">`
               : `<span style="font-size:26px">◓</span>`}
         <span class="pt-l">${esc(nm)}${role === 2 ? "" : " · L" + lvl}</span>${tag}
       </span>
-      ${body}</button>`;
+      ${body}</span>`;
   }).join("") || `<span class="note" style="padding:6px">no party needed on this stretch</span>`;
 }
 
@@ -2389,58 +2373,6 @@ document.getElementById("playMap").addEventListener("click", ev => {
   if (!ctx) return;
   const idx = ctx.nodes.findIndex(nd => nd.stop && nd.stopIdx === +m.dataset.jump);
   if (idx >= 0){ PLAY.node = idx; renderPlay(); }
-});
-
-/* team fold-out: click any card to open the whole party's setups, compact */
-let PT_OPEN = false, PT_LEG = null;
-function renderPtDetail(ctx){
-  const el = document.getElementById("ptDetail");
-  const legKey = `${PLAY.sec}/${PLAY.leg}`;
-  if (PT_LEG !== legKey){ PT_OPEN = false; PT_LEG = legKey; }
-  if (!PT_OPEN || !ctx){ el.hidden = true; el.innerHTML = ""; return; }
-  const pp = (ctx.d && ctx.d.pp && ctx.d.pp.length)
-    ? ctx.d.pp : (ctx.L.team || []).map(t => [t[0], 0, [], 0, t[2]]);
-  const cards = [];
-  for (const p of pp){
-    const nm = str(p[0]);
-    let card = (ctx.L.team || []).find(x => str(x[0]) === nm), eyebrow = "";
-    if (!card && p[3]){
-      const want = str(p[5] || "") || nm;
-      for (const L2 of legsOf(secData(p[3]))){
-        const f = (L2.team || []).find(x => str(x[0]) === want);
-        if (f){
-          card = f;
-          eyebrow = `next fielded — ${p[3]}. ${(STAGE_BY_ID[p[3]] || {}).name || ""}${
-            str(p[5] || "") ? ` · as ${esc(str(p[5]))}` : ""}`;
-          break;
-        }
-      }
-    }
-    if (!card) continue;
-    cards.push(`<div class="ptd-one">${eyebrow
-      ? `<div class="ptd-eyebrow">${eyebrow}</div>` : ""}${partyCard(card)}</div>`);
-  }
-  if (!cards.length){ el.hidden = true; el.innerHTML = ""; return; }
-  el.hidden = false;
-  el.innerHTML = `<div class="ptd">
-    <div class="ptd-h"><b>Party setup</b><span class="note"></span>
-      <button class="ptd-x" title="collapse">× close</button></div>
-    <div class="ptd-grid">${cards.join("")}</div></div>`;
-}
-document.getElementById("playTeam").addEventListener("click", ev => {
-  const b = ev.target.closest(".pt-mon");
-  if (!b) return;
-  PT_OPEN = !PT_OPEN;
-  const ctx = playCtx();
-  renderPtDetail(ctx);
-  renderPlayMap(ctx);          // the map refits around the fold-out
-});
-document.getElementById("ptDetail").addEventListener("click", ev => {
-  if (!ev.target.closest(".ptd-x")) return;
-  PT_OPEN = null;
-  const ctx = playCtx();
-  renderPtDetail(ctx);
-  renderPlayMap(ctx);
 });
 
 /* checkbox + fight link inside the detail panel */
