@@ -303,8 +303,19 @@ button{font:inherit;color:inherit}
 @keyframes rowflash{0%,60%{background:color-mix(in srgb, var(--accent) 18%, transparent)}100%{background:transparent}}
 
 /* ---------- section maps ---------- */
-.maph{font-weight:600;font-size:13px;padding:12px 16px 8px;display:flex;gap:10px;align-items:baseline}
-.mapwrap{overflow-x:auto;margin:0 16px 14px;border:1px solid var(--line);
+.mapscard{position:relative;padding-top:14px}
+.zoomctl.float{position:absolute;top:8px;right:24px;z-index:6;display:flex;gap:4px}
+.maptag{position:absolute;top:6px;left:6px;z-index:5;font-size:11px;font-weight:700;
+  background:var(--surface);border:1px solid var(--line-strong);padding:2px 8px;opacity:.94}
+.side-h{font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;
+  color:var(--ink-2);padding:2px 2px 6px}
+.mapcaption{font-size:11.5px;color:var(--ink-3);padding:0 16px 12px}
+.hchips{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
+.hchip{font-size:11px;font-weight:600;border:1px solid var(--line);padding:2px 9px;background:var(--surface-2)}
+.hchip.good{color:var(--good);border-color:var(--good)}
+.hchip.bad{color:var(--bad);border-color:var(--bad)}
+.hchip.hm2{color:var(--ink-2)}
+.mapwrap{overflow-x:auto;margin:0 16px 14px;border:1px solid var(--line);position:relative;
   border-radius:0;background:var(--surface-2)}
 .mapbox{position:relative;width:max-content}
 .mapbox img{display:block;image-rendering:pixelated}
@@ -1199,13 +1210,14 @@ function renderSecPanel(id, leg){
       <span><b>${L.b}</b> fight${L.b === 1 ? "" : "s"} · <b>${(L.st || 0).toLocaleString()}</b> steps
         · <b>${L.t}</b> turns${L.f ? ` · <b class="bad">${L.f} faint${L.f === 1 ? "" : "s"}</b>` : ""}</span>
       ${stops.length ? `<span class="prog"><b>${doneCount}</b> of <b>${stops.length}</b> done</span>` : ""}</div>
-    ${arrive || ends || L.cold ? `<div class="enc-meta">${
-        L.cold ? `<span class="bad">No Pokémon Center since the previous section — HP and PP carry over</span>` : ""}${
-        arrive ? `<span>You start fully healed — ${esc(arrive)}</span>` : ""}${
-        ends ? `<span>Ends with a full heal at <b>${esc(ends)}</b></span>` : ""}</div>` : ""}
-    ${size ? `<div class="enc-meta"><span>Party: ${L.team.map(t =>
-        `<b>${esc(str(t[0]))}</b>`).join(" · ")} <span class="dim">(details below)</span></span></div>` : ""}
-    ${hmLine ? `<div class="enc-meta"><span>Field moves: ${hmLine}</span></div>` : ""}
+    ${arrive || ends || L.cold || size || (d.hm || []).length ? `<div class="hchips">${
+        L.cold ? `<span class="hchip bad" title="No Pokémon Center since the previous section">HP·PP carry over</span>` : ""}${
+        arrive ? `<span class="hchip good" title="You start fully healed — ${esc(arrive)}">healed start</span>` : ""}${
+        ends ? `<span class="hchip good" title="Ends with a full heal at ${esc(ends)}">ends healed</span>` : ""}${
+        size ? L.team.map(t => `<span class="hchip" title="party — details below">${esc(str(t[0]))}</span>`).join("") : ""}${
+        (d.hm || []).filter(h => h[2] !== -1).map(h =>
+          `<span class="hchip hm2" title="field move — carried by ${esc(str(h[2]))}">${esc(str(h[0]))} · ${esc(str(h[2]))}</span>`).join("")}
+      </div>` : ""}
     </div></section>`;
 
   let prep = "";
@@ -1331,17 +1343,36 @@ function renderSecPanel(id, leg){
     const segsByMap = Object.fromEntries(L.mp.map(m => [m[0], m[1] || []]));
     const nextRuns = nextIdx >= 0 ? (stops[nextIdx][7] || []) : [];
     const clusters = (L.cl && L.cl.length) ? L.cl : L.mp.map(m => [[m[0], 0, 0]]);
-    html += `<section class="card"><div class="card-h"><h2>The ground you cover</h2>
-        <span class="note">the walk in black; your NEXT stretch marches in green — stops match the checklist below</span>
-        <span class="zoomctl">
+    html += `<section class="card mapscard">
+      <span class="zoomctl float">
           <button class="zoomb" data-zoom="fit" title="scale each map to fit the panel">fit</button>
           <button class="zoomb" data-zoom="1" title="one pixel per game pixel">1×</button>
-          <button class="zoomb" data-zoom="2" title="double size">2×</button></span></div>
+          <button class="zoomb" data-zoom="2" title="double size">2×</button></span>
       ${clusters.map(cluster => {
         const members = cluster.filter(c => MAPART[c[0]]);
         if (!members.length) return "";
         const W = Math.max(...members.map(c => c[1] * 16 + MAPART[c[0]][0]));
         const H = Math.max(...members.map(c => c[2] * 16 + MAPART[c[0]][1]));
+        // crop the stitched canvas to what the section actually touches
+        let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+        const grow = (px, py) => { bx0 = Math.min(bx0, px); by0 = Math.min(by0, py);
+                                   bx1 = Math.max(bx1, px); by1 = Math.max(by1, py); };
+        members.forEach(c => {
+          const [name, ox, oy] = c;
+          (segsByMap[name] || []).forEach(cc => {
+            for (let i2 = 0; i2 < cc.length; i2 += 2) grow((ox + cc[i2] + .5) * 16, (oy + cc[i2 + 1] + .5) * 16); });
+          nextRuns.filter(r => r[0] === name).forEach(r => { const cc = r[1];
+            for (let i2 = 0; i2 < cc.length; i2 += 2) grow((ox + cc[i2] + .5) * 16, (oy + cc[i2 + 1] + .5) * 16); });
+          (pinsByMap[name] || []).forEach(p2 => grow((ox + p2.x + .5) * 16, (oy + p2.y + .5) * 16));
+          ((L.amb || []).filter(a => a[0] === name)).forEach(a =>
+            grow((ox + a[1] + .5) * 16, (oy + a[2] + .5) * 16));
+        });
+        if (!isFinite(bx0))
+          members.forEach(c => { grow(c[1] * 16, c[2] * 16);
+            grow(c[1] * 16 + MAPART[c[0]][0], c[2] * 16 + MAPART[c[0]][1]); });
+        const PAD = 64;
+        const cx0 = Math.max(0, Math.floor(bx0 - PAD)), cy0 = Math.max(0, Math.floor(by0 - PAD));
+        const cw = Math.min(W, Math.ceil(bx1 + PAD)) - cx0, ch = Math.min(H, Math.ceil(by1 + PAD)) - cy0;
         const names = members.map(c => prettyMap(c[0]));
         const shown = names.length > 3 ? names.slice(0, 3).join(" · ") + " …"
                                        : names.join(" · ");
@@ -1387,10 +1418,10 @@ function renderSecPanel(id, leg){
               re-rolls when you enter with 1,500+ steps walked: ${
               Object.entries(ambSummary).map(([k2, n2]) =>
                 esc(k2) + (n2 > 1 ? ` ×${n2}` : "")).join(" · ")}</div>` : "";
-        return `<div class="maph">${esc(shown)}
-            <span class="note">${nPins ? nPins + " stop" + (nPins === 1 ? "" : "s") : "just the walk"}</span></div>
-          <div class="mapblock">
-          <div class="mapwrap" data-w="${W}" data-h="${H}"><div class="mapscale"><div class="mapbox" style="width:${W}px;height:${H}px">
+        return `<div class="mapblock">
+          <div class="mapwrap" data-w="${cw}" data-h="${ch}" data-x="${cx0}" data-y="${cy0}">
+          <span class="maptag">${esc(shown)}</span>
+          <div class="mapscale"><div class="mapbox" style="width:${W}px;height:${H}px">
             ${members.map(c => `<img class="stitch" src="data:image/png;base64,${MAPART[c[0]][2]}"
                 width="${MAPART[c[0]][0]}" height="${MAPART[c[0]][1]}"
                 style="left:${c[1] * 16}px;top:${c[2] * 16}px"
@@ -1398,9 +1429,12 @@ function renderSecPanel(id, leg){
             <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${svgs}</svg>
             ${pinsHtml}${ambPins}
           </div></div></div>
-          ${clusterPins.length || ambNote ? `<aside class="mapside">${clusterPins.map(sideRow).join("")}${ambNote}</aside>` : ""}
+          ${clusterPins.length || ambNote ? `<aside class="mapside">
+            <div class="side-h">${nPins ? nPins + " stop" + (nPins === 1 ? "" : "s") : "just the walk"}</div>
+            ${clusterPins.map(sideRow).join("")}${ambNote}</aside>` : ""}
           </div>`;
       }).join("")}
+      <div class="mapcaption">walk in black · your next stretch marches in green · pins numbered in walk order — they match the checklist</div>
     </section>`;
   }
 
@@ -1468,9 +1502,10 @@ function applyMapZoom(){
     const scale = MAPZOOM === "2" ? 2
       : MAPZOOM === "fit" ? Math.min(1, Math.max(0.25, (wrap.clientWidth - 2) / W))
       : 1;
+    const X = +wrap.dataset.x || 0, Y = +wrap.dataset.y || 0;
     sc.style.width = Math.round(W * scale) + "px";
     sc.style.height = Math.round(H * scale) + "px";
-    box.style.transform = scale === 1 ? "" : `scale(${scale})`;
+    box.style.transform = `scale(${scale}) translate(${-X}px, ${-Y}px)`;
   });
   document.querySelectorAll(".zoomb").forEach(b =>
     b.setAttribute("aria-pressed", String(b.dataset.zoom === MAPZOOM)));
