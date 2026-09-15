@@ -457,6 +457,16 @@ button{font:inherit;color:inherit}
 .pt-mon .pt-m{font-size:10px;color:var(--ink);white-space:nowrap;line-height:1.25;
   display:flex;align-items:baseline;gap:4px;justify-content:space-between}
 .pt-mon .msrc{font-size:8.5px;color:var(--ink-2);font-weight:600;letter-spacing:.02em}
+#ptDetail{flex-shrink:0;display:flex;justify-content:center;padding:8px 14px;
+  background:var(--surface);border-bottom:1px solid var(--line);
+  max-height:44vh;overflow-y:auto}
+#ptDetail .ptd{width:min(500px,94vw)}
+#ptDetail .ptd-h{display:flex;align-items:baseline;gap:10px;margin-bottom:6px}
+#ptDetail .ptd-h b{font-size:13.5px}
+#ptDetail .ptd-h .note{flex:1}
+#ptDetail .ptd-x{border:1px solid var(--line-strong);background:var(--surface);cursor:pointer;
+  font:600 11px/1 inherit;font-family:inherit;padding:4px 9px;flex-shrink:0}
+#ptDetail .ptd-x:hover{color:var(--accent);border-color:var(--accent)}
 #playMap{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;
   overflow:hidden;background:#101014}
 #playFit{position:relative;flex-shrink:0}
@@ -577,6 +587,7 @@ details.notes[open] summary::after{content:"−"}
     </div>
     <div id="playDesc" hidden></div>
     <div id="playTeam"></div>
+    <div id="ptDetail" hidden></div>
     <div id="playMap"><div id="playFit"></div></div>
     <div id="playDetail"></div>
     <div id="playDrawer" hidden>
@@ -2141,6 +2152,7 @@ function renderPlay(){
   dEl.innerHTML = desc ? `<div class="po-desc">${desc}</div>` : "";
 
   renderPlayTeam(ctx);
+  renderPtDetail(ctx);
   renderPlayMap(ctx);
   renderPlayDetail(ctx);
   savePlay();
@@ -2177,11 +2189,11 @@ function renderPlayTeam(ctx){
     const tag = role === 1 ? `<span class="pt-tag">HM</span>`
               : role === 2 ? `<span class="pt-tag nxt">SOON</span>` : "";
     const title = role === 1
-      ? `${nm} — carried for ${hms.join(" + ") || "the field"}; it never fights here`
+      ? `${nm} — carried for ${hms.join(" + ") || "the field"}; it never fights here. Click for its setup.`
       : role === 2
-      ? `${nm} — fills the party; ${str(p[5]) ? `evolves into ${str(p[5])} and ` : ""}next used in section ${nextSt} at L${lvl}`
-      : `${nm} — needed for this section's fights`;
-    return `<button class="pt-mon${roleCls}"${t ? ` data-mem="${i}"` : ""} title="${esc(title)}">
+      ? `${nm} — fills the party; ${str(p[5]) ? `evolves into ${str(p[5])} and ` : ""}next used in section ${nextSt} at L${lvl}. Click for that setup.`
+      : `${nm} — needed for this section's fights. Click for its full setup.`;
+    return `<button class="pt-mon${roleCls}" data-nm="${esc(nm)}" title="${esc(title)}">
       <span class="pt-left">
         ${spr ? `<img src="data:image/png;base64,${spr}" alt="${esc(nm)}">`
               : `<span style="font-size:26px">◓</span>`}
@@ -2332,20 +2344,53 @@ document.getElementById("playMap").addEventListener("click", ev => {
   if (idx >= 0){ PLAY.node = idx; renderPlay(); }
 });
 
-/* team member modal */
+/* team member fold-out: click any card — active or fill — for its setup */
+let PT_OPEN = null, PT_LEG = null;
+function renderPtDetail(ctx){
+  const el = document.getElementById("ptDetail");
+  const legKey = `${PLAY.sec}/${PLAY.leg}`;
+  if (PT_LEG !== legKey){ PT_OPEN = null; PT_LEG = legKey; }
+  if (!PT_OPEN || !ctx){ el.hidden = true; el.innerHTML = ""; return; }
+  const t = (ctx.L.team || []).find(x => str(x[0]) === PT_OPEN);
+  let card = t || null, note = "";
+  if (!card){
+    // a fill-list Pokémon: show its setup from the section it's next fielded in
+    const row = ((ctx.d && ctx.d.pp) || []).find(p => str(p[0]) === PT_OPEN);
+    if (row && row[3]){
+      const want = str(row[5] || "") || PT_OPEN;
+      for (const L2 of legsOf(secData(row[3]))){
+        const f = (L2.team || []).find(x => str(x[0]) === want);
+        if (f){
+          card = f;
+          note = `its setup when next fielded — ${row[3]}. ${(STAGE_BY_ID[row[3]] || {}).name || ""}${
+            str(row[5] || "") ? ` (as ${esc(str(row[5]))})` : ""}`;
+          break;
+        }
+      }
+    }
+  }
+  if (!card){ el.hidden = true; el.innerHTML = ""; return; }
+  el.hidden = false;
+  el.innerHTML = `<div class="ptd">
+    <div class="ptd-h"><b>${esc(PT_OPEN)}</b><span class="note">${note}</span>
+      <button class="ptd-x" title="collapse">× close</button></div>
+    <div class="party" style="grid-template-columns:1fr;padding:0">${partyCard(card)}</div></div>`;
+}
 document.getElementById("playTeam").addEventListener("click", ev => {
   const b = ev.target.closest(".pt-mon");
   if (!b) return;
+  const nm = b.dataset.nm;
+  PT_OPEN = (PT_OPEN === nm) ? null : nm;
   const ctx = playCtx();
-  const t = ctx && ctx.L.team[+b.dataset.mem];
-  if (!t) return;
-  document.getElementById("playModalBox").innerHTML =
-    `<div class="party" style="grid-template-columns:1fr">${partyCard(t)}</div>`;
-  document.getElementById("playModal").hidden = false;
+  renderPtDetail(ctx);
+  renderPlayMap(ctx);          // the map refits around the fold-out
 });
-document.getElementById("playModal").addEventListener("click", ev => {
-  if (!ev.target.closest("#playModalBox"))
-    document.getElementById("playModal").hidden = true;
+document.getElementById("ptDetail").addEventListener("click", ev => {
+  if (!ev.target.closest(".ptd-x")) return;
+  PT_OPEN = null;
+  const ctx = playCtx();
+  renderPtDetail(ctx);
+  renderPlayMap(ctx);
 });
 
 /* checkbox + fight link inside the detail panel */
