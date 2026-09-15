@@ -2256,16 +2256,48 @@ function renderPlayMap(ctx){
     </svg>
     ${pins}
   </div>`;
+  // the viewer boxes itself around what matters on this map: the leg's path,
+  // the gold stretch, and the pinned stops — not the whole map image
+  let bb = null;
+  const grow = (x, y) => {
+    const px = (x + 0.5) * 16, py = (y + 0.5) * 16;
+    if (!bb) bb = {x0: px, y0: py, x1: px, y1: py};
+    else { bb.x0 = Math.min(bb.x0, px); bb.y0 = Math.min(bb.y0, py);
+           bb.x1 = Math.max(bb.x1, px); bb.y1 = Math.max(bb.y1, py); }
+  };
+  dim.forEach(c => { for (let i = 0; i < c.length; i += 2) grow(c[i], c[i + 1]); });
+  if (node.seg) for (let i = 0; i < node.seg.length; i += 2) grow(node.seg[i], node.seg[i + 1]);
+  (L.rt || []).forEach(st => { if (st[2] === node.map) grow(st[3], st[4]); });
+  PLAY_BBOX = bb;
   fitPlayMap(W, H);
 }
+let PLAY_BBOX = null;
 function fitPlayMap(W, H){
   const wrap = document.getElementById("playMap");
   const holder = document.getElementById("playFit");
-  const scale = Math.min((wrap.clientWidth - 16) / W, (wrap.clientHeight - 16) / H, 2.5);
-  holder.style.width = Math.round(W * scale) + "px";
-  holder.style.height = Math.round(H * scale) + "px";
+  const availW = wrap.clientWidth - 16, availH = wrap.clientHeight - 16;
+  const fitAll = Math.min(availW / W, availH / H);
+  let scale, cx = W / 2, cy = H / 2;
+  if (PLAY_BBOX){
+    const M = 44;                       // breathing room around the route
+    const bw = PLAY_BBOX.x1 - PLAY_BBOX.x0 + 2 * M,
+          bh = PLAY_BBOX.y1 - PLAY_BBOX.y0 + 2 * M;
+    scale = Math.max(Math.min(availW / bw, availH / bh, 3), fitAll);
+    cx = (PLAY_BBOX.x0 + PLAY_BBOX.x1) / 2;
+    cy = (PLAY_BBOX.y0 + PLAY_BBOX.y1) / 2;
+  } else scale = Math.min(fitAll, 2.5);
+  // the window: only as big as the scaled map, never bigger than the viewer —
+  // and panned so the route sits centered, clamped to the map's edges
+  const vw = Math.min(W * scale, availW), vh = Math.min(H * scale, availH);
+  let tx = vw / 2 - cx * scale, ty = vh / 2 - cy * scale;
+  tx = Math.min(0, Math.max(vw - W * scale, tx));
+  ty = Math.min(0, Math.max(vh - H * scale, ty));
+  holder.style.width = Math.round(vw) + "px";
+  holder.style.height = Math.round(vh) + "px";
+  holder.style.overflow = "hidden";
   const box = holder.querySelector(".mapbox");
-  if (box){ box.style.transformOrigin = "0 0"; box.style.transform = `scale(${scale})`; }
+  if (box){ box.style.transformOrigin = "0 0";
+            box.style.transform = `translate(${tx}px,${ty}px) scale(${scale})`; }
 }
 window.addEventListener("resize", () => {
   if (view !== "play") return;
