@@ -1,0 +1,16 @@
+{
+  "name": "LeafGreen Maximizer",
+  "short_name": "LG Maximizer",
+  "description": "The fastest completionist route and damage-optimized team plan for Pokemon LeafGreen, built from the decompilation.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#FAFAF7",
+  "theme_color": "#0F8A3C",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
