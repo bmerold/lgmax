@@ -438,8 +438,11 @@ button{font:inherit;color:inherit}
 #playDesc{display:flex;justify-content:center;flex-shrink:0;padding:8px 14px;
   background:var(--surface);border-bottom:1px solid var(--line)}
 #playDesc .po-desc{font-size:15.5px;color:var(--ink);font-weight:500;line-height:1.5;
-  max-width:940px;padding:2px 0 2px 16px;
+  max-width:1060px;padding:2px 0 2px 16px;display:flex;gap:12px;align-items:flex-start;
   border-left:3px solid var(--accent);background:transparent}
+#playDesc .po-body{min-width:0}
+#playDesc .chk.big{width:24px;height:24px;flex-shrink:0;margin-top:3px;font-size:14px;line-height:22px}
+#playDesc .log-steps{margin-top:6px}
 #playDesc .po-desc b{color:var(--ink);font-weight:700}
 #playDesc .po-desc .fightlink{color:var(--accent);font-weight:700;text-decoration:underline dotted}
 #playPrev,#playNext,#playOutlineBtn{border:1px solid var(--line);border-radius:0;
@@ -475,19 +478,14 @@ button{font:inherit;color:inherit}
   overflow:hidden;background:#101014}
 #playFit{position:relative;flex-shrink:0}
 #playFit .mapbox{position:relative}
-#playDetail{flex-shrink:0;max-height:30vh;overflow-y:auto;background:var(--surface);
-  border-bottom:1px solid var(--line);padding:6px 14px}
-#playDetail .logrow{border:0;padding:4px 0}
-#playDetail .pd-note{font-size:12.5px;color:var(--ink-2);padding:4px 0}
-#playDetail .pd-note b{color:var(--ink)}
-#playDetail .pd-enc{margin-top:4px;border-top:1px solid var(--line);padding-top:4px;
+#playDesc .pd-enc{margin-top:4px;border-top:1px solid var(--line);padding-top:4px;
   display:flex;flex-direction:column;gap:2px}
-#playDetail .pd-opp{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 12px;font-size:11.5px}
-#playDetail .pd-opp-n{display:inline-flex;align-items:baseline;gap:6px}
-#playDetail .pd-opp-n .tw .type{font-size:8px;padding:1px 5px}
-#playDetail .pd-opp-mv{color:var(--ink-3);font-size:11px}
-#playDetail .pd-opp-b{color:var(--ink-2)}
-#playDetail .pd-opp-b b{color:var(--accent)}
+#playDesc .pd-opp{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 12px;font-size:11.5px}
+#playDesc .pd-opp-n{display:inline-flex;align-items:baseline;gap:6px}
+#playDesc .pd-opp-n .tw .type{font-size:8px;padding:1px 5px}
+#playDesc .pd-opp-mv{color:var(--ink-3);font-size:11px}
+#playDesc .pd-opp-b{color:var(--ink-2)}
+#playDesc .pd-opp-b b{color:var(--accent)}
 .mark.cur{z-index:4;outline:2px solid #fff;box-shadow:0 0 0 5px var(--accent),0 1px 5px rgba(0,0,0,.6);
   animation:markpulse 1.6s ease-out infinite}
 #playDrawer{position:fixed;inset:0 auto 0 0;width:min(430px,92vw);z-index:70;
@@ -598,7 +596,6 @@ details.notes[open] summary::after{content:"−"}
       <button id="playOutlineBtn" title="the whole journey">▤ journey</button>
     </div>
     <div id="playDesc" hidden></div>
-    <div id="playDetail"></div>
     <div id="playTeam"></div>
     <div id="playMap"><div id="playFit"></div></div>
     <div id="playDrawer" hidden>
@@ -2183,12 +2180,28 @@ function renderPlay(){
     <div class="po-what">${node && node.stop ? `${node.stopIdx + 1}. ` : ""}${esc(node ? node.label : "")}</div>
     ${planLine ? `<div class="po-plan">${esc(planLine)}</div>` : ""}`;
   const dEl = document.getElementById("playDesc");
-  dEl.hidden = !desc;
-  dEl.innerHTML = desc ? `<div class="po-desc">${desc}</div>` : "";
+  let descHtml = "";
+  if (desc){
+    const key = node && node.stop ? stopKey(node.stop) : null;
+    const done = key && DONE.has(key);
+    let extra = "";
+    if (row){
+      extra += `<div class="log-steps">${row[4].map(x => {
+        const opp = x[0], lvl = x[1], by = x[2], move = x[3], turns = x[6];
+        return `<span class="step"><b>${esc(str(opp))}</b> <span class="num">L${lvl}</span>
+          ${by !== -1 ? `<span class="by">${esc(str(by))}</span>` : ""}
+          ${move !== -1 ? `<span class="num">${esc(str(move))} · ${turns}t</span>` : ""}</span>`;
+      }).join("")}</div>` + encBrief(row[1]);
+    }
+    descHtml = `<div class="po-desc">
+      ${key ? `<span class="chk big${done ? " on" : ""}" data-key="${esc(key)}" title="mark this step done">✓</span>` : ""}
+      <div class="po-body">${desc}${extra}</div></div>`;
+  }
+  dEl.hidden = !descHtml;
+  dEl.innerHTML = descHtml;
 
   renderPlayTeam(ctx);
   renderPlayMap(ctx);
-  renderPlayDetail(ctx);
   savePlay();
 }
 
@@ -2343,33 +2356,6 @@ window.addEventListener("resize", () => {
   }
 });
 
-function renderPlayDetail(ctx){
-  const el = document.getElementById("playDetail");
-  const node = ctx.node;
-  if (!node){ el.innerHTML = ""; return; }
-  if (!node.stop){
-    el.innerHTML = `<div class="pd-note">${esc(node.label)} — just travel. The green
-      stretch shows the way; the next objective is one step ahead.</div>`;
-    return;
-  }
-  const st = node.stop, kind = str(st[0]);
-  const key = stopKey(st), state = {key, done: DONE.has(key), next: false};
-  if (kind === "trainer"){
-    const ord = (ctx.L.rt || []).slice(0, node.stopIdx + 1)
-      .filter(x => str(x[0]) === "trainer").length;
-    let seen = 0, row = null;
-    for (const l of ctx.L.log){
-      if (str(l[2]) === "wild") continue;
-      seen++; if (seen === ord){ row = l; break; }
-    }
-    el.innerHTML = (row ? logRow(row, node.stopIdx + 1, state)
-                        : `<div class="pd-note">${esc(str(st[1]) || "")}</div>`)
-                   + (row ? encBrief(row[1]) : "");
-  } else {
-    el.innerHTML = rtRow(st, node.stopIdx + 1, state);
-  }
-}
-
 /* the encounter section's fight details, compressed for the top band:
    each opposing Pokémon with its moves, and the run's best answer to it */
 function encBrief(encId){
@@ -2420,6 +2406,13 @@ document.getElementById("playPrev").addEventListener("click", () => playAdvance(
 /* links inside the objective description: fight matchups and node jumps */
 for (const holder of ["playTop", "playDesc"])
   document.getElementById(holder).addEventListener("click", ev => {
+    const c = ev.target.closest(".chk");
+    if (c){
+      const key = c.dataset.key;
+      if (DONE.has(key)) DONE.delete(key); else DONE.add(key);
+      saveDone(); renderSecList(); renderPlay();
+      return;
+    }
     const j = ev.target.closest("[data-jumpnode]");
     if (j){ PLAY.node = +j.dataset.jumpnode; renderPlay(); return; }
     const f = ev.target.closest(".fightlink");
@@ -2440,19 +2433,6 @@ document.getElementById("playMap").addEventListener("click", ev => {
   if (!ctx) return;
   const idx = ctx.nodes.findIndex(nd => nd.stop && nd.stopIdx === +m.dataset.jump);
   if (idx >= 0){ PLAY.node = idx; renderPlay(); }
-});
-
-/* checkbox + fight link inside the detail panel */
-document.getElementById("playDetail").addEventListener("click", ev => {
-  const c = ev.target.closest(".chk");
-  if (c){
-    const key = c.dataset.key;
-    if (DONE.has(key)) DONE.delete(key); else DONE.add(key);
-    saveDone(); renderSecList(); renderPlay();
-    return;
-  }
-  const f = ev.target.closest(".fightlink");
-  if (f){ openEncounter(f.dataset.enc, +f.dataset.n || null); }
 });
 
 /* ---- the journey drawer ---- */
