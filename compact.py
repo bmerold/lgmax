@@ -66,6 +66,7 @@ def main():
             "id": e["id"], "k": e["kind"], "st": e["stage"],
             "n": e["name"], "l": e["location"], "mx": e["maxLevel"],
         }
+        if e.get("pic"): node["pic"] = e["pic"]
         if e["kind"] == "wild":
             node["m"] = e["method"]
             node["er"] = e.get("encounterRate", 0)
@@ -406,9 +407,14 @@ def main():
         _fp = f"{OUT}/mapart/{_rel}"
         if os.path.exists(_fp):
             sprites[_nm] = base64.b64encode(open(_fp, "rb").read()).decode()
+    tpics = {}
+    for _nm, _rel in (mapart.get("tpics") or {}).items():
+        _fp = f"{OUT}/mapart/{_rel}"
+        if os.path.exists(_fp):
+            tpics[_nm] = base64.b64encode(open(_fp, "rb").read()).decode()
 
     payload = {"pool": pool, "stages": stages, "encounters": out_encs,
-               "mapart": art, "sprites": sprites,
+               "mapart": art, "sprites": sprites, "tpics": tpics,
                "route": {"total": route["stepTotal"]},
                "sections": out_sections, "choices": choices,
                "commitments": secs.get("tradeCommitments", {}),

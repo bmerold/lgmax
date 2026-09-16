@@ -254,6 +254,12 @@ def team_sprites():
                 for p in sec.get("partyPlan", []): species.add(p["species"])
                 for leg in sec.get("legs", []):
                     for t in leg.get("team", []): species.add(t["species"])
+    # every opposing Pokémon too, so fight cards can show the other side
+    encp = f"{OUT}/encounters.json"
+    if os.path.exists(encp):
+        for e in json.load(open(encp)):
+            for m in e.get("party") or []:
+                species.add(m["species"])
     sdir = os.path.join(ART, "sprites")
     os.makedirs(sdir, exist_ok=True)
     out = {}
@@ -272,6 +278,39 @@ def team_sprites():
             out[name] = f"sprites/{sp}.png"
         except Exception as ex:
             print(f"  sprite skip {sp}: {ex}")
+    return out
+
+def trainer_pics():
+    """Trainer front sprites for every pic class a routed trainer uses:
+    front_pic_tables.h maps TRAINER_PIC_X to a symbol, src/data/graphics/
+    trainers.h maps the symbol to its png, and the JASC .pal sits beside
+    the .gbapal it names."""
+    encp = f"{OUT}/encounters.json"
+    if not os.path.exists(encp): return {}
+    need = {e.get("pic") for e in json.load(open(encp)) if e.get("pic")}
+    tbl = open(f"{REPO}/src/data/trainer_graphics/front_pic_tables.h").read()
+    pic2sym = dict(re.findall(r"TRAINER_SPRITE\((\w+),\s*(\w+)", tbl))
+    gfx = open(f"{REPO}/src/data/graphics/trainers.h").read()
+    sym2png = dict(re.findall(r"const u32 (gTrainerFrontPic_\w+)\[\] = INCBIN_U32\(\"([^\"]+)\.4bpp", gfx))
+    sym2pal = dict(re.findall(r"const u32 (gTrainerPalette_\w+)\[\] = INCBIN_U32\(\"([^\"]+)\.gbapal", gfx))
+    tdir = os.path.join(ART, "tpics")
+    os.makedirs(tdir, exist_ok=True)
+    out = {}
+    for pic in sorted(need):
+        sym = pic2sym.get(pic)
+        png = sym2png.get(sym) if sym else None
+        pal = sym2pal.get((sym or "").replace("FrontPic", "Palette")) if sym else None
+        if not png or not pal: 
+            print(f"  tpic skip {pic}"); continue
+        dest = os.path.join(tdir, f"{pic}.png")
+        try:
+            w, h, px = read_indexed_png(f"{REPO}/{png}.png")
+            vals = [int(x) for x in open(f"{REPO}/{pal}.pal").read().split()[3:3 + 48]]
+            palette = [tuple(vals[i:i + 3]) for i in range(0, 48, 3)]
+            write_indexed_png(dest, w, h, px, palette, transparent0=True)
+            out[pic] = f"tpics/{pic}.png"
+        except Exception as ex:
+            print(f"  tpic skip {pic}: {ex}")
     return out
 
 def main():
@@ -308,7 +347,7 @@ def main():
     sprites = team_sprites()
     with open(os.path.join(ART, "index.json"), "w") as f:
         json.dump({"maps": index, "trainers": trainers,
-                   "connections": conns, "sprites": sprites}, f)
+                   "connections": conns, "sprites": sprites, "tpics": trainer_pics()}, f)
     size = sum(os.path.getsize(os.path.join(ART, f"{m}.png")) for m in index)
     print(f"maps: {len(index)} ({drawn} drawn, {kept} kept), "
           f"{size/1e6:.2f} MB of PNG; trainers placed: {len(trainers)}; "

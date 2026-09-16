@@ -266,6 +266,7 @@ def parse_trainers(parties):
     for m in re.finditer(r"\[(TRAINER_[A-Z0-9_]+)\]\s*=\s*\{(.*?)\n    \}", txt, re.S):
         const, blk = m.group(1), m.group(2)
         nm = re.search(r'\.trainerName\s*=\s*_\("([^"]*)"\)', blk)
+        pic = re.search(r"\.trainerPic\s*=\s*TRAINER_PIC_([A-Z0-9_]+)", blk)
         cls = re.search(r"\.trainerClass\s*=\s*(TRAINER_CLASS_[A-Z0-9_]+)", blk)
         pty = re.search(r"\.party\s*=\s*(\w+)\((sParty_\w+)\)", blk)
         dbl = "TRUE" in (re.search(r"\.doubleBattle\s*=\s*(\w+)", blk) or re.Match).__str__() if False else bool(re.search(r"\.doubleBattle\s*=\s*TRUE", blk))
@@ -274,6 +275,7 @@ def parse_trainers(parties):
         p = parties.get(pty.group(2)) if pty else None
         out[const] = {
             "const": const,
+            "pic": pic.group(1) if pic else None,
             "name": titlecase(nm.group(1)) if nm and nm.group(1) else "",
             "class": cls.group(1).replace("TRAINER_CLASS_", "").replace("_", " ").title() if cls else "",
             "partyLabel": pty.group(2) if pty else None,

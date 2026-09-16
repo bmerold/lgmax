@@ -256,6 +256,7 @@ def build_trainer_encounters():
             "id": f"trainer:{const}",
             "kind": kind,
             "trainerConst": const,
+            "pic": t.get("pic"),
             "name": display,
             "starterVariant": starter,
             "trainerClass": cls,

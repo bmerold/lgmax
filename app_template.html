@@ -478,14 +478,28 @@ button{font:inherit;color:inherit}
   overflow:hidden;background:#101014}
 #playFit{position:relative;flex-shrink:0}
 #playFit .mapbox{position:relative}
-#playDesc .pd-enc{margin-top:4px;border-top:1px solid var(--line);padding-top:4px;
-  display:flex;flex-direction:column;gap:2px}
-#playDesc .pd-opp{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 12px;font-size:11.5px}
-#playDesc .pd-opp-n{display:inline-flex;align-items:baseline;gap:6px}
-#playDesc .pd-opp-n .tw .type{font-size:8px;padding:1px 5px}
-#playDesc .pd-opp-mv{color:var(--ink-3);font-size:11px}
-#playDesc .pd-opp-b{color:var(--ink-2)}
-#playDesc .pd-opp-b b{color:var(--accent)}
+.vsband{margin-top:9px;display:flex;gap:12px;align-items:flex-start}
+.vs-tr{display:flex;flex-direction:column;align-items:center;width:88px;flex-shrink:0;gap:1px}
+.vs-timg{width:64px;height:64px;image-rendering:pixelated}
+.vs-tn{font-size:10.5px;font-weight:700;text-align:center;line-height:1.25}
+.vs-tot{font-family:var(--mono);font-size:9.5px;color:var(--ink-2)}
+.foes{display:flex;flex-wrap:wrap;gap:6px}
+.foe{width:216px;border:1px solid var(--line);border-top:3px solid var(--bad);
+  background:var(--surface);padding:5px 8px 6px}
+.foe-h{display:flex;align-items:center;gap:5px;min-height:36px}
+.foe-h img{width:36px;height:36px;image-rendering:pixelated;flex-shrink:0}
+.foe-n{font-size:11.5px;font-weight:700;flex:1;line-height:1.2}
+.foe-n .num{font-weight:500;font-size:9.5px}
+.foe .tw .type{font-size:7.5px;padding:1px 4px}
+.foe-mv{display:flex;flex-wrap:wrap;gap:1px 9px;font-size:9.5px;color:var(--ink-3);margin:2px 0 5px}
+.ans{display:flex;align-items:center;gap:6px;border-top:1px solid var(--line);padding-top:4px;margin-top:2px}
+.ans img{width:26px;height:26px;image-rendering:pixelated;flex-shrink:0}
+.ans-mv{font-size:10.5px;font-weight:700;color:var(--good);white-space:nowrap}
+.ans-t{font-family:var(--mono);font-size:9.5px;color:var(--ink-2);flex-shrink:0}
+.ans-bar{flex:1;height:5px;background:var(--surface-3);position:relative;overflow:hidden;min-width:24px}
+.ans-bar i{position:absolute;top:0;bottom:0;left:0;background:var(--good)}
+.ans-bar i.ko{background:var(--accent)}
+
 .mark.cur{z-index:4;outline:2px solid #fff;box-shadow:0 0 0 5px var(--accent),0 1px 5px rgba(0,0,0,.6);
   animation:markpulse 1.6s ease-out infinite}
 #playDrawer{position:fixed;inset:0 auto 0 0;width:min(430px,92vw);z-index:70;
@@ -675,6 +689,7 @@ const MAPART = DATA.mapart || {};
 const ROUTE = DATA.route || {total: 0, stages: []};
 /* The game's own front sprites, keyed by display name. */
 const SPRITES = DATA.sprites || {};
+const TPICS = DATA.tpics || {};
 /* Choices the run makes once and keeps; the section parties are solved with
    these locked, so a single Eevee can't become a Vaporeon in one town and a
    Jolteon in the next. */
@@ -2122,12 +2137,10 @@ function playDesc(ctx, row){
         hunt = st[11] || 0;
   if (kind === "trainer"){
     const opps = row ? row[4] : [];
-    const names = opps.slice(0, 4).map(s => `${esc(str(s[0]))} L${s[1]}`).join(", ");
     const link = row ? ` — <button class="fightlink" data-enc="${esc(row[1])}"
       data-n="${node.stopIdx + 1}">full matchup analysis ↗</button>` : "";
-    return `Walk the ${walk}-step green path to the pin and battle: ${opps.length}
-      Pokémon${names ? ` (${names}${opps.length > 4 ? "…" : ""})` : ""}. The plan
-      below answers each in order${link}.`;
+    return `Walk the ${walk}-step green path to the pin and battle. The plan
+      under each opponent is the run's answer, in order${link}.`;
   }
   if (kind === "item")
     return `Walk ${walk} steps to the pinned item ball and pick it up — it holds
@@ -2185,14 +2198,7 @@ function renderPlay(){
     const key = node && node.stop ? stopKey(node.stop) : null;
     const done = key && DONE.has(key);
     let extra = "";
-    if (row){
-      extra += `<div class="log-steps">${row[4].map(x => {
-        const opp = x[0], lvl = x[1], by = x[2], move = x[3], turns = x[6];
-        return `<span class="step"><b>${esc(str(opp))}</b> <span class="num">L${lvl}</span>
-          ${by !== -1 ? `<span class="by">${esc(str(by))}</span>` : ""}
-          ${move !== -1 ? `<span class="num">${esc(str(move))} · ${turns}t</span>` : ""}</span>`;
-      }).join("")}</div>` + encBrief(row[1]);
-    }
+    if (row) extra = vsBand(row);
     descHtml = `<div class="po-desc">
       ${key ? `<span class="chk big${done ? " on" : ""}" data-key="${esc(key)}" title="mark this step done">✓</span>` : ""}
       <div class="po-body">${desc}${extra}</div></div>`;
@@ -2356,25 +2362,49 @@ window.addEventListener("resize", () => {
   }
 });
 
-/* the encounter section's fight details, compressed for the top band:
-   each opposing Pokémon with its moves, and the run's best answer to it */
-function encBrief(encId){
-  const e = ENC.find(x => x.id === encId);
+/* the fight, drawn: trainer sprite, their party as adversary cards, and
+   under each opponent the run's answer — our sprite, move, turns, and a bar
+   of damage per hit against that Pokémon's HP */
+function vsBand(row){
+  const e = ENC.find(x => x.id === row[1]);
   if (!e || !e.p) return "";
-  const cnt = e.cnt || [];
-  const rows = e.p.map((m, i) => {
-    const c = cnt[i];
-    const best = c && c[5] && c[5].find(b =>
-      (b[14] === -1 || str(b[14]) === starter) && tradeOK(b[17]));
-    return `<div class="pd-opp">
-      <span class="pd-opp-n"><b>${esc(str(m[0]))}</b> <span class="num">L${m[2]} · ${m[3]} HP</span>
-        <span class="tw">${typeChips(m[1])}</span></span>
-      <span class="pd-opp-mv">${(m[4] || []).map(x => esc(str(x))).join(" · ")}</span>
-      ${best ? `<span class="pd-opp-b">best: <b>${esc(str(best[0]))}</b> · ${esc(str(best[2]))}
-        <span class="num">${best[8]}t · ${best[5]}–${best[6]} dmg${best[10] ? " · faster" : ""}</span></span>` : ""}
+  // split the plan's segments per opponent (a handover continues the same one)
+  const groups = [];
+  for (const x of row[4]){
+    if (!x[13] || !groups.length) groups.push([]);
+    groups[groups.length - 1].push(x);
+  }
+  const tot = row[4].reduce((a, x) => a + (x[6] || 0), 0);
+  const pic = e.pic && TPICS[e.pic];
+  const foes = e.p.map((m, i) => {
+    const nm = str(m[0]), spr = SPRITES[nm];
+    const answers = (groups[i] || []).map(x => {
+      const by = str(x[2]), mv = str(x[3]), spr2 = by && SPRITES[by];
+      const pct = m[3] ? Math.min(100, ((x[9] + x[10]) / 2) / m[3] * 100) : 0;
+      return `<div class="ans" title="${esc(by)} · ${esc(mv)} — ${x[9]}–${x[10]} damage per hit into ${m[3]} HP">
+        ${spr2 ? `<img src="data:image/png;base64,${spr2}" alt="">` : ""}
+        <span class="ans-mv">${esc(mv)}</span>
+        <span class="ans-t">${x[6]}t</span>
+        <span class="ans-bar"><i class="${pct >= 100 ? "ko" : ""}" style="width:${Math.max(4, Math.round(pct))}%"></i></span>
+      </div>`;
+    }).join("");
+    return `<div class="foe">
+      <div class="foe-h">
+        ${spr ? `<img src="data:image/png;base64,${spr}" alt="">` : ""}
+        <span class="foe-n">${esc(nm)}<span class="num"> L${m[2]} · ${m[3]} HP</span></span>
+        <span class="tw">${typeChips(m[1])}</span></div>
+      <div class="foe-mv">${(m[4] || []).map(x2 => `<span>${esc(str(x2))}</span>`).join("")}</div>
+      ${answers}
     </div>`;
   }).join("");
-  return `<div class="pd-enc">${rows}</div>`;
+  return `<div class="vsband">
+    <div class="vs-tr">
+      ${pic ? `<img class="vs-timg" src="data:image/png;base64,${pic}" alt="">` : ""}
+      <span class="vs-tn">${esc(str(row[0]))}</span>
+      <span class="vs-tot">≈${Math.round(tot * 10) / 10} turns</span>
+    </div>
+    <div class="foes">${foes}</div>
+  </div>`;
 }
 
 /* ---- navigation ---- */
