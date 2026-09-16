@@ -304,9 +304,36 @@ def catch_joins():
         if joins: _CATCH_JOINS[st["stage"]] = joins
     return _CATCH_JOINS
 
-JOIN_AT = {}    # species const -> trainer ordinal it becomes usable at, this section
+_TM_JOINS = None
+def tm_joins():
+    """stage -> {move const: trainer ordinal}: how many of the stage's fights
+    the walk clears BEFORE picking up that move's TM. Secret Power's TM43
+    sits at the far end of Route 25 — nothing can be taught it for the
+    Nugget Bridge fights."""
+    global _TM_JOINS
+    if _TM_JOINS is not None: return _TM_JOINS
+    _TM_JOINS = {}
+    path = f"{OUT}/route.json"
+    if not os.path.exists(path): return _TM_JOINS
+    rt = json.load(open(path))
+    for st in rt["stages"]:
+        joins, seen = {}, 0
+        for s in st["steps"]:
+            if s["kind"] == "trainer":
+                seen += 1
+            elif s["kind"] in ("item", "hidden") and str(s["what"]).startswith("TM"):
+                mv = G.TMHM_MOVE.get("ITEM_" + str(s["what"]))
+                if mv and seen > 0: joins.setdefault(mv, seen)
+        if joins: _TM_JOINS[st["stage"]] = joins
+    return _TM_JOINS
+
+JOIN_AT = {}     # species const -> trainer ordinal it becomes usable at, this section
+MOVE_JOIN = {}   # move const -> trainer ordinal its TM is picked up at, this section
+MOVE_LOCKED = set()   # of MOVE_JOIN, the moves not yet held at the current battle
 def set_join_at(stage, avail):
     JOIN_AT.clear()
+    MOVE_JOIN.clear(); MOVE_LOCKED.clear()
+    MOVE_JOIN.update(tm_joins().get(stage) or {})
     joins = catch_joins().get(stage)
     if not joins: return
     for sp in O.candidates(stage):
@@ -561,6 +588,7 @@ def usable(member, opp, badges):
     """Best move this member can still afford against this opponent."""
     best = None
     for mv in member.moves:
+        if mv in MOVE_LOCKED: continue
         if member.pp[mv] < 1: continue
         p = profile(member.mon, opp, mv, badges, member.obey)
         if not p or p["turns"] >= 900: continue
@@ -1023,6 +1051,9 @@ def run_section(team, battles, badges, heal_after_idx, tm_value=None,
         # species becomes usable at, in this section's route order.
         have = ([m for m in team if JOIN_AT.get(m.species, 0) <= trainers_seen]
                 if JOIN_AT else team)
+        if MOVE_JOIN:
+            MOVE_LOCKED.clear()
+            MOVE_LOCKED.update(mv for mv, j in MOVE_JOIN.items() if j > trainers_seen)
         if enc["kind"] == "wild":
             # You cannot pick your lead against something you have not seen yet.
             # One Pokemon walks the route and meets whatever the grass sends;
@@ -1520,6 +1551,7 @@ def solve_section(stage, encs, starter, avail, tm_value=None, carry=None):
                      for m in final["team"]},
         # the join constraints actually applied, for the verify guard
         "joins": {E.SPECIES[sp]["name"]: j for sp, j in JOIN_AT.items()},
+        "moveJoins": {E.MOVES[mv]["name"]: j for mv, j in MOVE_JOIN.items()},
         "stage": stage, "starter": starter, "level": level,
         "badges": badges["count"],
         "battles": len(trainer_battles),

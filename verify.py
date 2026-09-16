@@ -463,6 +463,25 @@ for run, per_stage in raw["sections"].items():
 check("no fight is answered by a Pokémon not yet caught at that point",
       not _early_by, str(_early_by[:4]))
 
+# A move whose only TM is picked up mid-stage cannot be thrown in the fights
+# before the pickup: Secret Power waits for the far end of Route 25.
+_early_mv = []
+for run, per_stage in raw["sections"].items():
+    for stg, sec in per_stage.items():
+        if not sec: continue
+        _mj = sec.get("moveJoins") or {}
+        if not _mj: continue
+        t = 0
+        for row in sec["log"]:
+            if row["kind"] == "wild": continue
+            for x in row["steps"]:
+                mv = x.get("move")
+                if mv and _mj.get(mv, 0) > t:
+                    _early_mv.append((run, int(stg), mv, row.get("enc")))
+            t += 1
+check("no move is thrown before its TM is picked up",
+      not _early_mv, str(_early_mv[:4]))
+
 # ------------------------------------------------------------------ TM supply
 # A single-use TM can only be taught to as many Pokemon as copies exist -- and
 # a Dept.-store TM (Dig, Brick Break, Secret Power) has only its finite gift

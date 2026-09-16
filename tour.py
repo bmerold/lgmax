@@ -295,7 +295,7 @@ def harvest():
         const = e["trainerConst"]
         if const in seen: continue
         seen.add(const)
-        t = tiles.get(const)
+        t = tiles.get(const) or SCRIPTED_TILE.get(const)
         if t:
             mp, x, y = t
         else:
@@ -454,6 +454,16 @@ def corners(path):
             out.append(path[i])
     if len(path) > 1: out.append(path[-1])
     return out
+
+# Scripted battles that fire from a coord trigger, pinned where the player
+# actually stands when they fire. The Cerulean rival ambushes you on the
+# three tiles at the foot of Nugget Bridge (VAR_MAP_SCENE_CERULEAN_CITY_RIVAL
+# at (22-24, 6)), not at any door.
+SCRIPTED_TILE = {
+    "TRAINER_RIVAL_CERULEAN_BULBASAUR":  ("CeruleanCity", 23, 6),
+    "TRAINER_RIVAL_CERULEAN_CHARMANDER": ("CeruleanCity", 23, 6),
+    "TRAINER_RIVAL_CERULEAN_SQUIRTLE":   ("CeruleanCity", 23, 6),
+}
 
 # ------------------------------------------------------------------ deliberate heals
 # The walk only records a heal when it happens to pass a Pokémon Center; it
