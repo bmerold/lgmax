@@ -480,6 +480,7 @@ button{font:inherit;color:inherit}
   overflow:hidden;background:#101014}
 #playFit{position:relative;flex-shrink:0}
 #playFit .mapbox{position:relative}
+.stop-note{font-size:12.5px;color:var(--warn);font-weight:600;margin-top:3px;line-height:1.4}
 .vsband{margin-top:9px;display:flex;gap:12px;align-items:flex-start}
 .vs-tr{display:flex;flex-direction:column;align-items:center;width:88px;flex-shrink:0;gap:1px}
 .vs-timg{width:64px;height:64px;image-rendering:pixelated}
@@ -1592,6 +1593,7 @@ function rtRow(s, n, st){
         : renew ? `<span class="note" title="the game re-rolls its renewable hidden items every ~1500 steps you take on this map; only one rarity tier exists at a time">renewable — there ${RENEW_ODDS[renew] || "?"} of the time, regrows as you walk; skip and re-check on later passes</span>`
         : kind === "heal" ? `<span class="note">HP and PP fully restored — the next section budgets from full bars</span>`
         : kind === "hidden" ? `<span class="note" title="hidden items have no sprite — they're there from the start of the game">invisible — face the pinned tile, press A</span>` : ""}
+      ${str(s[12] || "") ? `<div class="stop-note">⚠ ${esc(str(s[12]))}</div>` : ""}
       ${flyFrom ? `<div class="rt-fly">✈ Fly to ${esc(prettyMap(flyFrom))}, then walk</div>` : ""}
       ${species.length ? `<div class="rt-species">${species.map(x => esc(str(x))).join(" · ")}${
         hunt > 3 ? ` <span class="note">— expect ~${hunt} encounters for the rarest</span>` : ""}</div>` : ""}
@@ -2205,9 +2207,10 @@ function renderPlay(){
     if (row) extra = vsBand(row);
     else if (node && node.stop && str(node.stop[0]) === "catch")
       extra = wildBand(node.stop);
+    const stopNote = node && node.stop ? str(node.stop[12] || "") : "";
     descHtml = `<div class="po-desc">
       ${key ? `<span class="chk big${done ? " on" : ""}" data-key="${esc(key)}" title="mark this step done">✓</span>` : ""}
-      <div class="po-body">${desc}${extra}</div></div>`;
+      <div class="po-body">${desc}${stopNote ? `<div class="stop-note">⚠ ${esc(stopNote)}</div>` : ""}${extra}</div></div>`;
   }
   dEl.hidden = !descHtml;
   dEl.innerHTML = descHtml;

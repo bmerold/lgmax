@@ -295,7 +295,7 @@ def harvest():
         const = e["trainerConst"]
         if const in seen: continue
         seen.add(const)
-        t = tiles.get(const) or SCRIPTED_TILE.get(const)
+        t = SCRIPTED_TILE.get(const) or tiles.get(const)
         if t:
             mp, x, y = t
         else:
@@ -463,6 +463,22 @@ SCRIPTED_TILE = {
     "TRAINER_RIVAL_CERULEAN_BULBASAUR":  ("CeruleanCity", 23, 6),
     "TRAINER_RIVAL_CERULEAN_CHARMANDER": ("CeruleanCity", 23, 6),
     "TRAINER_RIVAL_CERULEAN_SQUIRTLE":   ("CeruleanCity", 23, 6),
+    # Flint must SPOT you from range so he walks off his post -- fought
+    # point-blank he stays on (28,4) and walls off TM43's pocket until Cut.
+    # The node stands at the foot of his three-tile sight line.
+    "TRAINER_CAMPER_FLINT":              ("Route25", 28, 7),
+}
+
+# Play notes for stops with a mechanical catch the map can't show.
+STOP_NOTES = {
+    ("Camper Flint", "Route25"):
+        "Stand HERE, two tiles below him, so he spots you and walks down to "
+        "fight — battled point-blank he never moves, and his body walls off "
+        "TM43's pocket until you have Cut.",
+    ("TM43", "Route25"):
+        "Through the gap Camper Flint vacated — only if he walked down to "
+        "meet you. If he's still on his post, this pocket waits for Cut "
+        "(the tree on the right).",
 }
 
 # ------------------------------------------------------------------ deliberate heals
@@ -653,6 +669,8 @@ def solve(max_stage=34, verbose=True):
                     "path": [[m, x, y] for m, x, y in corners(path)]}
             if flew: step["fly"] = path[0][0] if path else True
             if n.get("enc"): step["enc"] = n["enc"]
+            nt = STOP_NOTES.get((n["what"], n["map"]))
+            if nt: step["note"] = nt
             if n.get("underfoot"): step["underfoot"] = True
             if n.get("renewable"): step["renewable"] = n["renewable"]
             if n.get("hunt"): step["hunt"] = n["hunt"]
