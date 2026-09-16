@@ -260,6 +260,8 @@ def team_sprites():
         for e in json.load(open(encp)):
             for m in e.get("party") or []:
                 species.add(m["species"])
+            for m in e.get("wildMons") or []:
+                species.add(m["species"])
     sdir = os.path.join(ART, "sprites")
     os.makedirs(sdir, exist_ok=True)
     out = {}

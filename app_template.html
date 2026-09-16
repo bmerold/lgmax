@@ -501,6 +501,8 @@ button{font:inherit;color:inherit}
 .ans-bar{flex:1;height:5px;background:var(--surface-3);position:relative;overflow:hidden;min-width:24px}
 .ans-bar i{position:absolute;top:0;bottom:0;left:0;background:var(--good)}
 .ans-bar i.ko{background:var(--accent)}
+.foe.wild{border-top-color:var(--warn);width:172px}
+.wild-odds{font-family:var(--mono);font-size:10px;color:var(--ink-2);flex-shrink:0}
 
 .mark.cur{z-index:4;outline:2px solid #fff;box-shadow:0 0 0 5px var(--accent),0 1px 5px rgba(0,0,0,.6);
   animation:markpulse 1.6s ease-out infinite}
@@ -2201,6 +2203,8 @@ function renderPlay(){
     const done = key && DONE.has(key);
     let extra = "";
     if (row) extra = vsBand(row);
+    else if (node && node.stop && str(node.stop[0]) === "catch")
+      extra = wildBand(node.stop);
     descHtml = `<div class="po-desc">
       ${key ? `<span class="chk big${done ? " on" : ""}" data-key="${esc(key)}" title="mark this step done">✓</span>` : ""}
       <div class="po-body">${desc}${extra}</div></div>`;
@@ -2363,6 +2367,23 @@ window.addEventListener("resize", () => {
     fitPlayMap(W, H);
   }
 });
+
+/* a catch stop, drawn: one card per wild Pokémon with its sprite and odds */
+function wildBand(st){
+  const cards = (st[8] || []).map(x => {
+    const raw = str(x);
+    const nm = raw.split(" (")[0];
+    const odds = (raw.match(/\(([^)]+)\)/) || [])[1] || "";
+    const spr = SPRITES[nm];
+    return `<div class="foe wild">
+      <div class="foe-h">
+        ${spr ? `<img src="data:image/png;base64,${spr}" alt="">` : ""}
+        <span class="foe-n">${esc(nm)}</span>
+        ${odds ? `<span class="wild-odds">${esc(odds)}</span>` : ""}</div>
+    </div>`;
+  }).join("");
+  return cards ? `<div class="vsband"><div class="foes">${cards}</div></div>` : "";
+}
 
 /* the fight, drawn: trainer sprite, their party as adversary cards, and
    under each opponent the run's answer — our sprite, move, turns, and a bar
