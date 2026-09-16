@@ -429,14 +429,16 @@ button{font:inherit;color:inherit}
 /* ================= play mode: one screen, the map in charge ============= */
 #view-play{position:fixed;inset:0;z-index:60;display:flex;flex-direction:column;
   background:var(--bg)}
-#playTop{display:flex;gap:10px;align-items:center;padding:10px 14px;
+#playTop{display:flex;gap:10px;align-items:center;padding:10px 14px;min-height:78px;
   background:var(--surface);border-bottom:1px solid var(--line);flex-shrink:0}
 #playObj{flex:1;min-width:0;line-height:1.35}
 #playObj .po-leg{font-size:11px;color:var(--ink-3);letter-spacing:.05em;text-transform:uppercase}
 #playObj .po-what{font-weight:700;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #playObj .po-plan{font-size:13px;color:var(--accent);font-weight:600;margin-top:3px}
-#playDesc{display:flex;justify-content:center;flex-shrink:0;padding:8px 14px;
+#playDesc{display:flex;justify-content:center;align-items:center;flex-shrink:0;
+  height:216px;padding:8px 14px;
   background:var(--surface);border-bottom:1px solid var(--line)}
+#playDesc .po-desc{max-height:100%;overflow-y:auto}
 #playDesc .po-desc{font-size:15.5px;color:var(--ink);font-weight:500;line-height:1.5;
   max-width:1060px;padding:2px 0 2px 16px;display:flex;gap:12px;align-items:flex-start;
   border-left:3px solid var(--accent);background:transparent}
