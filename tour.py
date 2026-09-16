@@ -481,6 +481,53 @@ STOP_NOTES = {
         "(the tree on the right).",
 }
 
+# ------------------------------------------------------------------ sight aggro
+# A trainer with sight forces the battle the moment your walk enters their
+# line -- and their BODY is a wall, so a path drawn through them really means
+# stepping around them, usually into that line. Both count as aggro.
+_AGGRO = None
+_AGGRO_FACE = {"MOVEMENT_TYPE_FACE_RIGHT": [(1, 0)], "MOVEMENT_TYPE_FACE_LEFT": [(-1, 0)],
+               "MOVEMENT_TYPE_FACE_UP": [(0, -1)], "MOVEMENT_TYPE_FACE_DOWN": [(0, 1)]}
+def aggro_cones():
+    """[(map, {tiles}, (x, y))] per sighted trainer: the sight ray in every
+    facing the movement type allows, plus the body tile itself."""
+    global _AGGRO
+    if _AGGRO is not None: return _AGGRO
+    _AGGRO = []
+    for name, mj in R.maps().items():
+        if WD._map_stage(name) is None: continue
+        try: g = WD.grid(name)
+        except Exception: continue
+        for o in mj.get("object_events", []):
+            if o.get("trainer_type", "TRAINER_TYPE_NONE") == "TRAINER_TYPE_NONE": continue
+            sight = int(o.get("trainer_sight_or_berry_tree_id", "0") or 0)
+            if sight <= 0: continue
+            tiles = {(o["x"], o["y"])}
+            for dx, dy in _AGGRO_FACE.get(o.get("movement_type"),
+                                          [(1, 0), (-1, 0), (0, 1), (0, -1)]):
+                x, y = o["x"], o["y"]
+                for _ in range(sight):
+                    x += dx; y += dy
+                    if not g.inb(x, y) or g.c(x, y): break
+                    tiles.add((x, y))
+            _AGGRO.append((name, tiles, (o["x"], o["y"])))
+    return _AGGRO
+
+def walked_tiles(path):
+    """map -> set of tiles a corner-point path actually covers."""
+    out, prev = {}, None
+    for m, x, y in path:
+        if prev and prev[0] == m:
+            n = max(abs(x - prev[1]), abs(y - prev[2]), 1)
+            for t in range(n + 1):
+                out.setdefault(m, set()).add(
+                    (round(prev[1] + (x - prev[1]) * t / n),
+                     round(prev[2] + (y - prev[2]) * t / n)))
+        else:
+            out.setdefault(m, set()).add((x, y))
+        prev = (m, x, y)
+    return out
+
 # ------------------------------------------------------------------ deliberate heals
 # The walk only records a heal when it happens to pass a Pokémon Center; it
 # never *seeks* one. A player does: after a fight arc, heal in town before the
@@ -587,6 +634,7 @@ def solve(max_stage=34, verbose=True):
     pos = WD.spawn()
     route, total = [], 0
     fought_since_heal = False
+    ROUTED_FOUGHT = set()   # trainer consts already fought by the walk so far
 
     for stage in range(0, max_stage + 1):
         due = [n for n in pending if n["_st"] <= stage]
@@ -649,34 +697,61 @@ def solve(max_stage=34, verbose=True):
                     order.insert(order.index(ia) + 1, ib)
                     changed = True
             if not changed: break
-        cost, prev = 0, 0
-        for oi in order:
-            cost += mat[prev][oi]; prev = oi
+        def build_steps(ordr):
+            stps, cur2, prev_idx, cst = [], pos, 0, 0
+            for oi in ordr:
+                n = picked[oi - 1]
+                tgt = tiles[oi - 1]
+                flew = mat[prev_idx][oi] < wmat[prev_idx][oi]
+                if flew:
+                    path = WD.walk_back(cparent, tgt)   # from the landing Center
+                else:
+                    path = WD.path_between(cur2, tgt, stage) or [cur2, tgt]
+                step = {"kind": n["kind"], "what": n["what"],
+                        "map": n["map"], "at": [n["x"], n["y"]],
+                        "walk": int(mat[prev_idx][oi]),
+                        "path": [[m, x, y] for m, x, y in corners(path)]}
+                if flew: step["fly"] = path[0][0] if path else True
+                if n.get("enc"): step["enc"] = n["enc"]
+                nt = STOP_NOTES.get((n["what"], n["map"]))
+                if nt: step["note"] = nt
+                if n.get("underfoot"): step["underfoot"] = True
+                if n.get("renewable"): step["renewable"] = n["renewable"]
+                if n.get("hunt"): step["hunt"] = n["hunt"]
+                if n.get("species"): step["species"] = n["species"]
+                stps.append(step)
+                cst += mat[prev_idx][oi]
+                cur2, prev_idx = tgt, oi
+            return stps, cst, cur2
 
-        steps = []
-        cur, prev_idx = pos, 0
-        for oi in order:
-            n = picked[oi - 1]
-            tgt = tiles[oi - 1]
-            flew = mat[prev_idx][oi] < wmat[prev_idx][oi]
-            if flew:
-                path = WD.walk_back(cparent, tgt)   # from the landing Center
-            else:
-                path = WD.path_between(cur, tgt, stage) or [cur, tgt]
-            step = {"kind": n["kind"], "what": n["what"],
-                    "map": n["map"], "at": [n["x"], n["y"]],
-                    "walk": int(mat[prev_idx][oi]),
-                    "path": [[m, x, y] for m, x, y in corners(path)]}
-            if flew: step["fly"] = path[0][0] if path else True
-            if n.get("enc"): step["enc"] = n["enc"]
-            nt = STOP_NOTES.get((n["what"], n["map"]))
-            if nt: step["note"] = nt
-            if n.get("underfoot"): step["underfoot"] = True
-            if n.get("renewable"): step["renewable"] = n["renewable"]
-            if n.get("hunt"): step["hunt"] = n["hunt"]
-            if n.get("species"): step["species"] = n["species"]
-            steps.append(step)
-            cur, prev_idx = tgt, oi
+        # a hop that enters an unfought trainer's aggro forces that battle on
+        # the spot: pull the trainer to just before the hop, to a fixpoint
+        t2c = {v: k for k, v in R.trainer_tiles().items()}
+        moved_pairs = set()
+        for _ in range(12):
+            steps, cost, cur = build_steps(order)
+            fought_now = set(ROUTED_FOUGHT)
+            move = None
+            for si, (oi, step) in enumerate(zip(order, steps)):
+                w = walked_tiles(step["path"])
+                for name, atiles, pos0 in aggro_cones():
+                    if name not in w or not (atiles & w[name]): continue
+                    c = t2c.get((name, pos0[0], pos0[1]))
+                    if not c or c in fought_now: continue
+                    tj = next((k2 for k2 in order
+                               if (picked[k2 - 1].get("enc") or "").endswith(":" + c)), None)
+                    if tj is None or order.index(tj) <= si: continue
+                    if (tj, si) in moved_pairs: continue
+                    move = (tj, si); break
+                if move: break
+                n = picked[oi - 1]
+                if n["kind"] == "trainer" and n.get("enc"):
+                    fought_now.add(n["enc"].split(":")[-1])
+            if not move: break
+            moved_pairs.add(move)
+            tj, si = move
+            order.remove(tj); order.insert(si, tj)
+        steps, cost, cur = build_steps(order)
         cost += insert_heal(steps, stage, pos, fought_since_heal)
         for s in steps:
             if _passes_heal(s): fought_since_heal = False
@@ -687,6 +762,9 @@ def solve(max_stage=34, verbose=True):
                       "endsAt": [cur[0], cur[1], cur[2]]})
         total += cost
         pos = cur
+        for n in picked:
+            if n["kind"] == "trainer" and n.get("enc"):
+                ROUTED_FOUGHT.add(n["enc"].split(":")[-1])
         done = {id(n) for n in picked}
         pending = [n for n in pending if id(n) not in done]
         if verbose:

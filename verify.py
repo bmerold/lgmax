@@ -373,52 +373,27 @@ check("route paths run straight, tile to tile, never diagonally",
 # ------------------------------------------------------------------ sight & stones
 # The walk must never cross the sight line of a trainer it hasn't fought yet
 # -- in the game that forces the battle on the spot, at the wrong level.
-import world as WVIS
-_FACE = {"MOVEMENT_TYPE_FACE_RIGHT": [(1,0)], "MOVEMENT_TYPE_FACE_LEFT": [(-1,0)],
-         "MOVEMENT_TYPE_FACE_UP": [(0,-1)], "MOVEMENT_TYPE_FACE_DOWN": [(0,1)]}
-_fought = {}
-for _st in _routej["stages"]:
-    for _s in _st["steps"]:
-        if _s["kind"] == "trainer" and _s.get("enc"):
-            _fought[RO.battle_key(_s["enc"].split(":")[-1])] = _st["stage"]
+_aggro = __import__("tour").aggro_cones()
+_wt = __import__("tour").walked_tiles
 _t2c = {v: k for k, v in RO.trainer_tiles().items()}
-_cones = []
-for _name, _mj in RO.maps().items():
-    if WVIS._map_stage(_name) is None: continue
-    try: _g = WVIS.grid(_name)
-    except Exception: continue
-    for _o in _mj.get("object_events", []):
-        if _o.get("trainer_type", "TRAINER_TYPE_NONE") == "TRAINER_TYPE_NONE": continue
-        _sight = int(_o.get("trainer_sight_or_berry_tree_id", "0") or 0)
-        if _sight <= 0: continue
-        _tiles = set()
-        for _dx, _dy in _FACE.get(_o.get("movement_type"), [(1,0),(-1,0),(0,1),(0,-1)]):
-            _x, _y = _o["x"], _o["y"]
-            for _ in range(_sight):
-                _x += _dx; _y += _dy
-                if not _g.inb(_x, _y) or _g.c(_x, _y): break
-                _tiles.add((_x, _y))
-        _cones.append((_name, _tiles, (_o["x"], _o["y"])))
 _seen_early = []
+_fought_walk = set()
 for _st in _routej["stages"]:
-    _walked = {}
-    for _s in _st["steps"]:
-        _prev = None
-        for _m, _x, _y in _s["path"]:
-            if _prev and _prev[0] == _m:
-                _n = max(abs(_x-_prev[1]), abs(_y-_prev[2]), 1)
-                for _t in range(_n+1):
-                    _walked.setdefault(_m, set()).add(
-                        (round(_prev[1]+(_x-_prev[1])*_t/_n),
-                         round(_prev[2]+(_y-_prev[2])*_t/_n)))
-            _prev = (_m, _x, _y)
-    for _name, _tiles, _pos in _cones:
-        if _name not in _walked or not (_tiles & _walked[_name]): continue
-        _const = _t2c.get((_name, _pos[0], _pos[1]))
-        _fs = _fought.get(RO.battle_key(_const)) if _const else None
-        if _fs is not None and _fs > _st["stage"]:
-            _seen_early.append((_st["stage"], _const, _fs))
-check("the walk never crosses an unfought trainer's sight line",
+    _steps = _st["steps"]
+    for _i, _s in enumerate(_steps):
+        _w = _wt([(m, x, y) for m, x, y in _s["path"]])
+        _next_enc = _steps[_i + 1].get("enc") if _i + 1 < len(_steps) else None
+        for _name, _tiles, _pos in _aggro:
+            if _name not in _w or not (_tiles & _w[_name]): continue
+            _c = _t2c.get((_name, _pos[0], _pos[1]))
+            if not _c or _c in _fought_walk: continue
+            if (_s.get("enc") or "").endswith(":" + _c): continue   # the hop INTO this fight
+            # a side-by-side pair: brushing the partner who is fought next step
+            if (_next_enc or "").endswith(":" + _c): continue
+            _seen_early.append((_st["stage"], _c, _s["what"]))
+        if _s["kind"] == "trainer" and _s.get("enc"):
+            _fought_walk.add(_s["enc"].split(":")[-1])
+check("the walk never enters an unfought trainer aggro zone (sight or body)",
       not _seen_early, str(sorted(set(_seen_early))[:4]))
 
 # Moon Stones are finite: a party can only hold as many stone evolutions as
