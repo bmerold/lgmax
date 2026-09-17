@@ -1500,6 +1500,24 @@ def solve_section(stage, encs, starter, avail, tm_value=None, carry=None):
         history.append({"added": E.SPECIES[bestsp]["name"], "turns": round(bestres["turns"], 2),
                         "faints": bestres["faints"], "failed": bestres["failed"]})
 
+    # ---- prune: the greedy seed can end up with no job once the specialists
+    # join (a solo-strong opener whose every fight gets taken over). Drop any
+    # member whose removal costs nothing -- the party the page shows should
+    # be exactly the bodies the plan actually uses.
+    pruned = True
+    while pruned and len(team) > 1:
+        pruned = False
+        base = run_section(team, battles, badges, heal_idx, carry=carry, stage=stage)
+        bkey = (base["failed"], base["faints"], round(base["turns"], 2))
+        for m in list(team):
+            rest = [x for x in team if x is not m]
+            r = run_section(rest, battles, badges, heal_idx, carry=carry, stage=stage)
+            if (r["failed"], r["faints"], round(r["turns"], 2)) <= bkey:
+                team.remove(m)
+                if m.species in chosen: chosen.remove(m.species)
+                pruned = True
+                break
+
     # ---- HM coverage: the party has to be able to CROSS the section, not just
     # win the battles in it. Done before the final run so that a move given up
     # for a field move is paid for in the turn count.
