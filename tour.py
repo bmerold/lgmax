@@ -471,15 +471,26 @@ def corners(path):
 # actually stands when they fire. The Cerulean rival ambushes you on the
 # three tiles at the foot of Nugget Bridge (VAR_MAP_SCENE_CERULEAN_CITY_RIVAL
 # at (22-24, 6)), not at any door.
-SCRIPTED_TILE = {
-    "TRAINER_RIVAL_CERULEAN_BULBASAUR":  ("CeruleanCity", 23, 6),
-    "TRAINER_RIVAL_CERULEAN_CHARMANDER": ("CeruleanCity", 23, 6),
-    "TRAINER_RIVAL_CERULEAN_SQUIRTLE":   ("CeruleanCity", 23, 6),
-    # Flint must SPOT you from range so he walks off his post -- fought
-    # point-blank he stays on (28,4) and walls off TM43's pocket until Cut.
-    # The node stands at the foot of his three-tile sight line.
-    "TRAINER_CAMPER_FLINT":              ("Route25", 28, 7),
+# Every scripted rival battle fires from coord triggers (or the champion's
+# approach), never from a trainer tile -- pinned where the player stands
+# when each one actually starts, straight from the maps' coord_events.
+_SCRIPTED_RIVAL = {
+    "RIVAL_OAKS_LAB":      ("PalletTown_ProfessorOaksLab", 6, 8),
+    "RIVAL_ROUTE22_EARLY": ("Route22", 33, 5),
+    "RIVAL_CERULEAN":      ("CeruleanCity", 23, 6),
+    "RIVAL_SS_ANNE":       ("SSAnne_2F_Corridor", 31, 6),
+    "RIVAL_POKEMON_TOWER": ("PokemonTower_2F", 16, 6),
+    "RIVAL_SILPH":         ("SilphCo_7F", 2, 5),
+    "RIVAL_ROUTE22_LATE":  ("Route22", 33, 5),
+    "CHAMPION_FIRST":      ("PokemonLeague_ChampionsRoom", 6, 9),
+    "CHAMPION_REMATCH":    ("PokemonLeague_ChampionsRoom", 6, 9),
 }
+SCRIPTED_TILE = {f"TRAINER_{k}_{st}": v for k, v in _SCRIPTED_RIVAL.items()
+                 for st in ("BULBASAUR", "CHARMANDER", "SQUIRTLE")}
+# Flint must SPOT you from range so he walks off his post -- fought
+# point-blank he stays on (28,4) and walls off TM43's pocket until Cut.
+# The node stands at the foot of his three-tile sight line.
+SCRIPTED_TILE["TRAINER_CAMPER_FLINT"] = ("Route25", 28, 7)
 
 # Play notes for stops with a mechanical catch the map can't show.
 STOP_NOTES = {
