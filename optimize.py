@@ -213,12 +213,26 @@ def sweep(player, opp_mons, pool, badges, stage):
                                                "spdef": badges.get("spdef", False)},
                           moves=opp["moves"])
         faster = player["stats"]["speed"] > opp["stats"]["speed"]
+        # fold secondary-effect tempo both ways (flinch, freeze, paralysis,
+        # burn, poison, confusion), exactly as the section simulator does
+        act, burnf, chip = E.status_tempo(off["move"], faster, t)
+        chip_in = 0.0
+        if thr:
+            a2, b2, c2 = E.status_tempo(thr["move"], not faster, t)
+            t = t / max(a2, 0.25)
+            if b2 > 0 and E.MOVES[off["move"]]["category"] == "PHYSICAL":
+                t /= max(1e-6, 1.0 - 0.5 * b2)
+            chip_in = c2
+        t = t / (1.0 + chip * t)
         # the opponent attacks on each turn it is alive; if the player is faster
         # it gets one fewer swing on the turn the opponent faints
         swings = max(0.0, t - (1.0 if faster else 0.0))
         taken = 0.0
         if thr:
-            taken = thr["avg"] * thr["accuracy"] / 100.0 * swings
+            scale = act * ((1.0 - 0.5 * burnf)
+                           if E.MOVES[thr["move"]]["category"] == "PHYSICAL" else 1.0)
+            taken = (thr["avg"] * thr["accuracy"] / 100.0 * swings * scale
+                     + chip_in * t * hp)
             worst = thr["max"] * swings
         else:
             worst = 0.0

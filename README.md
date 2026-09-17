@@ -97,7 +97,10 @@ See `docs/` for the working notes behind each of these.
 - No stat-stage modelling on either side. Measured cost on the player's side: about one turn across
   the whole game (`docs/setup-moves-study.md`). The opponent's side still matters — Sabrina, Agatha
   and the Champion are harder than the numbers suggest.
-- No status effects, no held-item type boosts.
+- Secondary effects of damaging moves ARE folded in, as expected value on both sides: flinch
+  (only when faster), freeze with its 20% thaw, paralysis's 25% full-para, burn's attack halving
+  and chip, poison chip, and confusion. Deliberate status *moves* (Thunder Wave, Sleep Powder)
+  are still not used or faced — the plan and the modeled AI both throw damage. No held items.
 - Thrash, Outrage and Petal Dance are never recommended: the 2–3-turn lock-in and the confusion
   after are not modeled, and a plan can't steer a move that refuses orders.
 - Trainer AI is "their single best damaging move", close to but not identical to

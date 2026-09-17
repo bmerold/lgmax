@@ -233,6 +233,43 @@ CHARGE_EFFECTS = {"SOLAR_BEAM", "SKY_ATTACK", "RAZOR_WIND", "SKULL_BASH",
                   "SEMI_INVULNERABLE"}
 RECHARGE_EFFECTS = {"RECHARGE"}
 
+# ------------------------------------------------------------------ status tempo
+# Secondary effects of damaging moves, folded as expected value. Gen 3
+# numbers: thaw 20% per turn, full paralysis 25%, confusion self-hit 50%
+# lasting 1-4 turns. One major status per target, they don't stack.
+TEMPO_EFFECTS = {"FLINCH_HIT", "FREEZE_HIT", "PARALYZE_HIT", "BURN_HIT",
+                 "POISON_HIT", "CONFUSE_HIT", "TWINEEDLE", "POISON_FANG"}
+def status_tempo(move_const, attacker_faster, turns):
+    """-> (act, burn, chip): the fraction of its turns the defender actually
+    gets to act, the average probability it sits burned (physical attack
+    halved), and its expected residual damage per turn as a fraction of its
+    max HP. A tiny EV walk over the fight's length -- no state machine."""
+    m = MOVES.get(move_const) or {}
+    eff = m.get("effect")
+    p = (m.get("secondaryChance") or 0) / 100.0 * ((m.get("accuracy") or 100) / 100.0)
+    if eff not in TEMPO_EFFECTS or p <= 0:
+        return 1.0, 0.0, 0.0
+    T = max(1, min(int(turns + 0.999), 10))
+    frozen = para = burn = psn = conf = 0.0
+    acts = burn_avg = chip = 0.0
+    for _ in range(T):
+        healthy = max(0.0, 1.0 - frozen - para - burn - psn)
+        if eff == "FREEZE_HIT":     frozen += healthy * p
+        elif eff == "PARALYZE_HIT": para += healthy * p
+        elif eff == "BURN_HIT":     burn += healthy * p
+        elif eff in ("POISON_HIT", "TWINEEDLE", "POISON_FANG"):
+            psn += healthy * p
+        elif eff == "CONFUSE_HIT":  conf = min(1.0, conf + (1.0 - conf) * p)
+        act = (1.0 - frozen) * (1.0 - 0.25 * para) * (1.0 - 0.5 * conf)
+        if eff == "FLINCH_HIT" and attacker_faster:
+            act *= (1.0 - p)
+        acts += act
+        burn_avg += burn
+        chip += (burn + psn) * 0.125
+        frozen *= 0.8
+        conf *= 0.6
+    return acts / T, burn_avg / T, chip / T
+
 # Gen 3 Low Kick power brackets, by target weight in hectograms.
 LOW_KICK_BRACKETS = [(100, 20), (250, 40), (500, 60), (1000, 80), (2000, 100)]
 

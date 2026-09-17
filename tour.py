@@ -258,6 +258,14 @@ def harvest():
                 for sp, share in agg.items():
                     offer(sp, gate, name, label, share, spe)
 
+    # a species the run already owns by other means needs no wild stop:
+    # the Route 4 salesman's Magikarp precedes the Old Rod one by three stages
+    av = P.full_availability()
+    for sp in list(first_gate):
+        rec = av.get(sp)
+        if rec and rec["stage"] < first_gate[sp]:
+            del first_gate[sp]; cands.pop(sp, None)
+
     # each species goes where its hunt is cheapest; then stops group by site
     grouped = collections.defaultdict(list)  # (gate,map,label) -> [(sp, share)]
     for sp, gate in first_gate.items():
@@ -691,9 +699,13 @@ def solve(max_stage=34, verbose=True):
         # just after it (never the fetch pulled forward, which would tear the
         # stop off the stage's pinned ending), repeated to a fixpoint
         by_what = {picked[i - 1].get("what"): i for i in order}
+        pairs = list(EVENT_BEFORE)
+        for n in picked:
+            if n["kind"] == "catch" and "rod" in (n.get("method") or ""):
+                pairs.append((n["method"].title(), n["what"]))
         for _ in range(8):
             changed = False
-            for a_name, b_name in EVENT_BEFORE:
+            for a_name, b_name in pairs:
                 ia, ib = by_what.get(a_name), by_what.get(b_name)
                 if ia is None or ib is None: continue
                 if order.index(ia) > order.index(ib):

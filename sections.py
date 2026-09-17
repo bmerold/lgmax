@@ -482,8 +482,11 @@ def threat(opp, pm, badges):
     if hit is None:
         t = E.best_move(opp, pm, badges={"def": badges["def"], "spdef": badges["spdef"]},
                         moves=opp["moves"])
-        hit = {"name": t["name"], "avg": t["avg"] * t["accuracy"] / 100.0,
-               "max": t["max"]} if t else {"name": None, "avg": 0.0, "max": 0}
+        hit = ({"name": t["name"], "avg": t["avg"] * t["accuracy"] / 100.0,
+                "max": t["max"], "const": t["move"],
+                "cat": E.MOVES[t["move"]]["category"]}
+               if t else {"name": None, "avg": 0.0, "max": 0,
+                          "const": None, "cat": None})
         _threat_cache[key] = hit
     return hit
 
@@ -957,14 +960,28 @@ def plan_vs(team, opp, badges, active):
     best, bestkey = None, None
     for m, p, thr, faster in opts:
         s, t = sw(m), p["turns"]
-        hits = max(0.0, t - (1.0 if faster else 0.0)) + s
-        dmg = thr["avg"] * hits
+        # secondary-effect tempo, both directions: our flinch/freeze/paralysis
+        # cuts the opponent's acting turns and burn/poison chips it down; its
+        # own status moves stretch our clock and add residual damage to us
+        act, burnf, chip = E.status_tempo(p["move"], faster, t)
+        t_me, chip_in = t, 0.0
+        if thr.get("const"):
+            a2, b2, c2 = E.status_tempo(thr["const"], not faster, t)
+            t_me = t / max(a2, 0.25)
+            if b2 > 0 and E.MOVES[p["move"]]["category"] == "PHYSICAL":
+                t_me /= max(1e-6, 1.0 - 0.5 * b2)
+            chip_in = c2
+        t_me = t_me / (1.0 + chip * t_me)      # our chip shortens the fight
+        hits = max(0.0, t_me - (1.0 if faster else 0.0)) + s
+        scale = act * ((1.0 - 0.5 * burnf) if thr.get("cat") == "PHYSICAL" else 1.0)
+        dmg = thr["avg"] * hits * scale + chip_in * t_me * m.maxhp
+        hits_dmg = dmg / max(thr["avg"], 1e-6)     # so m.hurt() charges the real toll
         kills_self = boom(p)
         survives = dmg < m.hp and not kills_self
-        key = (0 if survives else 1, round(t + s, 4), dmg)
+        key = (0 if survives else 1, round(t_me + s, 4), dmg)
         if bestkey is None or key < bestkey:
             bestkey = key
-            best = [(m, p, thr, t + s, hits, s > 0, kills_self, t / m.obey)]
+            best = [(m, p, thr, t_me + s, hits_dmg, s > 0, kills_self, t / m.obey)]
 
     # Expected turns are very nearly linear in the target's remaining HP, so
     # prefix + switch + finish is essentially never FASTER than whichever solo
