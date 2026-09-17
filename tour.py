@@ -540,6 +540,69 @@ def walked_tiles(path):
         prev = (m, x, y)
     return out
 
+# ------------------------------------------------------------------ dig out
+# Field Dig is a reusable Escape Rope: in any map flagged allow_escaping it
+# warps to the mouth the walk came IN by. TM28 goes unused in combat, so a
+# rider can carry it for free from stage 9 (the Cerulean grunt hands it over
+# at the end of stage 8). A hop that walks a long way back out of a dungeon
+# through its own entrance becomes a 12-step menu action instead.
+DIG_COST = 12
+DIG_STAGE = 9
+def _escaping(m):
+    mj = R.maps().get(m)
+    return bool(mj and mj.get("allow_escaping"))
+
+def apply_dig(steps, stage, start_pos):
+    """Rewrite retrace-exits through a dungeon's own mouth as Dig. Returns
+    the steps saved. Tracks the entrance used per dungeon visit, exactly the
+    tile Escape Rope would target."""
+    if stage < DIG_STAGE: return 0
+    saved = 0
+    escape_at = None          # the outdoor (map,x,y) tile we entered the cave by
+    prev = (start_pos[0], start_pos[1], start_pos[2])
+    for s in steps:
+        if s.get("fly"):
+            prev = tuple(s["path"][-1]) if s["path"] else prev
+            escape_at = None
+            continue
+        path = [tuple(p) for p in s["path"]]
+        # find where this hop's walk leaves cave ground, and how much cave
+        # walking it does before that
+        walk_in, exit_i = 0, None
+        for i, (a, b) in enumerate(zip(path, path[1:])):
+            if a[0] == b[0] and _escaping(a[0]):
+                walk_in += abs(a[1] - b[1]) + abs(a[2] - b[2])
+            if _escaping(a[0]) and not _escaping(b[0]):
+                exit_i = i + 1
+                break
+            if not _escaping(a[0]) and _escaping(b[0]):
+                escape_at = a     # stepping in: remember the mouth
+        if exit_i is not None and escape_at is not None and _escaping(path[0][0]):
+            out = path[exit_i]
+            same_mouth = (out[0] == escape_at[0]
+                          and abs(out[1] - escape_at[1]) + abs(out[2] - escape_at[2]) <= 2)
+            gain = walk_in - DIG_COST
+            if same_mouth and gain > 15:
+                dest = path[-1]
+                p2 = WD.path_between(escape_at, dest, stage)
+                if p2:
+                    new_walk = DIG_COST + len(p2) - 1
+                    if new_walk < s["walk"]:
+                        saved += s["walk"] - new_walk
+                        s["walk"] = new_walk
+                        s["path"] = ([[path[0][0], path[0][1], path[0][2]]]
+                                     + [[m, x, y] for m, x, y in corners(p2)])
+                        note = (f"Use Dig here — you pop straight out to "
+                                f"{G.pretty_location(escape_at[0])} — then walk on. "
+                                f"(Teach TM28 to anyone along for the ride; no fight wants it.)")
+                        s["note"] = (s.get("note") + " " + note) if s.get("note") else note
+        # keep tracking entries across the rest of this hop
+        for a, b in zip(path[exit_i or 0:], path[(exit_i or 0) + 1:]):
+            if not _escaping(a[0]) and _escaping(b[0]):
+                escape_at = a
+        if path: prev = path[-1]
+    return saved
+
 # ------------------------------------------------------------------ deliberate heals
 # The walk only records a heal when it happens to pass a Pokémon Center; it
 # never *seeks* one. A player does: after a fight arc, heal in town before the
@@ -769,6 +832,7 @@ def solve(max_stage=34, verbose=True):
             order.remove(tj); order.insert(si, tj)
         steps, cost, cur = build_steps(order)
         cost += insert_heal(steps, stage, pos, fought_since_heal)
+        cost -= apply_dig(steps, stage, pos)
         for s in steps:
             if _passes_heal(s): fought_since_heal = False
             if s["kind"] in ("trainer", "catch"): fought_since_heal = True
