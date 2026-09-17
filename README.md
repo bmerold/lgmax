@@ -87,6 +87,8 @@ encounter rankings read so the two agree about the run's one-time choices.
   post-game Sevii item balls, so Porygon2, Steelix, Kingdra, Politoed and Slowking are post-game.
 - **Route 3 does not touch Mt. Moon** — it runs up into the west end of Route 4, where both the
   Pokémon Center and the cave mouth are.
+- **An evolved form never knows its level-1-only moves.** Evolution only checks moves at the new
+  level, so a Magikarp evolved at 20 gets Bite — Thrash exists only through the Move Maniac.
 
 See `docs/` for the working notes behind each of these.
 
@@ -96,6 +98,8 @@ See `docs/` for the working notes behind each of these.
   the whole game (`docs/setup-moves-study.md`). The opponent's side still matters — Sabrina, Agatha
   and the Champion are harder than the numbers suggest.
 - No status effects, no held-item type boosts.
+- Thrash, Outrage and Petal Dance are never recommended: the 2–3-turn lock-in and the confusion
+  after are not modeled, and a plan can't steer a move that refuses orders.
 - Trainer AI is "their single best damaging move", close to but not identical to
   `AI_SCRIPT_CHECK_BAD_MOVE`.
 - Handovers are searched two segments deep; the party builder is greedy, so individual section

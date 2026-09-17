@@ -56,7 +56,10 @@ EVENTS = [
     ("Buy the Magikarp (500)", "Route4_PokemonCenter_1F", 6),
     ("S.S. Ticket from Bill", "Route25_SeaCottage", 7, "Bill"),
     ("Bike Voucher from the Fan Club", "VermilionCity_PokemonFanClub", 9),
-    ("Bicycle from the Bike Shop", "CeruleanCity_BikeShop", 9),
+    # the shop only hands the Bicycle over FOR the Vermilion voucher, so the
+    # pickup waits for the next natural pass through Cerulean -- stage 13
+    # leaves for Routes 9-10 from Cerulean's east side
+    ("Bicycle from the Bike Shop", "CeruleanCity_BikeShop", 13),
     ("Powder Jar from the Berry lady", "CeruleanCity_House5", 6, "BerryPowderMan"),
     ("Old Rod", "VermilionCity_House1", 9),
     ("HM01 Cut from the Captain", "SSAnne_CaptainsOffice", 10),
@@ -95,6 +98,7 @@ EVENTS = [
 # Story precedence inside a stage: the fetch has to happen before the stop
 # that spends it, even when the TSP would rather swing by the other way.
 EVENT_BEFORE = [
+    ("Bike Voucher from the Fan Club", "Bicycle from the Bike Shop"),
     ("Super Nerd Miguel", "Helix or Dome Fossil (pick one)"),
     ("Oak's Parcel from the Mart clerk", "Deliver the Parcel — Pokédex from Oak"),
     ("Deliver the Parcel — Pokédex from Oak", "Town Map from Daisy"),

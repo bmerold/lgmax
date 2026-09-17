@@ -1282,28 +1282,29 @@ def build_party_plans(per_stage, avail):
 
 def move_origin(species, level, mv):
     """Where this specimen got the move: its own level-up learnset first
-    (that is how move_pool found it too), else the TM/HM that teaches it,
-    else the Two Island tutor. A move an evolved form only lists at Lv 1
-    was really learned lower down the line, so name the form and level
-    that learned it."""
+    (that is how move_pool found it too), else somewhere down the evolution
+    line (a carried move like Gyarados\'s Tackle may not appear in the
+    evolved form\'s learnset at all), else the TM/HM that teaches it, else
+    the Two Island tutor."""
     lvls = [lv for lv, m2 in E.LEVELUP.get(species, []) if m2 == mv and lv <= level]
+    if lvls and max(lvls) > 1:
+        return f"Lv {max(lvls)}"
+    pre = _pre_evo(species)
+    while pre:
+        plv = [l for l, m2 in E.LEVELUP.get(pre, [])
+               if m2 == mv and 1 < l <= level]
+        if plv:
+            return f"Lv {max(plv)} ({E.SPECIES[pre]['name']})"
+        pre = _pre_evo(pre)
     if lvls:
-        lv = max(lvls)
-        if lv > 1: return f"Lv {lv}"
-        pre = _pre_evo(species)
-        while pre:
-            plv = [l for l, m2 in E.LEVELUP.get(pre, [])
-                   if m2 == mv and 1 < l <= level]
-            if plv:
-                return f"Lv {max(plv)} ({E.SPECIES[pre]['name']})"
-            pre = _pre_evo(pre)
         return "start"
     item = G.MOVE_TO_TM.get(mv)
     if item:
         return item.replace("ITEM_", "")
     if mv.replace("MOVE_", "") in E.TUTOR.get(species, []):
         return "Tutor"
-    return ""
+    # a pre-evolution starting move carried through (Splash, Tackle...)
+    return "start"
 
 def _leg_member(m, md, avail, stage):
     """One party member's ledger for one leg: PP and HP spent on this stretch

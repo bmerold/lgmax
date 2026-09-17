@@ -221,6 +221,10 @@ UNUSABLE_EFFECTS = {
     "FOCUS_PUNCH",      # -3 priority; only connects if the user isn't hit
     "REVENGE", "ENDEAVOR", "BEAT_UP", "FUTURE_SIGHT", "RAGE", "PURSUIT",
     "FRUSTRATION",      # a playthrough Pokemon has high friendship, so ~1 BP
+    "RAMPAGE",          # Thrash/Outrage/Petal Dance lock the user in for 2-3
+                        # turns and confuse it after: no retargeting, no
+                        # switching, no move choice -- the plan can't honor
+                        # any of that, so it never recommends them
 }
 
 # Effective turns per use. Charge moves spend a turn winding up; Hyper Beam

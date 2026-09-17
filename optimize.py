@@ -42,13 +42,64 @@ def tm_allowed(move, species, stage=None):
     if owners is None: return True             # no plan in force yet
     return species in owners
 
+MOVE_MANIAC_STAGE = 28   # Two Island; relearns any level-up move for a mushroom
+
+def _avail():
+    if not _AVAIL_CACHE:
+        _AVAIL_CACHE.update(P.full_availability())
+    return _AVAIL_CACHE
+
+_TO_HOP = None
+def _levelup_pool(species, level, stage):
+    """Level-up moves this specimen can actually KNOW. A form the run reaches
+    by evolving only contributes moves from the level it joined the line --
+    an evolved form's Lv-1-only moves (Gyarados's Thrash) exist solely
+    through the Two Island Move Maniac. A form the run catches outright
+    keeps its whole list, exactly like the game's starting-moveset walk."""
+    if stage >= MOVE_MANIAC_STAGE:
+        return E.learnable_by(species, level)
+    av = _avail()
+    rec = av.get(species)
+    if not rec or not str(rec.get("source", "")).startswith("Evolve"):
+        return E.learnable_by(species, level)
+    global _TO_HOP
+    if _TO_HOP is None:
+        _TO_HOP = {}
+        for frm, evs in E.EVOS.items():
+            for ev in evs:
+                _TO_HOP.setdefault(ev["to"], (frm, ev.get("method"), ev.get("param")))
+    chain, cur = [], species
+    while True:
+        r2, hop = av.get(cur), _TO_HOP.get(cur)
+        if not r2 or not str(r2.get("source", "")).startswith("Evolve") or not hop:
+            chain.append((cur, 0)); break
+        frm, meth, param = hop
+        if meth == "LEVEL" and isinstance(param, int):
+            join = param
+        else:
+            # stone/trade: no level-up learning fires on the evolution itself;
+            # the form starts contributing at the level the run performs it
+            join = P.STAGE_BY_ID.get(r2.get("stage"), {}).get("level", level) + 1
+        chain.append((cur, join))
+        cur = frm
+    chain.reverse()          # caught base first
+    out = []
+    for i, (form, join) in enumerate(chain):
+        upper = min(chain[i + 1][1], level) if i + 1 < len(chain) else level
+        for lv, mv in E.LEVELUP.get(form, []):
+            if i == 0:
+                if lv <= upper: out.append(mv)
+            elif join <= lv <= upper:
+                out.append(mv)
+    return out
+
 _pool_cache = {}
 def move_pool(species, level, stage):
     """Every damaging move this species could actually know at this point:
     level-up moves learned by `level`, plus TMs/HMs/tutor moves obtainable by `stage`."""
     key = (species, level, stage)
     if key in _pool_cache: return _pool_cache[key]
-    moves = set(E.learnable_by(species, level))
+    moves = set(_levelup_pool(species, level, stage))
     tms = G.tm_moves_by_stage(stage)
     for item in E.TMHM.get(species, []):
         const = "ITEM_" + item.split("_")[0] if item.startswith(("TM", "HM")) else None

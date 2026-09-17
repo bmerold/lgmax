@@ -236,6 +236,10 @@ def maps_needed():
         for st in json.load(open(rt))["stages"]:
             for s in st["steps"]:
                 need.add(s["map"])
+                # and every map the walk merely passes THROUGH -- the
+                # Underground Path is real ground even with nothing to do in it
+                for m, _x, _y in s["path"]:
+                    need.add(m)
     return sorted(m for m in need if m in R.maps())
 
 def team_sprites():
