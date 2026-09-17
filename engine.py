@@ -239,15 +239,23 @@ RECHARGE_EFFECTS = {"RECHARGE"}
 # lasting 1-4 turns. One major status per target, they don't stack.
 TEMPO_EFFECTS = {"FLINCH_HIT", "FREEZE_HIT", "PARALYZE_HIT", "BURN_HIT",
                  "POISON_HIT", "CONFUSE_HIT", "TWINEEDLE", "POISON_FANG"}
-def status_tempo(move_const, attacker_faster, turns):
+def status_tempo(move_const, attacker_faster, turns, terrain=None):
     """-> (act, burn, chip): the fraction of its turns the defender actually
     gets to act, the average probability it sits burned (physical attack
     halved), and its expected residual damage per turn as a fraction of its
-    max HP. A tiny EV walk over the fight's length -- no state machine."""
+    max HP. A tiny EV walk over the fight's length -- no state machine.
+    Secret Power's secondary is the arena's: paralysis on plain ground and
+    indoors, flinch in caves, poison in grass, sleep in long grass."""
     m = MOVES.get(move_const) or {}
     eff = m.get("effect")
+    if eff == "SECRET_POWER":
+        eff = {"cave": "FLINCH_HIT", "building": "PARALYZE_HIT",
+               "plain": "PARALYZE_HIT", "grass": "POISON_HIT",
+               "long_grass": "SLEEP_HIT"}.get(terrain or "plain")
+        if eff is None:                # water/sand arenas: a stat drop we don't model
+            return 1.0, 0.0, 0.0
     p = (m.get("secondaryChance") or 0) / 100.0 * ((m.get("accuracy") or 100) / 100.0)
-    if eff not in TEMPO_EFFECTS or p <= 0:
+    if (eff not in TEMPO_EFFECTS and eff != "SLEEP_HIT") or p <= 0:
         return 1.0, 0.0, 0.0
     T = max(1, min(int(turns + 0.999), 10))
     frozen = para = burn = psn = conf = 0.0
@@ -260,6 +268,7 @@ def status_tempo(move_const, attacker_faster, turns):
         elif eff in ("POISON_HIT", "TWINEEDLE", "POISON_FANG"):
             psn += healthy * p
         elif eff == "CONFUSE_HIT":  conf = min(1.0, conf + (1.0 - conf) * p)
+        elif eff == "SLEEP_HIT":    frozen += healthy * p   # sleeps like a freeze walk
         act = (1.0 - frozen) * (1.0 - 0.25 * para) * (1.0 - 0.5 * conf)
         if eff == "FLINCH_HIT" and attacker_faster:
             act *= (1.0 - p)

@@ -116,6 +116,26 @@ ITEM_STAGE_CORRECTIONS = {
 }
 ITEM_STAGE.update(ITEM_STAGE_CORRECTIONS)
 
+_MAP_TYPE_CACHE = {}
+def battle_terrain(map_name, kind=None, method=None):
+    """Secret Power's arena, the way BattleSetup_GetTerrainId sees it:
+    'cave' underground, 'building' indoors, 'grass' for wild land battles,
+    'water' for surf/rod battles, else 'plain'."""
+    mt = _MAP_TYPE_CACHE.get(map_name)
+    if mt is None:
+        try:
+            mt = json.load(open(f"{REPO}/data/maps/{map_name}/map.json")).get("map_type", "")
+        except Exception:
+            mt = ""
+        _MAP_TYPE_CACHE[map_name] = mt
+    if mt == "MAP_TYPE_UNDERGROUND": return "cave"
+    if mt in ("MAP_TYPE_INDOOR", "MAP_TYPE_SECRET_BASE"): return "building"
+    m = (method or "").lower()
+    if kind == "wild":
+        if "land" in m: return "grass"
+        if "water" in m or "rod" in m or "surf" in m: return "water"
+    return "plain"
+
 def tm_moves_by_stage(stage):
     """Every TM/HM move the player could have taught by `stage`."""
     out = {}

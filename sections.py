@@ -931,7 +931,7 @@ def _thresh(tbl, limit):
         else: hi = mid - 1
     return lo
 
-def plan_vs(team, opp, badges, active):
+def plan_vs(team, opp, badges, active, terrain=None):
     """Cheapest way for the party to take ONE opposing Pokemon down.
 
     Two shapes are considered. A solo: one member does the whole thing, paying a
@@ -963,10 +963,10 @@ def plan_vs(team, opp, badges, active):
         # secondary-effect tempo, both directions: our flinch/freeze/paralysis
         # cuts the opponent's acting turns and burn/poison chips it down; its
         # own status moves stretch our clock and add residual damage to us
-        act, burnf, chip = E.status_tempo(p["move"], faster, t)
+        act, burnf, chip = E.status_tempo(p["move"], faster, t, terrain)
         t_me, chip_in = t, 0.0
         if thr.get("const"):
-            a2, b2, c2 = E.status_tempo(thr["const"], not faster, t)
+            a2, b2, c2 = E.status_tempo(thr["const"], not faster, t, terrain)
             t_me = t / max(a2, 0.25)
             if b2 > 0 and E.MOVES[p["move"]]["category"] == "PHYSICAL":
                 t_me /= max(1e-6, 1.0 - 0.5 * b2)
@@ -1088,7 +1088,9 @@ def run_section(team, battles, badges, heal_after_idx, tm_value=None,
             # switch tax. Wild leads still carry over unpriced choices.
             if enc["kind"] != "wild" and oi > 0:
                 active = None
-            plan = plan_vs(have, opp, badges, active)
+            plan = plan_vs(have, opp, badges, active,
+                           G.battle_terrain(enc.get("locationRaw") or enc.get("map") or "",
+                                            enc.get("kind"), enc.get("method")))
             if plan is None:
                 failed += 1
                 entries.append({"opp": opp["name"], "lvl": opp["level"],

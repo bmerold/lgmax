@@ -190,7 +190,7 @@ def _turn_cost(off, hits):
     if e in E.CHARGE_EFFECTS:   return 2.0 * hits
     return hits
 
-def sweep(player, opp_mons, pool, badges, stage):
+def sweep(player, opp_mons, pool, badges, stage, terrain=None):
     """Walk the opposing party in order, tracking expected turns and cumulative
     damage on a single player Pokemon that never switches or heals."""
     hp = player["stats"]["hp"]
@@ -215,10 +215,10 @@ def sweep(player, opp_mons, pool, badges, stage):
         faster = player["stats"]["speed"] > opp["stats"]["speed"]
         # fold secondary-effect tempo both ways (flinch, freeze, paralysis,
         # burn, poison, confusion), exactly as the section simulator does
-        act, burnf, chip = E.status_tempo(off["move"], faster, t)
+        act, burnf, chip = E.status_tempo(off["move"], faster, t, terrain)
         chip_in = 0.0
         if thr:
-            a2, b2, c2 = E.status_tempo(thr["move"], not faster, t)
+            a2, b2, c2 = E.status_tempo(thr["move"], not faster, t, terrain)
             t = t / max(a2, 0.25)
             if b2 > 0 and E.MOVES[off["move"]]["category"] == "PHYSICAL":
                 t /= max(1e-6, 1.0 - 0.5 * b2)
@@ -398,7 +398,8 @@ def analyze(enc, allow_trade=False):
         pm = player_mon(sp, level)
         pool = move_pool(sp, level, stage)
         sw = _weighted_sweep(pm, opps, pool, badges) if weighted \
-             else sweep(pm, opp_mons, pool, badges, stage)
+             else sweep(pm, opp_mons, pool, badges, stage,
+                        G.battle_terrain(enc.get("locationRaw") or "", enc["kind"]))
         if sw is None: continue
         if not weighted:
             sw = heal_penalty(sw, enc.get("items", []))
