@@ -63,6 +63,7 @@ EVENTS = [
     ("Powder Jar from the Berry lady", "CeruleanCity_House5", 6, "BerryPowderMan"),
     ("Old Rod", "VermilionCity_House1", 9),
     ("HM01 Cut from the Captain", "SSAnne_CaptainsOffice", 10),
+    ("Trash-can switches (open Surge's door)", "VermilionCity_Gym", 11),
     ("Itemfinder from Oak's aide", "Route11_EastEntrance_2F", 12),
     ("HM05 Flash from Oak's aide (10 owned)", "Route2_EastBuilding", 12),
     ("Tea from the old lady (opens Saffron's gates)", "CeladonCity_Condominiums_1F", 15, "TeaWoman"),
@@ -99,6 +100,7 @@ EVENTS = [
 # that spends it, even when the TSP would rather swing by the other way.
 EVENT_BEFORE = [
     ("Bike Voucher from the Fan Club", "Bicycle from the Bike Shop"),
+    ("Trash-can switches (open Surge's door)", "Leader Lt. Surge"),
     ("Super Nerd Miguel", "Helix or Dome Fossil (pick one)"),
     ("Oak's Parcel from the Mart clerk", "Deliver the Parcel — Pokédex from Oak"),
     ("Deliver the Parcel — Pokédex from Oak", "Town Map from Daisy"),
@@ -502,6 +504,12 @@ STOP_NOTES = {
         "Through the gap Camper Flint vacated — only if he walked down to "
         "meet you. If he's still on his post, this pocket waits for Cut "
         "(the tree on the right).",
+    ("Trash-can switches (open Surge's door)", "VermilionCity_Gym"):
+        "The 15 cans are a 5-wide grid. The FIRST switch hides in a random "
+        "can; the SECOND is always in a can directly beside the first (up, "
+        "down, left or right) — a wrong second guess re-scrambles both. So "
+        "sweep the cans one by one, and when the first clicks, work its "
+        "neighbors. The electric fence to Surge drops when both are set.",
 }
 
 # ------------------------------------------------------------------ sight aggro
