@@ -51,23 +51,24 @@ def _avail():
 
 _TO_HOP = None
 def _levelup_pool(species, level, stage):
-    """Level-up moves this specimen can actually KNOW. A form the run reaches
-    by evolving only contributes moves from the level it joined the line --
-    an evolved form's Lv-1-only moves (Gyarados's Thrash) exist solely
-    through the Two Island Move Maniac. A form the run catches outright
-    keeps its whole list, exactly like the game's starting-moveset walk."""
+    """Level-up moves this specimen can actually KNOW, the way the game's own
+    move-learning works. On CAPTURE it gets GiveBoxMonInitialMoveset -- the
+    last four moves in learn order at its catch level -- so a level-1 move
+    crowded out by the time you catch it (a wild Dugtrio's Tri Attack) is
+    simply gone. From there it learns each new move as it levels, by whatever
+    form is active at that level, so an evolved form's level-1-only moves
+    (Gyarados's Thrash) never appear either. Only the Two Island Move Maniac
+    (stage 28) restores any of it."""
     if stage >= MOVE_MANIAC_STAGE:
         return E.learnable_by(species, level)
     av = _avail()
-    rec = av.get(species)
-    if not rec or not str(rec.get("source", "")).startswith("Evolve"):
-        return E.learnable_by(species, level)
     global _TO_HOP
     if _TO_HOP is None:
         _TO_HOP = {}
         for frm, evs in E.EVOS.items():
             for ev in evs:
                 _TO_HOP.setdefault(ev["to"], (frm, ev.get("method"), ev.get("param")))
+    # walk down to the caught base, recording each form's active-from level
     chain, cur = [], species
     while True:
         r2, hop = av.get(cur), _TO_HOP.get(cur)
@@ -77,19 +78,22 @@ def _levelup_pool(species, level, stage):
         if meth == "LEVEL" and isinstance(param, int):
             join = param
         else:
-            # stone/trade: no level-up learning fires on the evolution itself;
-            # the form starts contributing at the level the run performs it
             join = P.STAGE_BY_ID.get(r2.get("stage"), {}).get("level", level) + 1
         chain.append((cur, join))
         cur = frm
     chain.reverse()          # caught base first
-    out = []
+    base = chain[0][0]
+    catch_stage = (av.get(base) or {}).get("stage", stage)
+    catch_lvl = P.STAGE_BY_ID.get(catch_stage, {}).get("level", 1)
+    # the initial moveset on capture -- the game's last-four-at-catch walk
+    out = list(E.default_moveset(base, catch_lvl))
+    # then every move learned as it levels from capture to `level`, by the
+    # form active at each level; the base's crowded-out low moves never return
     for i, (form, join) in enumerate(chain):
-        upper = min(chain[i + 1][1], level) if i + 1 < len(chain) else level
+        lo = catch_lvl if i == 0 else join - 1     # inclusive of the evo level
+        hi = min(chain[i + 1][1] - 1, level) if i + 1 < len(chain) else level
         for lv, mv in E.LEVELUP.get(form, []):
-            if i == 0:
-                if lv <= upper: out.append(mv)
-            elif join <= lv <= upper:
+            if lo < lv <= hi:
                 out.append(mv)
     return out
 

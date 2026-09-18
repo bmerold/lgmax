@@ -87,8 +87,9 @@ encounter rankings read so the two agree about the run's one-time choices.
   post-game Sevii item balls, so Porygon2, Steelix, Kingdra, Politoed and Slowking are post-game.
 - **Route 3 does not touch Mt. Moon** — it runs up into the west end of Route 4, where both the
   Pokémon Center and the cave mouth are.
-- **An evolved form never knows its level-1-only moves.** Evolution only checks moves at the new
-  level, so a Magikarp evolved at 20 gets Bite — Thrash exists only through the Move Maniac.
+- **A caught Pokémon only knows its last four moves in learn order**, per the game's own capture
+  routine — so a wild Dugtrio's level-1 Tri Attack, and an evolved form's level-1-only moves
+  (Gyarados's Thrash), are both crowded out and exist only through the Two Island Move Maniac.
 
 See `docs/` for the working notes behind each of these.
 
