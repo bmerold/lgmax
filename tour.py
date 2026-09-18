@@ -53,7 +53,9 @@ EVENTS = [
     ("Town Map from Daisy", "PalletTown_RivalsHouse", 1, "Daisy"),
     ("Old Amber from the scientist", "PewterCity_Museum_1F", 4, "OldAmberScientist"),
     ("Helix or Dome Fossil (pick one)", "MtMoon_B2F", 5, "Fossil"),
-    ("Buy the Magikarp (500)", "Route4_PokemonCenter_1F", 6),
+    # the salesman shares the Route 4 Center the walk heals at BEFORE Mt.
+    # Moon -- buy on the way in, not on some later loop back
+    ("Buy the Magikarp (500)", "Route4_PokemonCenter_1F", 5),
     ("S.S. Ticket from Bill", "Route25_SeaCottage", 7, "Bill"),
     ("Bike Voucher from the Fan Club", "VermilionCity_PokemonFanClub", 9),
     # the shop only hands the Bicycle over FOR the Vermilion voucher, so the

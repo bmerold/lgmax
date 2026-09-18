@@ -143,7 +143,7 @@ STATIC_SOURCES = [
     ("SPECIES_BULBASAUR",  0, "starter",  "Starter choice, Oak's Lab"),
     ("SPECIES_CHARMANDER", 0, "starter",  "Starter choice, Oak's Lab"),
     ("SPECIES_SQUIRTLE",   0, "starter",  "Starter choice, Oak's Lab"),
-    ("SPECIES_MAGIKARP",   6, "purchase", "Route 4 salesman, 500"),
+    ("SPECIES_MAGIKARP",   5, "purchase", "Route 4 salesman, 500"),
     ("SPECIES_ABRA",      15, "prize",    "Celadon Game Corner prize"),
     ("SPECIES_CLEFAIRY",  15, "prize",    "Celadon Game Corner prize"),
     ("SPECIES_DRATINI",   15, "prize",    "Celadon Game Corner prize"),
