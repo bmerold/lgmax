@@ -503,6 +503,13 @@ button{font:inherit;color:inherit}
 .ans-bar i{position:absolute;top:0;bottom:0;left:0;background:var(--good)}
 .ans-bar i.ko{background:var(--accent)}
 .foe.wild{border-top-color:var(--warn);width:172px}
+.vsband.trade{align-items:center;gap:14px}
+.foe.trade{width:186px;position:relative;padding-top:16px}
+.foe.trade.give{border-top-color:var(--bad)}
+.foe.trade.get{border-top-color:var(--good)}
+.tr-tag{position:absolute;top:3px;left:8px;font-size:8.5px;font-weight:800;letter-spacing:.08em;color:var(--ink-2)}
+.foe.trade.get .tr-tag{color:var(--good)}
+.tr-arrow{font-size:22px;font-weight:700;color:var(--accent);flex-shrink:0}
 .wild-odds{font-family:var(--mono);font-size:10px;color:var(--ink-2);flex-shrink:0}
 
 .mark.cur{z-index:4;outline:2px solid #fff;box-shadow:0 0 0 5px var(--accent),0 1px 5px rgba(0,0,0,.6);
@@ -2207,6 +2214,8 @@ function renderPlay(){
     if (row) extra = vsBand(row);
     else if (node && node.stop && str(node.stop[0]) === "catch")
       extra = wildBand(node.stop);
+    else if (node && node.stop && str(node.stop[0]) === "event")
+      extra = tradeBand(str(node.stop[1]));
     const stopNote = node && node.stop ? str(node.stop[12] || "") : "";
     descHtml = `<div class="po-desc">
       ${key ? `<span class="chk big${done ? " on" : ""}" data-key="${esc(key)}" title="mark this step done">✓</span>` : ""}
@@ -2370,6 +2379,24 @@ window.addEventListener("resize", () => {
     fitPlayMap(W, H);
   }
 });
+
+/* an in-game trade, drawn: the Pokémon you give, an arrow, the one you get */
+function tradeBand(what){
+  const m = /^Trade for (.+?) \(give (.+?)\)$/.exec(what || "");
+  if (!m) return "";
+  const get = m[1], give = m[2];
+  const card = (nm, tag) => {
+    const spr = SPRITES[nm];
+    return `<div class="foe trade ${tag === "GIVE" ? "give" : "get"}">
+      <div class="tr-tag">${tag}</div>
+      <div class="foe-h">
+        ${spr ? `<img src="data:image/png;base64,${spr}" alt="">`
+              : `<span style="font-size:22px">◓</span>`}
+        <span class="foe-n">${esc(nm)}</span></div></div>`;
+  };
+  return `<div class="vsband trade">
+    ${card(give, "GIVE")}<span class="tr-arrow">→</span>${card(get, "GET")}</div>`;
+}
 
 /* a catch stop, drawn: one card per wild Pokémon with its sprite and odds */
 function wildBand(st){

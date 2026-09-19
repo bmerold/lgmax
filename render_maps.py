@@ -266,6 +266,15 @@ def team_sprites():
                 species.add(m["species"])
             for m in e.get("wildMons") or []:
                 species.add(m["species"])
+    # both sides of every in-game trade, for the give -> get cards
+    try:
+        import tour as _T
+        byname = {v["name"]: k for k, v in _E.SPECIES.items()}
+        for got, give, *_ in _T.INGAME_TRADE_STOPS:
+            for nm in (got, give):
+                if nm in byname: species.add(byname[nm])
+    except Exception as _ex:
+        print("  trade sprites skip:", _ex)
     sdir = os.path.join(ART, "sprites")
     os.makedirs(sdir, exist_ok=True)
     out = {}
