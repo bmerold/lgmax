@@ -98,6 +98,39 @@ EVENTS = [
     ("Ruby and Sapphire to Celio — trading unlocked", "OneIsland_PokemonCenter_1F", 33, "Celio"),
 ]
 
+# In-game trades (src/data/ingame_trades.h), each at the building it lives in.
+# (received, given, stage, map, give-instruction). The stage is the first at
+# which the building is open AND you can hold the requested Pokémon.
+INGAME_TRADE_STOPS = [
+    ("Mr. Mime", "Abra",       13, "Route2_House",
+     "Trade an Abra for Mr. Mime — the ONLY Mr. Mime in LeafGreen. Catch a "
+     "spare Abra on Route 24 to hand over (you keep your own)."),
+    ("Farfetch'd", "Spearow",  10, "VermilionCity_House2",
+     "Trade a Spearow for Farfetch'd — the only one in the game. Catch a "
+     "spare Spearow back on Route 22."),
+    ("Nidoran♀", "Nidoran♂", 9, "UndergroundPath_NorthEntrance",
+     "Trade a Nidoran♂ for a Nidoran♀ (fills the other gender's dex "
+     "slot). Both are on Route 3 — catch a spare to give; no leveling needed."),
+    ("Nidorina", "Nidorino",   12, "Route11_EastEntrance_2F",
+     "Trade a Nidorino for a Nidorina. LEVEL a Nidoran♂ to 16 to evolve "
+     "it first — catch a spare on Route 3 to raise, don't give your team's."),
+    ("Jynx", "Poliwhirl",      19, "CeruleanCity_House3",
+     "Trade a Poliwhirl for Jynx. Super-Rod a Poliwag on Route 6 and LEVEL it "
+     "to 25 to evolve — or Super-Rod a Poliwhirl straight out of the water."),
+    ("Lickitung", "Slowbro",   21, "Route18_EastEntrance_2F",
+     "Trade a Slowbro for Lickitung — the only Lickitung in the game. "
+     "LeafGreen has no Psyduck, so you must LEVEL a Slowpoke to 37 (Slowpoke "
+     "is on Route 10 / Seafoam)."),
+    ("Electrode", "Raichu",    26, "CinnabarIsland_PokemonLab_Lounge",
+     "Trade a Raichu for Electrode. No wild Raichu exists — catch a Pikachu "
+     "(Power Plant or Viridian Forest) and use a Thunder Stone on it."),
+    ("Seel", "Ponyta",         28, "CinnabarIsland_PokemonLab_ExperimentRoom",
+     "Trade a Ponyta for Seel. Catch a spare Ponyta on Mt. Ember (Sevii "
+     "Islands) to give — Seel is also catchable in the Seafoam Islands."),
+]
+for _got, _give, _st, _map, _note in INGAME_TRADE_STOPS:
+    EVENTS.append((f"Trade for {_got} (give {_give})", _map, _st))
+
 # Story precedence inside a stage: the fetch has to happen before the stop
 # that spends it, even when the TSP would rather swing by the other way.
 EVENT_BEFORE = [
@@ -567,6 +600,9 @@ def walked_tiles(path):
 # rider can carry it for free from stage 9 (the Cerulean grunt hands it over
 # at the end of stage 8). A hop that walks a long way back out of a dungeon
 # through its own entrance becomes a 12-step menu action instead.
+for _got, _give, _st, _map, _note in INGAME_TRADE_STOPS:
+    STOP_NOTES[(f"Trade for {_got} (give {_give})", _map)] = _note
+
 DIG_COST = 12
 DIG_STAGE = 9
 def _escaping(m):
