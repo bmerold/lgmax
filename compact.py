@@ -286,7 +286,8 @@ def main():
                 path_runs(s["path"]),
                 [S(x) for x in s.get("species", [])],
                 1 if s.get("underfoot") else 0,
-                S(s.get("renewable")), s.get("hunt", 0), S(s.get("note"))]
+                S(s.get("renewable")), s.get("hunt", 0), S(s.get("note")),
+                s.get("huntHi", 0)]
 
     def leg_rows(sec, stage):
         """A section split at its full heals. Each leg carries its own roster
@@ -353,6 +354,7 @@ def main():
             rows[str(stage)] = {
                 "lv": sec["level"], "bg": sec["badges"], "b": sec["battles"],
                 "wb": sec.get("wildBattles", 0), "wt": sec.get("wildTurns", 0),
+                "wl": S(sec.get("wildLead")),
                 "om": sec["opposingMons"], "t": sec["turns"], "f": sec["faints"],
                 "u": sec["unanswered"], "nb": 1 if sec.get("noBattles") else 0,
                 "hm": [[S(h["name"]), S(h["hm"]), S(h["by"]), S(h["how"]),

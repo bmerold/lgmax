@@ -471,6 +471,7 @@ button{font:inherit;color:inherit}
 .pt-tag{font-size:8px;font-weight:700;letter-spacing:.06em;color:#fff;
   background:var(--ink-2);border-radius:0;padding:1px 4px;margin-top:1px}
 .pt-tag.nxt{background:var(--accent)}
+.pt-tag.lead{background:var(--warn)}
 .pt-role{font-size:9.5px;color:var(--ink-2);white-space:nowrap}
 .pt-mon .pt-mv{display:flex;flex-direction:column;gap:1px;flex:1;min-width:0}
 .pt-mon .pt-m{font-size:10px;color:var(--ink);white-space:nowrap;line-height:1.25;overflow:hidden;
@@ -1336,7 +1337,7 @@ function renderSecPanel(id, leg){
     (pinsByMap[mp] = pinsByMap[mp] || []).push(
       {n: i + 1, x: s[3], y: s[4], kind: str(s[0]), what: str(s[1]),
        walk: s[5], fly: s[6], species: (s[8] || []).length,
-       underfoot: s[9], renew: str(s[10]), hunt: s[11] || 0,
+       underfoot: s[9], renew: str(s[10]), hunt: s[11] || 0, huntHi: s[13] || 0,
        key: keys[i], done: DONE.has(keys[i]),
        next: i === nextIdx, plan: planByStop[i + 1]});
   });
@@ -1348,7 +1349,7 @@ function renderSecPanel(id, leg){
     else if (p.renew) bits.push(`renewable — there ${RENEW_ODDS[p.renew] || "?"} of the time`);
     else if (p.kind === "hidden") bits.push("invisible — press A");
     if (p.species > 1) bits.push(p.species + " species");
-    if (p.hunt > 3) bits.push(`~${p.hunt} encounters for the rarest`);
+    if (p.hunt > 3) bits.push(`~${p.hunt} enc. avg${p.huntHi > p.hunt ? `, ~${p.huntHi} unlucky` : ""} for the rarest`);
     return `<button class="side-row${p.done ? " done" : ""}${p.next ? " next" : ""}" data-n="${p.n}">
       <span class="side-n" style="background:${k.color}">${p.n}</span>
       <span><span class="side-t">${esc(p.what || "")}</span>
@@ -1589,7 +1590,7 @@ function partyCard(t){
 function rtRow(s, n, st){
   const kind = str(s[0]), what = str(s[1]), mp = s[2], walk = s[5],
         flyFrom = s[6], species = s[8] || [], underfoot = s[9],
-        renew = str(s[10]), hunt = s[11] || 0;
+        renew = str(s[10]), hunt = s[11] || 0, huntHi = s[13] || 0;
   st = st || {};
   return `<div class="rt-row${st.done ? " done" : ""}${st.next ? " next" : ""}" id="fight-${n}">
     ${st.key ? `<span class="chk${st.done ? " on" : ""}" data-key="${esc(st.key)}" title="mark done">✓</span>` : ""}
@@ -1603,7 +1604,7 @@ function rtRow(s, n, st){
       ${str(s[12] || "") ? `<div class="stop-note">⚠ ${esc(str(s[12]))}</div>` : ""}
       ${flyFrom ? `<div class="rt-fly">✈ Fly to ${esc(prettyMap(flyFrom))}, then walk</div>` : ""}
       ${species.length ? `<div class="rt-species">${species.map(x => esc(str(x))).join(" · ")}${
-        hunt > 3 ? ` <span class="note">— expect ~${hunt} encounters for the rarest</span>` : ""}</div>` : ""}
+        hunt > 3 ? ` <span class="note">— ~${hunt} encounters on average for the rarest${huntHi > hunt ? `, up to ~${huntHi} on an unlucky run` : ""}</span>` : ""}</div>` : ""}
     </span>
     <span class="rt-where">${esc(prettyMap(mp))}<br><span class="num">${walk} steps</span></span>
   </div>`;
@@ -2166,9 +2167,9 @@ function playDesc(ctx, row){
          (${walk} steps), face the tile and press A.${nextBit}`;
   if (kind === "catch")
     return `New wild Pokémon live here: hunt this spot until you've caught
-      ${species.join(", ") || "them"}${hunt > 3 ? ` — expect around ${hunt}
-      encounters for the rarest` : ""}. The party plan already budgets the
-      wild damage.`;
+      ${species.join(", ") || "them"}${hunt > 3 ? ` — about ${hunt} encounters on
+      average for the rarest, up to ~${node.stop[13] || hunt} on an unlucky run` : ""}.
+      The party plan already budgets the wild damage.`;
   if (kind === "heal")
     return `Step inside and heal at the counter — HP and PP fully restore, and
       every fight plan after this point budgets from full bars.${nextBit}`;
@@ -2273,7 +2274,10 @@ function renderPlayTeam(ctx){
         <span class="pt-role">${nextLbl}</span></span>`;
       title = `${nm} — fills the party; ${becomes ? `evolves into ${becomes} and ` : ""}next used in section ${nextSt} at L${lvl}`;
     }
-    const tag = role === 1 ? `<span class="pt-tag">HM</span>` : "";
+    const wildLead = ctx.d && str(ctx.d.wl || "");
+    const isLead = role !== 2 && wildLead && nm === wildLead;
+    const tag = role === 1 ? `<span class="pt-tag">HM</span>`
+              : isLead ? `<span class="pt-tag lead" title="walks point — meets the wild encounters, so its PP is spent on the route too">POINT</span>` : "";
     return `<span class="pt-mon${roleCls}" title="${esc(title)}">
       <span class="pt-left">
         ${spr ? `<img src="data:image/png;base64,${spr}" alt="${esc(nm)}">`

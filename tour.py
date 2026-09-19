@@ -322,15 +322,22 @@ def harvest():
             return (hunt + (0 if free else OFF_ROUTE_PENALTY), name, label)
         (name, label), (share, _) = min(cands[sp].items(), key=cost)
         grouped[(gate, name, label)].append((sp, share))
+    import math as _math
     picked_stops = []
     for (gate, name, label), pairs in grouped.items():
         pairs.sort(key=lambda x: x[1])
-        rare_share = pairs[0][1]
+        rare_share = max(pairs[0][1], 1e-6)
         species = sorted(f"{E.SPECIES[sp]['name']} ({share*100:.0f}%)"
                          for sp, share in pairs)
-        picked_stops.append((gate, name, label, species,
-                             int(round(1 / max(rare_share, 1e-6)))))
-    for gate, name, label, species, hunt in sorted(picked_stops):
+        # Finding a specific slot is a geometric process: each fight is an
+        # independent chance `rare_share`. The mean 1/p undersells the tail,
+        # so we also carry the 80th-percentile count -- the number of fights
+        # you need to have found it 4 runs in 5.
+        mean = int(round(1 / rare_share))
+        p80 = int(_math.ceil(_math.log(0.2) / _math.log(1 - rare_share))) \
+              if rare_share < 1 else 1
+        picked_stops.append((gate, name, label, species, mean, max(p80, mean)))
+    for gate, name, label, species, hunt, huntHi in sorted(picked_stops):
         mode = ("water" if label == "surfing"
                 else "shore" if "rod" in label else "land")
         xy = WD.encounter_anchor(name, mode) or WD.encounter_anchor(name, "land")
@@ -341,7 +348,7 @@ def harvest():
         names_only = ", ".join(x.split(" (")[0] for x in species)
         nodes.append({"kind": "catch", "map": name, "x": xy[0], "y": xy[1],
                       "stage": gate, "species": species, "method": label,
-                      "hunt": hunt,
+                      "hunt": hunt, "huntHi": huntHi,
                       "what": f"Catch {names_only} ({label})"})
 
     # trainers: the same set the sections fight, on the tiles they stand on
@@ -863,6 +870,7 @@ def solve(max_stage=34, verbose=True):
                 if n.get("underfoot"): step["underfoot"] = True
                 if n.get("renewable"): step["renewable"] = n["renewable"]
                 if n.get("hunt"): step["hunt"] = n["hunt"]
+                if n.get("huntHi"): step["huntHi"] = n["huntHi"]
                 if n.get("species"): step["species"] = n["species"]
                 stps.append(step)
                 cst += mat[prev_idx][oi]

@@ -140,6 +140,41 @@ def build_sections(graph):
 
 WILD_LOAD = {}     # stage -> [per-map estimate]; filled from walking.py
 
+def route_wild_load():
+    """Wild battles per section, counted from the ACTUAL route walk rather
+    than a generic map clear: the tiles the path really covers on each map,
+    at the stage it covers them, times that map's encounter share and rate.
+    Reassigns each map's wild load to the stage the route walks it in."""
+    import collections as _c
+    rp = f"{OUT}/route.json"
+    if not os.path.exists(rp): return W.section_wild_load()
+    info = {}
+    for maps in W.section_wild_load().values():
+        for m in maps: info[m["map"]] = m
+    rt = json.load(open(rp))
+    out = {}
+    for st in rt["stages"]:
+        stage = st["stage"]
+        walked = _c.defaultdict(float)
+        for s2 in st["steps"]:
+            path = s2.get("path") or []
+            for a, b in zip(path, path[1:]):
+                if a[0] == b[0]:
+                    walked[a[0]] += abs(a[1]-b[1]) + abs(a[2]-b[2])
+        entries = []
+        for mp, steps in walked.items():
+            m = info.get(mp)
+            spe = m.get("stepsPerEncounter") if m else None
+            if not m or not spe: continue
+            enc_steps = steps * m["encounterShare"]
+            battles = enc_steps / spe
+            if battles < 0.5: continue
+            e = dict(m); e["stage"] = stage; e["steps"] = int(steps)
+            e["encounterSteps"] = round(enc_steps, 1); e["battles"] = round(battles, 1)
+            entries.append(e)
+        if entries: out[stage] = entries
+    return out
+
 def wild_battles_for(stage):
     """Wild encounters you have to fight to clear a section's maps: every item,
     every trainer, every corridor. One pseudo-battle each, so switching and the
@@ -779,6 +814,7 @@ def assign_hms(team, stage, level, badges, avail, opponents, starter,
 
     # ---- 4: last resort, someone gives up a move
     for mv in list(uncovered):
+        if mv not in uncovered: continue   # a prior swap already covered it
         cands = [m for m in team + extra if HM.can_learn(m.species, mv)]
         if not cands and len(team) + len(extra) >= MAX_TEAM:
             # A full party where nobody can even learn the move -- Silph Co.
@@ -826,7 +862,8 @@ def assign_hms(team, stage, level, badges, avail, opponents, starter,
             plan.append({"move": mv, "by": None, "species": None,
                          "how": "uncovered", "gave": None, "gaveBack": None,
                          "permanent": False})
-            uncovered.remove(mv); continue
+            if mv in uncovered: uncovered.remove(mv)
+            continue
         best, bestkey = None, None
         for m in cands:
             worst = min(m.moves, key=lambda x: drop_key(m, x, level, stage,
@@ -840,7 +877,7 @@ def assign_hms(team, stage, level, badges, avail, opponents, starter,
         plan.append({"move": mv, "by": m.name, "species": m.species,
                      "how": "sacrifice", "gave": E.MOVES[worst]["name"],
                      "gaveBack": why, "permanent": rank >= 3})
-        uncovered.remove(mv)
+        if mv in uncovered: uncovered.remove(mv)
 
     # whatever HMs the party now holds, it is stuck with until Fuchsia
     for m in team + extra:
@@ -1047,6 +1084,7 @@ def run_section(team, battles, badges, heal_after_idx, tm_value=None,
             m.leg_mark()
     log, total_turns, faints, failed = [], 0.0, 0, 0
     wild_turns = 0.0
+    wild_led = collections.Counter()   # species -> wild battles it walked point for
     leads = {}          # map -> the Pokemon you are walking around with
     # A "leg" is the stretch between two full heals. Cumulative counters are
     # snapshotted at every heal so the section can be reported leg by leg.
@@ -1076,6 +1114,7 @@ def run_section(team, battles, badges, heal_after_idx, tm_value=None,
             # One Pokemon walks the route and meets whatever the grass sends;
             # anything else has to be switched in at the usual price.
             active = pick_lead(have, enc, badges, leads)
+            if active is not None: wild_led[active.species] += 1
         else:
             active = None          # party order is free to set before a trainer
             trainers_seen += 1
@@ -1138,6 +1177,8 @@ def run_section(team, battles, badges, heal_after_idx, tm_value=None,
     if battles: mark(len(battles) - 1, None)
     hp_lost = sum(1.0 - (max(0.0, m.hp) / m.maxhp) for m in team) / max(1, len(team))
     return {"turns": total_turns, "wildTurns": wild_turns, "hpLost": hp_lost,
+            "wildLed": dict(wild_led),
+
             "faints": faints, "failed": failed, "log": log, "legMarks": marks,
             "ppLeft": min([min(m.pp.values()) / max(1, max(E.MOVES[x]["pp"] for x in m.moves))
                            for m in team], default=1.0),
@@ -1595,6 +1636,8 @@ def solve_section(stage, encs, starter, avail, tm_value=None, carry=None):
         "battles": len(trainer_battles),
         "noBattles": not trainer_battles,
         "wildBattles": len(wild_only),
+        "wildLead": (E.SPECIES[max(final["wildLed"], key=final["wildLed"].get)]["name"]
+                     if final.get("wildLed") else None),
         "wildTurns": round(final.get("wildTurns", 0.0), 1),
         "opposingMons": sum(len(e["_mons"]) for e in trainer_battles),
         "turns": round(final["turns"], 1),
@@ -1908,7 +1951,7 @@ if __name__ == "__main__":
     sections = build_sections(graph)
     avail = P.full_availability()
     print("estimating the walk...", flush=True)
-    wl = W.section_wild_load()
+    wl = route_wild_load()
     with open(f"{OUT}/wildLoad.json", "w") as f:
         json.dump({str(k): v for k, v in wl.items()}, f)
     WILD_LOAD.update({str(k): v for k, v in wl.items()})
