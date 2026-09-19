@@ -487,6 +487,11 @@ button{font:inherit;color:inherit}
 .wp-inline .wp-wrap{padding:0;gap:6px}
 .wp-inline .wp-tbl{font-size:11.5px}
 .wp-inline .wp-h .note{font-size:10.5px}
+.dex-evo{margin-top:6px}
+.dex-h{font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--accent);margin-bottom:4px}
+.dex-row{font-size:12.5px;padding:2px 0;line-height:1.4}
+.dex-row .num{margin-left:6px}
+.dex-note{display:block;font-size:11px;color:var(--warn);font-weight:600}
 .pt-role{font-size:9.5px;color:var(--ink-2);white-space:nowrap}
 .pt-mon .pt-mv{display:flex;flex-direction:column;gap:1px;flex:1;min-width:0}
 .pt-mon .pt-m{font-size:10px;color:var(--ink);white-space:nowrap;line-height:1.25;overflow:hidden;
@@ -1192,6 +1197,16 @@ document.getElementById("secPanel").addEventListener("click", ev => {
   }
 });
 
+function dexEvoHtml(d){
+  const de = (d && d.de) || [];
+  if (!de.length) return "";
+  return `<div class="dex-evo"><div class="dex-h">✦ Pokédex — you can now evolve for new entries</div>
+    ${de.map(r => {
+      const from=str(r[0]), to=str(r[1]), how=str(r[2]), note=str(r[3]||"");
+      return `<div class="dex-row"><b>${esc(from)}</b> → <b>${esc(to)}</b>
+        <span class="num">${esc(how)}</span>${note?`<span class="dex-note">${esc(note)}</span>`:""}</div>`;
+    }).join("")}</div>`;
+}
 function wildPlanHtml(d, onlyMap){
   let wp = (d && d.wp) || [];
   if (onlyMap) wp = wp.filter(w => str(w[0]) === onlyMap);
@@ -1528,6 +1543,10 @@ function renderSecPanel(id, leg){
       ${doneCount ? `<button class="hdone" aria-pressed="${HIDEDONE}">hide done (${doneCount})</button>` : ""}</div>
     ${listHtml}</section>`;
   html += wildPlanCard(d);
+  { const de = dexEvoHtml(d);
+    if (de) html += `<section class="card"><div class="card-h"><h2>Pokédex progress</h2>
+      <span class="note">evolutions that fill a new entry — do them next time you pass a Pokémon Center</span></div>
+      <div style="padding:6px 16px 14px">${de}</div></section>`; }
   html += prep;
 
   if (d.bench.length){
@@ -2258,6 +2277,9 @@ function renderPlay(){
     if (row) extra = vsBand(row);
     else if (node && node.stop && str(node.stop[0]) === "event")
       extra = tradeBand(str(node.stop[1]));
+    else if (node && node.stop && str(node.stop[0]) === "heal"){
+      extra = dexEvoHtml(ctx.d);
+    }
     else if (node){
       // walking a leg: show what the point Pokémon uses on THIS map's grass,
       // plus the catch odds when the stop is a catch
@@ -2391,9 +2413,17 @@ function renderPlayMap(ctx){
     else { bb.x0 = Math.min(bb.x0, px); bb.y0 = Math.min(bb.y0, py);
            bb.x1 = Math.max(bb.x1, px); bb.y1 = Math.max(bb.y1, py); }
   };
-  dim.forEach(c => { for (let i = 0; i < c.length; i += 2) grow(c[i], c[i + 1]); });
-  if (node.seg) for (let i = 0; i < node.seg.length; i += 2) grow(node.seg[i], node.seg[i + 1]);
-  (L.rt || []).forEach(st => { if (st[2] === node.map) grow(st[3], st[4]); });
+  // zoom onto the ACTIVE path — the gold stretch from where you are to the
+  // current stop — with the current pin, so the view frames where you're
+  // headed, not the whole leg. Fall back to the leg's path only when this
+  // step has no drawn approach (e.g. a bare transition node).
+  if (node.seg && node.seg.length >= 2){
+    for (let i = 0; i < node.seg.length; i += 2) grow(node.seg[i], node.seg[i + 1]);
+    if (node.stop && node.stop[2] === node.map) grow(node.stop[3], node.stop[4]);
+  } else {
+    dim.forEach(c => { for (let i = 0; i < c.length; i += 2) grow(c[i], c[i + 1]); });
+    (L.rt || []).forEach(st => { if (st[2] === node.map) grow(st[3], st[4]); });
+  }
   PLAY_BBOX = bb;
   fitPlayMap(W, H);
 }
@@ -2405,10 +2435,10 @@ function fitPlayMap(W, H){
   const fitAll = Math.min(availW / W, availH / H);
   let scale, cx = W / 2, cy = H / 2;
   if (PLAY_BBOX){
-    const M = 44;                       // breathing room around the route
+    const M = 40;                       // breathing room around the active path
     const bw = PLAY_BBOX.x1 - PLAY_BBOX.x0 + 2 * M,
           bh = PLAY_BBOX.y1 - PLAY_BBOX.y0 + 2 * M;
-    scale = Math.max(Math.min(availW / bw, availH / bh, 3), fitAll);
+    scale = Math.max(Math.min(availW / bw, availH / bh, 4), fitAll);
     cx = (PLAY_BBOX.x0 + PLAY_BBOX.x1) / 2;
     cy = (PLAY_BBOX.y0 + PLAY_BBOX.y1) / 2;
   } else scale = Math.min(fitAll, 2.5);

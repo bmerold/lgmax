@@ -928,6 +928,74 @@ def lead_cost(m, dist, badges):
              max(0.0, p["turns"] - (1.0 if faster else 0.0))
     return t, d
 
+_DEX_EVOS = None
+def dex_evolutions(avail):
+    """stage -> [rows] of caught Pokémon that first fill a new Pokédex entry by
+    EVOLUTION at that stage: level-ups the moment your level reaches them,
+    store-stone evolutions once Celadon opens, Moon-Stone ones flagged as
+    spending a scarce stone. Whenever you next pass a Pokémon Center (where you
+    could grind a level or use a stone), these are the entries within reach."""
+    global _DEX_EVOS
+    if _DEX_EVOS is not None: return _DEX_EVOS
+    STORE_STONES = {"ITEM_FIRE_STONE", "ITEM_WATER_STONE",
+                    "ITEM_THUNDER_STONE", "ITEM_LEAF_STONE"}
+    out = collections.defaultdict(list)
+    for tgt, rec in avail.items():
+        if rec.get("kind") != "evolution": continue
+        frm = rec.get("from"); meth = rec.get("evoMethod"); param = rec.get("evoParam")
+        fname = E.SPECIES[frm]["name"] if frm else "?"
+        tname = E.SPECIES[tgt]["name"]
+        if meth and meth.startswith("LEVEL"):
+            lv = param if isinstance(param, int) else None
+            how = f"level it to {lv}" if lv else "level it up"
+            note = None
+            # optional: a strong move the pre-evo learns a few levels before the
+            # evolved form, within a plausible playthrough window. Delaying trades
+            # evolved stats meanwhile, so it is framed as a choice, not advice.
+            if lv:
+                fl = {m2: l2 for l2, m2 in E.LEVELUP.get(frm, [])}
+                tl = {m2: l2 for l2, m2 in E.LEVELUP.get(tgt, [])}
+                best = None
+                for m2, lf in fl.items():
+                    if E.MOVES[m2]["power"] < 90: continue
+                    lt = tl.get(m2, 999)
+                    gap = lt - lf
+                    if lf > lv and 3 <= gap <= 12 and lf <= lv + 22:
+                        if best is None or gap > best[0]:
+                            best = (gap, E.MOVES[m2]["name"], lf, lt)
+                if best:
+                    g2, mvn, lf, lt = best
+                    note = (f"optional: {fname} learns {mvn} at L{lf}, "
+                            f"{g2} levels before {tname}"
+                            + (f" (which learns it at L{lt})" if lt < 999 else " (never, by level)")
+                            + " — delay the evolution only if you want it early")
+        elif meth == "ITEM":
+            stn = E.ITEMS.get(param, {}).get("name", param)
+            buy = " (buy at Celadon)" if param in STORE_STONES else ""
+            how = f"use a {stn}{buy}"
+            note = ("only 4 in the game — save them for the evolutions you'll keep"
+                    if param == "ITEM_MOON_STONE" else None)
+            # if the evolved form learns nothing more by level, warn to delay
+            keep = [E.MOVES[mv2]["name"] for lv2, mv2 in E.LEVELUP.get(tgt, [])
+                    if lv2 > 1 and E.MOVES[mv2]["power"] >= 40]
+            if not keep:
+                pre = sorted({mv2 for lv2, mv2 in E.LEVELUP.get(frm, [])
+                              if E.MOVES[mv2]["power"] >= 40}, key=lambda x: x)
+                pre_names = [E.MOVES[x]["name"] for x in
+                             sorted({m2 for l2, m2 in E.LEVELUP.get(frm, [])
+                                     if E.MOVES[m2]["power"] >= 40})][:3]
+                warn = (f"{tname} learns nothing more by level — teach {fname} its "
+                        f"level-up moves ({', '.join(pre_names)}) BEFORE using the stone")
+                note = (note + " · " + warn) if note else warn
+        elif meth == "FRIENDSHIP":
+            how = "raise its friendship"; note = "needs the National Dex (post-Elite Four)"
+        else:
+            continue                              # trades / trade-items: handled as their own stops
+        out[rec["stage"]].append({"from": fname, "to": tname, "how": how, "note": note})
+    for st in out: out[st].sort(key=lambda r: r["to"])
+    _DEX_EVOS = dict(out)
+    return _DEX_EVOS
+
 def wild_plan(team, stage, badges):
     """For each map the section walks, the point Pokémon and how it answers
     each wild species in the grass: the move, expected turns, and damage.
@@ -1345,14 +1413,14 @@ def build_party_plans(per_stage, avail):
     for i, st in enumerate(ids):
         sec = per_stage[st]
         if not sec: continue
-        plan, seen = [], set()
+        plan, seen, lines = [], set(), set()
         for m in sec["team"]:
             used = sum(mv["used"] for mv in m["moves"])
             hms = [mv["name"] for mv in m["moves"] if mv["name"] in hm_names]
             plan.append({"species": m["species"], "name": m["name"],
                          "level": m["level"], "hms": hms,
                          "role": "hm" if hms and used == 0 else "fight"})
-            seen.add(m["species"])
+            seen.add(m["species"]); lines.add(C.line_root(m["species"]))
         for st2 in ids[i + 1:]:
             if len(plan) >= 6: break
             sec2 = per_stage[st2]
@@ -1365,8 +1433,11 @@ def build_party_plans(per_stage, avail):
                 form = sp
                 while form and avail.get(form, {}).get("stage", 99) > st:
                     form = _pre_evo(form)
+                # never fill with a Pokémon already on the plan by evolution
+                # line -- no Kadabra beside its own Alakazam
                 if not form or form in seen or sp in seen: continue
-                seen.add(sp); seen.add(form)
+                if C.line_root(form) in lines: continue
+                seen.add(sp); seen.add(form); lines.add(C.line_root(form))
                 plan.append({"species": form, "name": E.SPECIES[form]["name"],
                              "level": m2["level"], "hms": [],
                              "role": "next", "nextStage": st2,
@@ -1672,6 +1743,7 @@ def solve_section(stage, encs, starter, avail, tm_value=None, carry=None):
         "wildLead": (E.SPECIES[max(final["wildLed"], key=final["wildLed"].get)]["name"]
                      if final.get("wildLed") else None),
         "wildPlan": wild_plan(final["team"], stage, badges),
+        "dexEvos": dex_evolutions(avail).get(stage, []),
         "wildTurns": round(final.get("wildTurns", 0.0), 1),
         "opposingMons": sum(len(e["_mons"]) for e in trainer_battles),
         "turns": round(final["turns"], 1),

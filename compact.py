@@ -355,6 +355,8 @@ def main():
                 "lv": sec["level"], "bg": sec["badges"], "b": sec["battles"],
                 "wb": sec.get("wildBattles", 0), "wt": sec.get("wildTurns", 0),
                 "wl": S(sec.get("wildLead")),
+                "de": [[S(r["from"]), S(r["to"]), S(r["how"]), S(r.get("note"))]
+                       for r in sec.get("dexEvos", [])],
                 "wp": [[S(w["map"]), S(w["lead"]), w["battles"],
                         [[S(r["name"]), r["level"], r["share"], S(r["by"]),
                           r["turns"], r["dmg"], r["hp"],
