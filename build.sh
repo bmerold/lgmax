@@ -29,4 +29,4 @@ open("app.html", "w").write(tpl.replace("__PAYLOAD__", open("data/payload.json")
 print("app.html written")
 PY
 
-python3 verify.py       # 27 guard rails; all must pass
+python3 verify.py       # guard rails; all must pass

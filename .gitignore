@@ -6,6 +6,7 @@ PIPELINE_DONE
 
 # Scratch
 .idea/
+.wrangler/
 __pycache__/
 *.pyc
 node_modules/

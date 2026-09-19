@@ -10,7 +10,7 @@ the working contract for changing the code.
    trainer parties, encounter tables, map geometry, item scripts, mechanics — all parsed from
    `$LGMAX_POKEFIRERED` (default `~/pokefirered`). If the ROM disagrees with received wisdom, the
    ROM wins, and a comment should cite the source file (e.g. `src/data/…` or a map's `scripts.inc`).
-2. **`verify.py` is the safety net — it must print all OKs after every rebuild.** It encodes 38
+2. **`verify.py` is the safety net — it must print all OKs after every rebuild.** It encodes 42
    executable invariants (route coverage/continuity, no illegal party, sight-line/aggro legality,
    move/TM legality, Moon-Stone accounting, …). A new guard is the right way to lock in any bug a
    playthrough uncovers. Never weaken a guard to make it pass; fix the cause.
@@ -45,6 +45,14 @@ JSON in `data/`. `tour.py` runs before `sections.py`, so `sections.py` may read 
   function, and the `assign_hms` loop mutates a shared `uncovered` list — guard every `.remove`.
 - **`app_template.html` is authored, not generated.** `app.html`/`data/` are build outputs and are
   gitignored; commit source (`app_template.html`, the `.py` files), never the built artifacts.
+- **Abilities: `abilities.py` is the registry; `engine.base_damage` owns the stat mults.** Every
+  ability is a function in `abilities.py`, and the engine reads its effects through consumer helpers
+  (`negates_damage`, `blocks_crit`, `accuracy_mult`, `immune_to_status`, …). The order-sensitive
+  CalculateBaseDamage Attack/Defense mults (Huge/Pure Power, Hustle, Guts, Marvel Scale, Thick Fat,
+  the Overgrow line) stay transcribed inline in `base_damage` — do **not** also route them through a
+  helper, or they double-apply. New ability effect that fits the 1v1 model → add a consumer helper
+  and call it from the engine; effect outside the model → still give the ability a documented
+  `unmodeled` descriptor so the registry stays complete (`verify.py` checks that).
 - **The sync bundle shape is a second cross-file contract.** `app_template.html`'s `syncBundle`
   (`{v, done, play, starter, trading, ts}`) and `sync/worker.js`'s `merge` must agree. The rules
   that keep two devices from clobbering each other: `done` is always **unioned**, `play`/`starter`/

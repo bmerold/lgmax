@@ -20,7 +20,7 @@ export LGMAX_POKEFIRERED=~/pokefirered      # optional; this is the default
 ```
 
 Python 3.10+, no third-party packages. Takes 6–8 minutes; `build.sh` runs the whole pipeline and
-finishes with `verify.py`, which must print 38 OKs. The output is `app.html` — one self-contained
+finishes with `verify.py`, which must print 42 OKs. The output is `app.html` — one self-contained
 file, ~10 MB, no server needed.
 
 `./deploy.sh` publishes the current `app.html` to
@@ -56,6 +56,7 @@ them.
 |---|---|
 | `extract.py` | decomp → normalized JSON in `data/` |
 | `engine.py` | Gen 3 stat + damage engine, trainer party realization, the turn DP, obedience |
+| `abilities.py` | every Gen 3 ability as a function; damage immunities, crit block, accuracy and status immunities the engine consults |
 | `progression.py` | 35-section story model, map→section gating, species availability |
 | `build_graph.py` | encounter graph, TM/HM availability by section |
 | `route_order.py` | the order you actually meet trainers, from map geometry |
@@ -69,7 +70,7 @@ them.
 | `render_maps.py` | renders each section's maps to PNG from the decomp's tilesets/layouts, and pins every trainer to the tile its object event stands on |
 | `sections.py` | two-pass per-section party optimizer + choice evaluation |
 | `compact.py` | array-encoded payload (~25 MB → ~5 MB) |
-| `verify.py` | **38 guard rails; all must pass after every rebuild** |
+| `verify.py` | **42 guard rails; all must pass after every rebuild** |
 | `setup_study.py` | standalone: does setting up beat hit-and-switch? (it does not) |
 
 `sections.py` runs before `optimize.py` because it writes `data/commitments.json`, which the
@@ -105,6 +106,14 @@ See `docs/` for the working notes behind each of these.
   (only when faster), freeze with its 20% thaw, paralysis's 25% full-para, burn's attack halving
   and chip, poison chip, and confusion. Deliberate status *moves* (Thunder Wave, Sleep Powder)
   are still not used or faced — the plan and the modeled AI both throw damage. No held items.
+- Abilities are modeled where they touch a 1v1 damage/turn calc: type immunities and absorptions
+  (Levitate, Volt/Water Absorb, Flash Fire, Wonder Guard, Soundproof), crit prevention (Battle/Shell
+  Armor), accuracy (Compound Eyes, Hustle), the CalculateBaseDamage stat mults (Huge/Pure Power,
+  Guts, Thick Fat, Marvel Scale, the Overgrow line) and status immunities (Limber, Insomnia, Inner
+  Focus, …). `abilities.py` implements every Gen 3 ability as a function; the ones that live outside
+  this model — weather (Drizzle, Swift Swim), switch-in tricks (Intimidate, Trace), contact effects
+  (Static, Flame Body), PP Pressure — are present and documented but not simulated. Lightning Rod is
+  correctly a no-op in single battles (Gen 3 redirects only in doubles).
 - Thrash, Outrage and Petal Dance are never recommended: the 2–3-turn lock-in and the confusion
   after are not modeled, and a plan can't steer a move that refuses orders.
 - Trainer AI is "their single best damaging move", close to but not identical to

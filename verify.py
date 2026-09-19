@@ -480,6 +480,41 @@ for run, per_stage in raw["sections"].items():
 check("no run spends more copies of a single-use TM than it holds",
       not _over, str(_over[:4]))
 
+# ------------------------------------------------------------------ abilities
+# Every ability the ROM defines must have a function, or the engine is silently
+# treating an unknown ability as no-op. Parsed straight from the decomp header.
+import abilities as AB
+check("every ROM ability has an implementation",
+      set(AB.ABILITY_NAMES) == set(AB.ABILITIES),
+      str(sorted(set(AB.ABILITY_NAMES) ^ set(AB.ABILITIES))[:6]))
+
+# The damage-negating abilities must actually zero a move — and Gen 3's
+# Lightning Rod must NOT (it only redirects in doubles). Locks the mechanics so
+# a future refactor can't quietly drop an immunity or invent one.
+_neg = AB.negates_damage
+_ability_cases = [
+    ("Levitate negates Ground", _neg("LEVITATE", "GROUND", 100, "MOVE_EARTHQUAKE", 2.0), True),
+    ("Levitate ignores Water", _neg("LEVITATE", "WATER", 100, "MOVE_SURF", 1.0), False),
+    ("Volt Absorb negates Electric", _neg("VOLT_ABSORB", "ELECTRIC", 90, "MOVE_THUNDERBOLT", 1.0), True),
+    ("Water Absorb negates Water", _neg("WATER_ABSORB", "WATER", 80, "MOVE_SURF", 1.0), True),
+    ("Flash Fire negates Fire", _neg("FLASH_FIRE", "FIRE", 95, "MOVE_FLAMETHROWER", 1.0), True),
+    ("Wonder Guard negates non-super", _neg("WONDER_GUARD", "NORMAL", 80, "MOVE_TACKLE", 1.0), True),
+    ("Wonder Guard allows super", _neg("WONDER_GUARD", "FIRE", 80, "MOVE_EMBER", 2.0), False),
+    ("Lightning Rod is no-op in 1v1", _neg("LIGHTNING_ROD", "ELECTRIC", 90, "MOVE_THUNDERBOLT", 1.0), False),
+]
+_bad = [n for n, got, want in _ability_cases if got != want]
+check("damage-immunity abilities behave as the ROM does", not _bad, str(_bad))
+check("Battle/Shell Armor block crits, others don't",
+      AB.blocks_crit("BATTLE_ARMOR") and AB.blocks_crit("SHELL_ARMOR")
+      and not AB.blocks_crit("NONE"))
+
+# A status-immunity ability must actually spare its status in the tempo model:
+# Body Slam can't slow a Limber mon, Bite can't make Inner Focus flinch.
+check("status-immunity abilities neutralize the matching secondary",
+      E.status_tempo("MOVE_BODY_SLAM", True, 4, def_ability="LIMBER")[0] == 1.0
+      and E.status_tempo("MOVE_BITE", True, 4, def_ability="INNER_FOCUS")[0] == 1.0
+      and E.status_tempo("MOVE_BODY_SLAM", True, 4, def_ability="NONE")[0] < 1.0)
+
 # ------------------------------------------------------------------ graph sanity
 graph = json.load(open(f"{OUT}/encounters.json"))
 ids = [e["id"] for e in graph]

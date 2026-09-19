@@ -1101,10 +1101,12 @@ def plan_vs(team, opp, badges, active, terrain=None):
         # secondary-effect tempo, both directions: our flinch/freeze/paralysis
         # cuts the opponent's acting turns and burn/poison chips it down; its
         # own status moves stretch our clock and add residual damage to us
-        act, burnf, chip = E.status_tempo(p["move"], faster, t, terrain)
+        act, burnf, chip = E.status_tempo(p["move"], faster, t, terrain,
+            def_ability=opp.get("ability", "NONE"), atk_ability=m.mon.get("ability", "NONE"))
         t_me, chip_in = t, 0.0
         if thr.get("const"):
-            a2, b2, c2 = E.status_tempo(thr["const"], not faster, t, terrain)
+            a2, b2, c2 = E.status_tempo(thr["const"], not faster, t, terrain,
+                def_ability=m.mon.get("ability", "NONE"), atk_ability=opp.get("ability", "NONE"))
             t_me = t / max(a2, 0.25)
             if b2 > 0 and E.MOVES[p["move"]]["category"] == "PHYSICAL":
                 t_me /= max(1e-6, 1.0 - 0.5 * b2)

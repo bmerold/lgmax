@@ -150,15 +150,20 @@ def scalar_damage(attacker, defender, move_const, badges):
     if eff == "SONICBOOM": return 20.0
     if eff in E.LEVEL_DAMAGE_EFFECTS: return float(attacker["level"])
     if eff == "SUPER_FANG": return defender["stats"]["hp"] / 2.0
-    mult = E.type_mult(E.move_type_for(attacker, move_const), defender["types"])
+    mtype = E.move_type_for(attacker, move_const)
+    mult = E.type_mult(mtype, defender["types"])
     if mult == 0: return 0.0
+    # A defender ability can negate the move outright (Levitate, Volt/Water
+    # Absorb, Flash Fire, Wonder Guard, Soundproof) — same check the full path uses.
+    if E.A.negates_damage(defender.get("ability", "NONE"), mtype, m["power"], move_const, mult):
+        return 0.0
     d = E.base_damage(attacker, defender, move_const, False,
                       badges.get("atk", False), badges.get("def", False),
                       badges.get("spatk", False), badges.get("spdef", False))
     if d <= 0: return 0.0
-    if E.move_type_for(attacker, move_const) in attacker["types"]: d = d * 15 // 10
+    if mtype in attacker["types"]: d = d * 15 // 10
     d = d * mult
-    cc = E.crit_chance(move_const)
+    cc = E.crit_chance(move_const, defender.get("ability", "NONE"))
     d = d * (1 + cc)                       # crits double, so mean scales by 1+p
     hits = E.MULTI_HIT_EFFECTS.get(eff, 1.0)
     tpu = 2.0 if eff in E.CHARGE_EFFECTS or eff in E.RECHARGE_EFFECTS else 1.0
@@ -168,7 +173,14 @@ def best_scalar(attacker, defender, pool, badges):
     best, bmv = 0.0, None
     for mv in pool:
         m = E.MOVES[mv]
-        acc = (m["accuracy"] or 100) / 100.0
+        # accuracy-checked moves are scaled by the attacker's ability (Compound
+        # Eyes, Hustle); never-miss moves (accuracy 0/None) always connect.
+        if m["accuracy"]:
+            physical = E.move_type_for(attacker, mv) in E.PHYSICAL_TYPES
+            acc = min(100, round(m["accuracy"] *
+                      E.A.accuracy_mult(attacker.get("ability", "NONE"), physical))) / 100.0
+        else:
+            acc = 1.0
         v = scalar_damage(attacker, defender, mv, badges) * acc
         if v > best: best, bmv = v, mv
     return best, bmv
@@ -219,10 +231,12 @@ def sweep(player, opp_mons, pool, badges, stage, terrain=None):
         faster = player["stats"]["speed"] > opp["stats"]["speed"]
         # fold secondary-effect tempo both ways (flinch, freeze, paralysis,
         # burn, poison, confusion), exactly as the section simulator does
-        act, burnf, chip = E.status_tempo(off["move"], faster, t, terrain)
+        act, burnf, chip = E.status_tempo(off["move"], faster, t, terrain,
+            def_ability=opp.get("ability", "NONE"), atk_ability=player.get("ability", "NONE"))
         chip_in = 0.0
         if thr:
-            a2, b2, c2 = E.status_tempo(thr["move"], not faster, t, terrain)
+            a2, b2, c2 = E.status_tempo(thr["move"], not faster, t, terrain,
+                def_ability=player.get("ability", "NONE"), atk_ability=opp.get("ability", "NONE"))
             t = t / max(a2, 0.25)
             if b2 > 0 and E.MOVES[off["move"]]["category"] == "PHYSICAL":
                 t /= max(1e-6, 1.0 - 0.5 * b2)

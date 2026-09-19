@@ -8,6 +8,7 @@ Every formula here is transcribed from the pokefirered decompilation:
 """
 import json, os, re
 from functools import lru_cache
+import abilities as A
 
 DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 # Path to a checkout of the pret/pokefirered decompilation -- the single source
@@ -206,7 +207,9 @@ HIGH_CRIT_MOVES = {"MOVE_CRABHAMMER","MOVE_KARATE_CHOP","MOVE_RAZOR_LEAF","MOVE_
                    "MOVE_AEROBLAST","MOVE_CROSS_CHOP","MOVE_LEAF_BLADE","MOVE_SKY_ATTACK",
                    "MOVE_BLAZE_KICK","MOVE_POISON_TAIL"}
 
-def crit_chance(move_const):
+def crit_chance(move_const, def_ability="NONE"):
+    # Battle Armor / Shell Armor on the target refuse the crit roll entirely.
+    if A.blocks_crit(def_ability): return 0.0
     return 1/8 if (move_const in HIGH_CRIT_MOVES or
                    MOVES[move_const]["effect"] in HIGH_CRIT_EFFECTS) else 1/16
 
@@ -239,13 +242,24 @@ RECHARGE_EFFECTS = {"RECHARGE"}
 # lasting 1-4 turns. One major status per target, they don't stack.
 TEMPO_EFFECTS = {"FLINCH_HIT", "FREEZE_HIT", "PARALYZE_HIT", "BURN_HIT",
                  "POISON_HIT", "CONFUSE_HIT", "TWINEEDLE", "POISON_FANG"}
-def status_tempo(move_const, attacker_faster, turns, terrain=None):
+# The status a damaging move's secondary inflicts, so an ability can refuse it.
+_TEMPO_STATUS = {"FREEZE_HIT": "freeze", "PARALYZE_HIT": "paralysis",
+                 "BURN_HIT": "burn", "POISON_HIT": "poison", "TWINEEDLE": "poison",
+                 "POISON_FANG": "poison", "CONFUSE_HIT": "confusion",
+                 "FLINCH_HIT": "flinch", "SLEEP_HIT": "sleep"}
+
+def status_tempo(move_const, attacker_faster, turns, terrain=None,
+                 def_ability="NONE", atk_ability="NONE"):
     """-> (act, burn, chip): the fraction of its turns the defender actually
     gets to act, the average probability it sits burned (physical attack
     halved), and its expected residual damage per turn as a fraction of its
     max HP. A tiny EV walk over the fight's length -- no state machine.
     Secret Power's secondary is the arena's: paralysis on plain ground and
-    indoors, flinch in caves, poison in grass, sleep in long grass."""
+    indoors, flinch in caves, poison in grass, sleep in long grass.
+
+    Abilities: Serene Grace (attacker) doubles the odds, Shield Dust (defender)
+    blocks them, a matching immunity (Limber, Insomnia, Inner Focus, …) refuses
+    the status outright, and Early Bird (defender) clears sleep faster."""
     m = MOVES.get(move_const) or {}
     eff = m.get("effect")
     if eff == "SECRET_POWER":
@@ -255,27 +269,37 @@ def status_tempo(move_const, attacker_faster, turns, terrain=None):
         if eff is None:                # water/sand arenas: a stat drop we don't model
             return 1.0, 0.0, 0.0
     p = (m.get("secondaryChance") or 0) / 100.0 * ((m.get("accuracy") or 100) / 100.0)
+    # Serene Grace ×2 / Shield Dust ×0 on the added-effect chance.
+    p = min(1.0, p * A.secondary_scale(atk_ability, def_ability))
     if (eff not in TEMPO_EFFECTS and eff != "SLEEP_HIT") or p <= 0:
         return 1.0, 0.0, 0.0
+    # An ability can make the defender flat-out immune to this status.
+    if A.immune_to_status(def_ability, _TEMPO_STATUS.get(eff, "")):
+        return 1.0, 0.0, 0.0
+    # Early Bird clears sleep about twice as fast -> a steeper per-turn decay.
+    sleep_decay = 0.8 ** A.sleep_wake_mult(def_ability)
     T = max(1, min(int(turns + 0.999), 10))
     frozen = para = burn = psn = conf = 0.0
     acts = burn_avg = chip = 0.0
     for _ in range(T):
         healthy = max(0.0, 1.0 - frozen - para - burn - psn)
+        decay = 0.8
         if eff == "FREEZE_HIT":     frozen += healthy * p
         elif eff == "PARALYZE_HIT": para += healthy * p
         elif eff == "BURN_HIT":     burn += healthy * p
         elif eff in ("POISON_HIT", "TWINEEDLE", "POISON_FANG"):
             psn += healthy * p
         elif eff == "CONFUSE_HIT":  conf = min(1.0, conf + (1.0 - conf) * p)
-        elif eff == "SLEEP_HIT":    frozen += healthy * p   # sleeps like a freeze walk
+        elif eff == "SLEEP_HIT":
+            frozen += healthy * p     # sleeps like a freeze walk
+            decay = sleep_decay
         act = (1.0 - frozen) * (1.0 - 0.25 * para) * (1.0 - 0.5 * conf)
         if eff == "FLINCH_HIT" and attacker_faster:
             act *= (1.0 - p)
         acts += act
         burn_avg += burn
         chip += (burn + psn) * 0.125
-        frozen *= 0.8
+        frozen *= decay
         conf *= 0.6
     return acts / T, burn_avg / T, chip / T
 
@@ -374,7 +398,7 @@ def base_damage(attacker, defender, move_const, crit=False,
         spatk *= 2
     if item == "ITEM_THICK_CLUB" and attacker["species"] in ("SPECIES_CUBONE", "SPECIES_MAROWAK"):
         attack *= 2
-    if dab == "THICK_FAT" and mtype in ("FIRE", "ICE"):
+    if A.halves_foe_special(dab, mtype):   # Thick Fat: incoming Fire/Ice
         spatk //= 2
     if ab == "HUSTLE":
         attack = (150 * attack) // 100
@@ -415,6 +439,12 @@ def damage_rolls(attacker, defender, move_const, crit=False, badges=None):
     returned as a list of 16 integers."""
     mv = MOVES[move_const]
     eff = mv["effect"]
+    # A defender ability can zero the move before any damage math: Levitate
+    # (Ground), Volt/Water Absorb, Flash Fire, Wonder Guard, Soundproof.
+    mt = move_type_for(attacker, move_const)
+    if A.negates_damage(defender.get("ability", "NONE"), mt, mv["power"],
+                        move_const, type_mult(mt, defender["types"])):
+        return [0] * 16
     if eff in FIXED_DAMAGE_EFFECTS: return [FIXED_DAMAGE_EFFECTS[eff]] * 16
     if eff in LEVEL_DAMAGE_EFFECTS: return [attacker["level"]] * 16
     if eff == "SUPER_FANG":
@@ -455,7 +485,11 @@ def move_profile(attacker, defender, move_const, badges=None):
         return None
     mtype = move_type_for(attacker, move_const)
     eff_mult = type_mult(mtype, defender["types"])
-    if eff_mult == 0 and mv["effect"] not in special:
+    # A defender ability (Levitate, Volt/Water Absorb, Flash Fire, Wonder Guard,
+    # Soundproof) can make the move do nothing even when the type chart doesn't.
+    negated = A.negates_damage(defender.get("ability", "NONE"), mtype,
+                               mv["power"], move_const, eff_mult)
+    if (eff_mult == 0 or negated) and mv["effect"] not in special:
         return {"move": move_const, "name": mv["name"], "immune": True,
                 "avg": 0.0, "avgNoCrit": 0.0, "avgPerTurn": 0.0,
                 "min": 0, "max": 0, "critMin": 0, "critMax": 0,
@@ -465,14 +499,22 @@ def move_profile(attacker, defender, move_const, badges=None):
 
     normal = damage_rolls(attacker, defender, move_const, False, badges)
     crits  = damage_rolls(attacker, defender, move_const, True, badges)
-    cc = crit_chance(move_const)
+    cc = crit_chance(move_const, defender.get("ability", "NONE"))
     hits = MULTI_HIT_EFFECTS.get(mv["effect"], 1.0)
 
     dist = {}
     for v in normal: dist[int(v * hits)] = dist.get(int(v * hits), 0) + (1 - cc) / 16
     for v in crits:  dist[int(v * hits)] = dist.get(int(v * hits), 0) + cc / 16
 
-    acc = mv["accuracy"] if mv["accuracy"] else 100
+    # Never-miss moves (accuracy 0/None) skip the accuracy roll, so no ability
+    # touches them; a real accuracy is scaled by the attacker's ability
+    # (Compound Eyes ×1.3, Hustle ×0.8 on physical), then capped at always-hit.
+    base_acc = mv["accuracy"]
+    if base_acc:
+        physical = mtype in PHYSICAL_TYPES
+        acc = min(100, round(base_acc * A.accuracy_mult(attacker.get("ability", "NONE"), physical)))
+    else:
+        acc = 100
     avg = sum(k * p for k, p in dist.items())
     nc = [int(v * hits) for v in normal]
     cr = [int(v * hits) for v in crits]
