@@ -101,6 +101,14 @@ EVENTS = [
 # In-game trades (src/data/ingame_trades.h), each at the building it lives in.
 # (received, given, stage, map, give-instruction). The stage is the first at
 # which the building is open AND you can hold the requested Pokémon.
+# each trade's NPC script label, so the stop pins on the trader, not the door
+INGAME_TRADE_NPC = {
+    "Route2_House": "Reyley", "CeruleanCity_House3": "Dontae",
+    "VermilionCity_House2": "Elyssa", "Route11_EastEntrance_2F": "Turner",
+    "Route18_EastEntrance_2F": "Haden", "UndergroundPath_NorthEntrance": "Saige",
+    "CinnabarIsland_PokemonLab_Lounge": "Clifton",
+    "CinnabarIsland_PokemonLab_ExperimentRoom": "Garett",
+}
 INGAME_TRADE_STOPS = [
     ("Mr. Mime", "Abra",       13, "Route2_House",
      "Trade an Abra for Mr. Mime — the ONLY Mr. Mime in LeafGreen. Catch a "
@@ -129,7 +137,8 @@ INGAME_TRADE_STOPS = [
      "Islands) to give — Seel is also catchable in the Seafoam Islands."),
 ]
 for _got, _give, _st, _map, _note in INGAME_TRADE_STOPS:
-    EVENTS.append((f"Trade for {_got} (give {_give})", _map, _st))
+    EVENTS.append((f"Trade for {_got} (give {_give})", _map, _st,
+                   INGAME_TRADE_NPC.get(_map)))
 
 # Story precedence inside a stage: the fetch has to happen before the stop
 # that spends it, even when the TSP would rather swing by the other way.
@@ -641,7 +650,7 @@ def apply_dig(steps, stage, start_pos):
             gain = walk_in - DIG_COST
             if same_mouth and gain > 15:
                 dest = path[-1]
-                p2 = WD.path_between(escape_at, dest, stage)
+                p2 = WD.draw_path(escape_at, dest, stage)
                 if p2:
                     new_walk = DIG_COST + len(p2) - 1
                     if new_walk < s["walk"]:
@@ -741,8 +750,8 @@ def insert_heal(steps, stage, start_pos, fought_in):
                                   steps[k-1]["at"][0], steps[k-1]["at"][1])
     a = WD.reach_tile(a, stage)
     b = WD.reach_tile((s["map"], s["at"][0], s["at"][1]), stage)
-    p1 = WD.path_between(a, door, stage)
-    p2 = WD.path_between(door, b, stage)
+    p1 = WD.draw_path(a, door, stage)
+    p2 = WD.draw_path(door, b, stage)
     if not p1 or not p2: return 0
     # the heal is its own stop, so the guide can say "heal here" out loud
     steps.insert(k, {
@@ -842,7 +851,7 @@ def solve(max_stage=34, verbose=True):
                 if flew:
                     path = WD.walk_back(cparent, tgt)   # from the landing Center
                 else:
-                    path = WD.path_between(cur2, tgt, stage) or [cur2, tgt]
+                    path = WD.draw_path(cur2, tgt, stage) or [cur2, tgt]
                 step = {"kind": n["kind"], "what": n["what"],
                         "map": n["map"], "at": [n["x"], n["y"]],
                         "walk": int(mat[prev_idx][oi]),

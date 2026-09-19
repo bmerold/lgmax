@@ -618,7 +618,7 @@ details.notes[open] summary::after{content:"−"}
     <div id="playTop">
       <button id="playPrev" title="previous step (←)">‹</button>
       <div id="playObj"></div>
-      <button id="playNext" title="marks this step done and moves on (→)">next ›</button>
+      <button id="playNext" title="next step (→) — tick the checkbox to mark it done">next ›</button>
       <button id="playOutlineBtn" title="the whole journey">▤ journey</button>
     </div>
     <div id="playDesc" hidden></div>
@@ -2464,10 +2464,8 @@ function vsBand(row){
 function playAdvance(dir){
   const ctx = playCtx();
   if (!ctx) return;
-  if (dir > 0 && ctx.node && ctx.node.stop){
-    const key = stopKey(ctx.node.stop);
-    if (!DONE.has(key)){ DONE.add(key); saveDone(); renderSecList(); }
-  }
+  // advancing does NOT tick the step -- the checkbox is the only way to
+  // mark progress, so "next" is free to use as a pager
   let n = PLAY.node + dir;
   if (n >= ctx.nodes.length || n < 0){
     const order = legOrder();
