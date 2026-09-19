@@ -260,6 +260,24 @@ def base_availability():
         _record(avail, sp, stage, f"In-game trade for {E.SPECIES[want]['name']} ({where})", "ingame_trade")
     return avail
 
+# National Dex number per species, parsed from the decomp's pokedex order.
+# In FRLG a Kanto Pokémon whose evolution lands OUTSIDE the Kanto dex (#152+)
+# cannot evolve until Prof. Oak upgrades the Pokédex to National after the
+# Elite Four -- so Crobat, Blissey and the like are post-game.
+NATIONAL_DEX_STAGE = 32     # you have the National Dex once the League is beaten
+import re as _re
+def _national_dex():
+    txt = open(f"{__import__('engine').REPO}/include/constants/pokedex.h").read()
+    m = _re.search(r"enum\s*\{(.*?)\}", txt, _re.S)
+    out, n = {}, 0
+    for line in m.group(1).splitlines():
+        t = line.split("//")[0].strip().rstrip(",")
+        if t.startswith("NATIONAL_DEX_"):
+            out["SPECIES_" + t[len("NATIONAL_DEX_"):]] = n
+            n += 1
+    return out
+NAT_DEX = _national_dex()
+
 def full_availability():
     """Propagate evolutions forward. Returns species -> record with the earliest
     stage the player could actually have that species in hand."""
@@ -311,6 +329,11 @@ def full_availability():
                 else:
                     continue
                 if stage is None: continue
+                # cross-generation evolutions wait for the National Dex
+                if NAT_DEX.get(tgt, 0) > 151:
+                    stage = max(stage, NATIONAL_DEX_STAGE)
+                    note = (note or f"Evolve {E.SPECIES[src]['name']}") + \
+                           " — needs the National Dex (post-Elite Four)"
                 cur = avail.get(tgt)
                 if cur is None or stage < cur["stage"]:
                     avail[tgt] = {"stage": stage, "source": note, "kind": "evolution",

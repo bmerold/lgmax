@@ -83,6 +83,8 @@ encounter rankings read so the two agree about the run's one-time choices.
 - **An HM cannot be overwritten** — the Move Deleter in Fuchsia is the only way out of the slot, so
   HMs taught before then stay stuck.
 - **The Move Maniac on Two Island relearns level-up moves only**, for a Big Mushroom.
+- **A Kanto Pokémon whose evolution is a Johto-or-later form** (Crobat, Blissey…) cannot evolve
+  until Prof. Oak upgrades the Pokédex to National after the Elite Four — the model gates them there.
 - **All four trade-evolution items** (Metal Coat, Dragon Scale, King's Rock, Up-Grade) are
   post-game Sevii item balls, so Porygon2, Steelix, Kingdra, Politoed and Slowking are post-game.
 - **Route 3 does not touch Mt. Moon** — it runs up into the west end of Route 4, where both the
