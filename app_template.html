@@ -839,7 +839,7 @@ let query = "";
    Worker's KV store; opt-in and additive — the app works with none of it).
    PROGRESS_TS is the last local change time, used to decide whose play
    position wins when two devices differ; the done-list is always unioned. */
-const SYNC_ENDPOINT_DEFAULT = "";  /* baked-in Worker URL; empty until deployed */
+const SYNC_ENDPOINT_DEFAULT = "https://lgmax-sync.bmerold.workers.dev";  /* deployed sync Worker */
 let SYNC_ENDPOINT = SYNC_ENDPOINT_DEFAULT, SYNC_KEY = "", PROGRESS_TS = 0;
 try {
   SYNC_ENDPOINT = localStorage.getItem("lgmax-sync-url") || SYNC_ENDPOINT_DEFAULT;
