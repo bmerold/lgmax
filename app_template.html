@@ -471,6 +471,7 @@ button{font:inherit;color:inherit}
 .pt-tag{font-size:8px;font-weight:700;letter-spacing:.06em;color:#fff;
   background:var(--ink-2);border-radius:0;padding:1px 4px;margin-top:1px}
 .pt-tag.nxt{background:var(--accent)}
+.pt-tag.fightlead{background:var(--bad);color:#fff;font-size:8px;font-weight:800;letter-spacing:.06em;padding:1px 5px}
 .pt-tag.lead{background:var(--warn);border:0;cursor:pointer;font-family:inherit;
   color:#fff;font-size:8px;font-weight:800;letter-spacing:.06em;padding:1px 5px}
 .pt-tag.lead:hover{filter:brightness(1.1)}
@@ -2297,6 +2298,15 @@ function renderPlay(){
   dEl.hidden = !descHtml;
   dEl.innerHTML = descHtml;
 
+  ctx._fightLead = ""; ctx._wildLead = ""; ctx._wildMap = "";
+  if (row){
+    const cnt = {};
+    row[4].forEach(x => { const by = str(x[2]); if (by) cnt[by] = (cnt[by] || 0) + 1; });
+    ctx._fightLead = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a])[0] || "";
+  } else if (node && node.map){
+    const w = ((ctx.d && ctx.d.wp) || []).find(x => str(x[0]) === node.map);
+    if (w){ ctx._wildLead = str(w[1]); ctx._wildMap = prettyMap(node.map); }
+  }
   renderPlayTeam(ctx);
   renderPlayMap(ctx);
   savePlay();
@@ -2346,10 +2356,13 @@ function renderPlayTeam(ctx){
         <span class="pt-role">${nextLbl}</span></span>`;
       title = `${nm} — fills the party; ${becomes ? `evolves into ${becomes} and ` : ""}next used in section ${nextSt} at L${lvl}`;
     }
-    const wildLead = ctx.d && str(ctx.d.wl || "");
-    const isLead = role !== 2 && wildLead && nm === wildLead;
+    // contextual to THIS step: the fight's opening answerer, or the point
+    // Pokémon for the current map's grass while walking
+    const isFight = role !== 2 && ctx._fightLead && nm === ctx._fightLead;
+    const isPoint = role !== 2 && !isFight && ctx._wildLead && nm === ctx._wildLead;
     const tag = role === 1 ? `<span class="pt-tag">HM</span>`
-              : isLead ? `<span class="pt-tag lead" title="walks point — meets the wild encounters, so its PP is spent on the route too">POINT</span>` : "";
+              : isFight ? `<span class="pt-tag fightlead" title="opens this fight — answers the lead opponent">FIGHT</span>`
+              : isPoint ? `<button class="pt-tag lead" data-wildplan="1" title="walks point on ${esc(ctx._wildMap||"this map")} — meets its wild encounters; click for its moves">POINT ▸</button>` : "";
     return `<span class="pt-mon${roleCls}" title="${esc(title)}">
       <span class="pt-left">
         ${spr ? `<img src="data:image/png;base64,${spr}" alt="${esc(nm)}">`

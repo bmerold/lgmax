@@ -312,7 +312,12 @@ def main():
             if li == len(legs) - 1: end = len(steps)
             stops = steps[cursor:end]; cursor = end
             hs = heal_stop_for(leg, stops, stage)
-            if hs: stops = stops + [hs]
+            # don't synthesize a leg-end heal the route already walks to: the
+            # deliberate heals (insert_heal) put a real heal stop at the same
+            # Center, and two would draw two pins and double every callout
+            if hs and not any(str(x.get("kind")) == "heal"
+                              and x.get("map") == hs.get("map") for x in stops):
+                stops = stops + [hs]
             # this leg's maps in the order the walk meets them, with the
             # walk itself as polyline runs per map
             seq, segs = [], _c.defaultdict(list)
