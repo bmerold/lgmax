@@ -355,6 +355,12 @@ def main():
                 "lv": sec["level"], "bg": sec["badges"], "b": sec["battles"],
                 "wb": sec.get("wildBattles", 0), "wt": sec.get("wildTurns", 0),
                 "wl": S(sec.get("wildLead")),
+                "wp": [[S(w["map"]), S(w["lead"]), w["battles"],
+                        [[S(r["name"]), r["level"], r["share"], S(r["by"]),
+                          r["turns"], r["dmg"], r["hp"],
+                          1 if r["faster"] else 0, 1 if r["walled"] else 0]
+                         for r in w["rows"]]]
+                       for w in sec.get("wildPlan", [])],
                 "om": sec["opposingMons"], "t": sec["turns"], "f": sec["faints"],
                 "u": sec["unanswered"], "nb": 1 if sec.get("noBattles") else 0,
                 "hm": [[S(h["name"]), S(h["hm"]), S(h["by"]), S(h["how"]),

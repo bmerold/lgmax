@@ -471,7 +471,22 @@ button{font:inherit;color:inherit}
 .pt-tag{font-size:8px;font-weight:700;letter-spacing:.06em;color:#fff;
   background:var(--ink-2);border-radius:0;padding:1px 4px;margin-top:1px}
 .pt-tag.nxt{background:var(--accent)}
-.pt-tag.lead{background:var(--warn)}
+.pt-tag.lead{background:var(--warn);border:0;cursor:pointer;font-family:inherit;
+  color:#fff;font-size:8px;font-weight:800;letter-spacing:.06em;padding:1px 5px}
+.pt-tag.lead:hover{filter:brightness(1.1)}
+.wp-wrap{padding:4px 16px 14px;display:flex;flex-direction:column;gap:10px}
+.wp-map .wp-h{display:flex;align-items:baseline;gap:10px;margin-bottom:3px}
+.wp-tbl{width:100%;border-collapse:collapse;font-size:12.5px}
+.wp-tbl td{padding:3px 8px;border-top:1px solid var(--line);vertical-align:top}
+.wp-sp{white-space:nowrap;color:var(--ink)}
+.wp-mv b{color:var(--accent)}
+.wp-wall .wp-mv{color:var(--bad)}
+.wp-inline{margin-top:8px}
+.wp-inline-h{font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
+  color:var(--warn);margin-bottom:3px}
+.wp-inline .wp-wrap{padding:0;gap:6px}
+.wp-inline .wp-tbl{font-size:11.5px}
+.wp-inline .wp-h .note{font-size:10.5px}
 .pt-role{font-size:9.5px;color:var(--ink-2);white-space:nowrap}
 .pt-mon .pt-mv{display:flex;flex-direction:column;gap:1px;flex:1;min-width:0}
 .pt-mon .pt-m{font-size:10px;color:var(--ink);white-space:nowrap;line-height:1.25;overflow:hidden;
@@ -1177,6 +1192,33 @@ document.getElementById("secPanel").addEventListener("click", ev => {
   }
 });
 
+function wildPlanHtml(d, onlyMap){
+  let wp = (d && d.wp) || [];
+  if (onlyMap) wp = wp.filter(w => str(w[0]) === onlyMap);
+  if (!wp.length) return "";
+  return wp.map(w => {
+    const mp = str(w[0]), lead = str(w[1]), battles = w[2], rows = w[3] || [];
+    return `<div class="wp-map"><div class="wp-h"><b>${esc(prettyMap(mp))}</b>
+        <span class="note">point: <b>${esc(lead)}</b> · ~${battles} wild battles</span></div>
+      <table class="wp-tbl"><tbody>${rows.map(r => {
+        const nm=str(r[0]), lv=r[1], share=r[2], by=str(r[3]), turns=r[4],
+              dmg=r[5], hp=r[6], faster=r[7], walled=r[8];
+        return `<tr class="${walled?"wp-wall":""}">
+          <td class="wp-sp">${esc(nm)} <span class="num">L${lv} · ${Math.round(share*100)}%</span></td>
+          <td class="wp-mv">${walled?`<span class="bad">can't touch it — switch in a partner</span>`
+            :`<b>${esc(by)}</b> <span class="num">${turns}t · ${dmg}/${hp} dmg${faster?" · faster":""}</span>`}</td>
+        </tr>`;
+      }).join("")}</tbody></table></div>`;
+  }).join("");
+}
+function wildPlanCard(d){
+  const inner = wildPlanHtml(d);
+  if (!inner) return "";
+  return `<section class="card"><div class="card-h"><h2>Wild encounters</h2>
+    <span class="note">what your point Pokémon uses on the grass while you walk — its PP is already spent in the section plan</span></div>
+    <div class="wp-wrap">${inner}</div></section>`;
+}
+
 function renderSecPanel(id, leg){
   const el = document.getElementById("secPanel");
   if (id == null){ el.innerHTML = ""; return; }
@@ -1485,6 +1527,7 @@ function renderSecPanel(id, leg){
       <span class="note">fights, pickups and catches in walk order — tick things off as you play; click a fight for its matchup analysis</span>
       ${doneCount ? `<button class="hdone" aria-pressed="${HIDEDONE}">hide done (${doneCount})</button>` : ""}</div>
     ${listHtml}</section>`;
+  html += wildPlanCard(d);
   html += prep;
 
   if (d.bench.length){
@@ -2213,10 +2256,17 @@ function renderPlay(){
     const done = key && DONE.has(key);
     let extra = "";
     if (row) extra = vsBand(row);
-    else if (node && node.stop && str(node.stop[0]) === "catch")
-      extra = wildBand(node.stop);
     else if (node && node.stop && str(node.stop[0]) === "event")
       extra = tradeBand(str(node.stop[1]));
+    else if (node){
+      // walking a leg: show what the point Pokémon uses on THIS map's grass,
+      // plus the catch odds when the stop is a catch
+      const wpHere = node.map ? wildPlanHtml(ctx.d, node.map) : "";
+      const catchHere = (node.stop && str(node.stop[0]) === "catch") ? wildBand(node.stop) : "";
+      extra = catchHere + (wpHere
+        ? `<div class="wp-inline"><div class="wp-inline-h">Wild grass here — your point Pokémon's answers</div>${wpHere}</div>`
+        : "");
+    }
     const stopNote = node && node.stop ? str(node.stop[12] || "") : "";
     descHtml = `<div class="po-desc">
       ${key ? `<span class="chk big${done ? " on" : ""}" data-key="${esc(key)}" title="mark this step done">✓</span>` : ""}
@@ -2486,6 +2536,18 @@ function playAdvance(dir){
   PLAY.node = n;
   renderPlay();
 }
+document.getElementById("playTeam").addEventListener("click", ev => {
+  if (!ev.target.closest("[data-wildplan]")) return;
+  const ctx = playCtx();
+  const inner = ctx ? wildPlanHtml(ctx.d) : "";
+  document.getElementById("playModalBox").innerHTML =
+    `<div class="card-h" style="padding:0 0 8px"><h2 style="font-size:16px">Wild encounters</h2></div>
+     <div class="wp-wrap">${inner || `<p class="note">No wild grass in this stretch.</p>`}</div>`;
+  document.getElementById("playModal").hidden = false;
+});
+document.getElementById("playModal").addEventListener("click", ev => {
+  if (!ev.target.closest("#playModalBox")) document.getElementById("playModal").hidden = true;
+});
 document.getElementById("playNext").addEventListener("click", () => playAdvance(1));
 document.getElementById("playPrev").addEventListener("click", () => playAdvance(-1));
 /* links inside the objective description: fight matchups and node jumps */

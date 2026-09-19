@@ -928,6 +928,39 @@ def lead_cost(m, dist, badges):
              max(0.0, p["turns"] - (1.0 if faster else 0.0))
     return t, d
 
+def wild_plan(team, stage, badges):
+    """For each map the section walks, the point Pokémon and how it answers
+    each wild species in the grass: the move, expected turns, and damage.
+    This is what the POINT lead actually does while you walk."""
+    plans = []
+    for m in WILD_LOAD.get(str(stage), []):
+        specs = [sp for sp in m.get("species", []) if sp["species"] in E.SPECIES]
+        if not specs or not m.get("battles"): continue
+        dist = [(E.make_mon(sp["species"], sp["level"]), sp["share"]) for sp in specs]
+        tot = sum(sh for _, sh in dist) or 1
+        dist = [(mon, sh / tot) for mon, sh in dist]
+        lead = min((mm for mm in team if mm.alive()),
+                   key=lambda mm: lead_cost(mm, dist, badges), default=None)
+        if lead is None: continue
+        rows = []
+        for (mon, share), sp in zip(dist, specs):
+            pr = usable(lead, mon, badges)
+            faster = lead.mon["stats"]["speed"] > mon["stats"]["speed"]
+            rows.append({
+                "species": sp["species"], "name": E.SPECIES[sp["species"]]["name"],
+                "level": sp["level"], "share": round(share, 3),
+                "by": pr["name"] if pr else None,
+                "turns": round(pr["turns"], 1) if pr else None,
+                "dmg": round(pr["avg"], 0) if pr else 0,
+                "hp": mon["stats"]["hp"],
+                "faster": bool(faster) if pr else False,
+                "walled": pr is None,
+            })
+        rows.sort(key=lambda r: -r["share"])
+        plans.append({"map": m["map"], "lead": E.SPECIES[lead.species]["name"],
+                      "battles": round(m["battles"], 1), "rows": rows})
+    return plans
+
 def pick_lead(team, enc, badges, leads):
     """Who is walking the route. Chosen once per map against the whole weighted
     encounter table -- not per battle, because you do not get to see what the
@@ -1638,6 +1671,7 @@ def solve_section(stage, encs, starter, avail, tm_value=None, carry=None):
         "wildBattles": len(wild_only),
         "wildLead": (E.SPECIES[max(final["wildLed"], key=final["wildLed"].get)]["name"]
                      if final.get("wildLed") else None),
+        "wildPlan": wild_plan(final["team"], stage, badges),
         "wildTurns": round(final.get("wildTurns", 0.0), 1),
         "opposingMons": sum(len(e["_mons"]) for e in trainer_battles),
         "turns": round(final["turns"], 1),
