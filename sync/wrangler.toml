@@ -1,0 +1,13 @@
+# Cloudflare Worker config for the LeafGreen Maximizer sync backend.
+# Deploy steps are in sync/README.md. The KV namespace id is filled in by
+# `wrangler kv namespace create LGMAX` (see the README) — the placeholder below
+# is replaced with the real id it prints.
+
+name = "lgmax-sync"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+
+# Progress bundles live here, one row per anonymous sync key.
+[[kv_namespaces]]
+binding = "LGMAX"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"

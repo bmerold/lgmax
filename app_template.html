@@ -562,6 +562,41 @@ button{font:inherit;color:inherit}
 #playModalBox{max-width:min(430px,92vw);max-height:84vh;overflow-y:auto;
   background:var(--surface);border-radius:0;padding:14px;box-shadow:0 0 0 1px var(--line-strong)}
 
+/* ---------- cross-device sync ---------- */
+.sync-navb{margin-left:auto;color:var(--ink-2)}
+.sync-navb[data-state="ok"]{color:var(--accent)}
+.sync-navb[data-state="err"]{color:var(--bad)}
+#syncModal{position:fixed;inset:0;z-index:90;background:rgba(0,0,0,.45);
+  display:flex;align-items:center;justify-content:center}
+#syncBox{width:min(460px,94vw);max-height:88vh;overflow-y:auto;background:var(--surface);
+  box-shadow:0 0 0 1px var(--line-strong)}
+.sync-h{display:flex;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line)}
+.sync-h b{font-family:var(--display);font-size:15px}
+#syncClose{margin-left:auto;border:1px solid var(--line);background:var(--surface-2);
+  color:var(--ink-2);font:600 12px/1 inherit;padding:6px 9px;cursor:pointer}
+#syncClose:hover{color:var(--accent);border-color:var(--accent)}
+#syncBody{padding:16px;display:flex;flex-direction:column;gap:18px}
+.sync-sec{display:flex;flex-direction:column;gap:9px}
+.sync-sec h4{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3);margin:0}
+.sync-p{font-size:12.5px;color:var(--ink-2);line-height:1.5}
+.sync-p .mono,.mono{font-family:var(--mono)}
+.sync-key{font-family:var(--mono);font-size:15px;letter-spacing:.05em;background:var(--surface-2);
+  border:1px solid var(--line-strong);padding:10px 12px;word-break:break-all;user-select:all}
+.sync-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.sync-in{flex:1;min-width:140px;padding:8px 10px;border:1px solid var(--line-strong);border-radius:0;
+  background:var(--bg);color:var(--ink);font-family:inherit;font-size:13px}
+.sync-btn{border:1px solid var(--line-strong);background:var(--surface-2);color:var(--ink);
+  font:600 12px/1 inherit;padding:9px 12px;cursor:pointer;white-space:nowrap}
+.sync-btn:hover{border-color:var(--accent);color:var(--accent)}
+.sync-btn.pri{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.sync-btn.pri:hover{color:var(--on-accent);filter:brightness(1.06)}
+textarea.sync-code{width:100%;height:60px;resize:vertical;font-family:var(--mono);font-size:11px;
+  border:1px solid var(--line-strong);border-radius:0;background:var(--surface-2);color:var(--ink-2);
+  padding:8px;word-break:break-all}
+#syncStatus{font-size:12px;min-height:15px}
+#syncStatus.ok{color:var(--accent-ink)} #syncStatus.err{color:var(--bad)} #syncStatus.pend{color:var(--ink-3)}
+.sync-adv{border-top:1px solid var(--line);padding-top:14px}
+
 /* ---------- choices ---------- */
 .choice-h{padding:16px 18px 14px}
 .choice-h h3{font-size:18px;font-weight:700}
@@ -633,6 +668,7 @@ details.notes[open] summary::after{content:"−"}
       <button class="navb" data-view="sec" aria-current="false">The guide</button>
       <button class="navb" data-view="tm" aria-current="false">TM plan</button>
       <button class="navb" data-view="cho" aria-current="false">Choices</button>
+      <button class="navb sync-navb" id="syncBtn" title="carry your progress between devices">⇄ Sync</button>
     </nav>
   </header>
 
@@ -702,6 +738,11 @@ details.notes[open] summary::after{content:"−"}
   <p class="foot">Built from the <em>pokefirered</em> decompilation — base stats, movesets, trainer
     rosters, encounter tables, healing spots and the damage formula are read from the game's own
     source, not from a wiki.</p>
+
+  <div id="syncModal" hidden><div id="syncBox">
+    <div class="sync-h"><b>Cross-device sync</b><button id="syncClose">✕</button></div>
+    <div id="syncBody"></div>
+  </div></div>
 </div>
 
 <script type="application/json" id="payload">__PAYLOAD__</script>
@@ -775,7 +816,7 @@ try { DONE = new Set(JSON.parse(localStorage.getItem("lgmax-done") || "[]")); } 
 let MAPZOOM = "1", HIDEDONE = false;
 try { MAPZOOM = localStorage.getItem("lgmax-zoom") || "1"; } catch (e) {}
 try { HIDEDONE = localStorage.getItem("lgmax-hidedone") === "1"; } catch (e) {}
-const saveDone = () => { try { localStorage.setItem("lgmax-done", JSON.stringify([...DONE])); } catch (e) {} };
+const saveDone = () => { try { localStorage.setItem("lgmax-done", JSON.stringify([...DONE])); } catch (e) {} syncTouch(); };
 /* a stop's identity survives re-solves: what it is + where it stands */
 const stopKey = s => [str(s[0]), str(s[1]), s[2], s[3], s[4]].join("|");
 const saveUi = () => { try { localStorage.setItem("lgmax-ui",
@@ -793,6 +834,22 @@ try {
 } catch (e) {}
 let active = new Set(["boss","rival","trainer","wild"]);
 let query = "";
+
+/* ---- cross-device sync (an anonymous key names one row in a Cloudflare
+   Worker's KV store; opt-in and additive — the app works with none of it).
+   PROGRESS_TS is the last local change time, used to decide whose play
+   position wins when two devices differ; the done-list is always unioned. */
+const SYNC_ENDPOINT_DEFAULT = "";  /* baked-in Worker URL; empty until deployed */
+let SYNC_ENDPOINT = SYNC_ENDPOINT_DEFAULT, SYNC_KEY = "", PROGRESS_TS = 0;
+try {
+  SYNC_ENDPOINT = localStorage.getItem("lgmax-sync-url") || SYNC_ENDPOINT_DEFAULT;
+  SYNC_KEY = localStorage.getItem("lgmax-sync-key") || "";
+  PROGRESS_TS = +localStorage.getItem("lgmax-ts") || 0;
+} catch (e) {}
+/* syncReady gates saves during boot; syncApplying gates them while we fold in
+   a bundle pulled from elsewhere — either way a touch must not bump the clock. */
+let syncReady = false, syncApplying = false, syncPushTimer = null;
+let syncStatusText = "", syncStatusCls = "";
 
 /* A rival or Champion battle exists in three versions, one per starter.
    Showing only your starter's version is both correct and less cluttered. */
@@ -832,6 +889,7 @@ document.getElementById("starterBtns").addEventListener("click", ev => {
   renderMast(); renderList(); renderSecList(); renderTM();
   renderPanel(ENC.find(x => x.id === selected));
   renderSecPanel(selectedSec, selectedLeg);
+  saveUi(); syncTouch();
 });
 
 document.getElementById("tradeBtns").addEventListener("click", ev => {
@@ -842,6 +900,7 @@ document.getElementById("tradeBtns").addEventListener("click", ev => {
   renderMast(); renderList(); renderSecList(); renderTM();
   renderPanel(ENC.find(x => x.id === selected));
   renderSecPanel(selectedSec, selectedLeg);
+  saveUi(); syncTouch();
 });
 
 document.getElementById("nav").addEventListener("click", ev => {
@@ -2106,7 +2165,7 @@ try {
   const pp = JSON.parse(localStorage.getItem("lgmax-play") || "null");
   if (pp && typeof pp.sec === "number") PLAY = pp;
 } catch (e) {}
-const savePlay = () => { try { localStorage.setItem("lgmax-play", JSON.stringify(PLAY)); } catch (e) {} };
+const savePlay = () => { try { localStorage.setItem("lgmax-play", JSON.stringify(PLAY)); } catch (e) {} syncTouch(); };
 
 const FLOOR_RE = /_(B?\d+F)$/;
 function floorVal(m){
@@ -2683,6 +2742,234 @@ document.querySelector("#playDrawer .drawer-links").addEventListener("click", ev
   saveUi();
 });
 
+/* ---------------- cross-device sync ---------------- */
+const syncEnabled = () => !!(SYNC_ENDPOINT && SYNC_KEY);
+const syncUrl = () => SYNC_ENDPOINT.replace(/\/+$/, "") + "?key=" + encodeURIComponent(SYNC_KEY);
+const KEYCHARS = "0123456789abcdefghjkmnpqrstvwxyz";  /* Crockford-ish, no look-alikes */
+function newSyncKey(){
+  const a = new Uint8Array(16); crypto.getRandomValues(a);
+  return [...a].map(b => KEYCHARS[b & 31]).join("");
+}
+const validKey = k => /^[A-Za-z0-9_-]{8,64}$/.test(k);
+
+/* The whole of a device's progress, as one portable bundle. */
+const syncBundle = () => ({
+  v: 1, done: [...DONE], play: {sec: PLAY.sec, leg: PLAY.leg, node: PLAY.node},
+  starter, trading, ts: PROGRESS_TS,
+});
+
+/* Fold a bundle (from the server or a pasted code) into this device: never drop
+   a checked stop, and take the play position + choices only if they are newer.
+   Writes straight to localStorage so it doesn't re-trigger a sync of its own.
+   Returns whether anything actually changed. */
+function applyBundle(b){
+  if (!b || typeof b !== "object") return false;
+  let changed = false;
+  for (const k of (b.done || [])) if (!DONE.has(k)){ DONE.add(k); changed = true; }
+  if ((b.ts || 0) > PROGRESS_TS){
+    if (b.play && typeof b.play.sec === "number"){
+      PLAY.sec = b.play.sec; PLAY.leg = b.play.leg || 0; PLAY.node = b.play.node || 0;
+      selectedSec = PLAY.sec; selectedLeg = PLAY.leg;
+    }
+    if (STARTERS.includes(b.starter)) starter = b.starter;
+    if (typeof b.trading === "boolean") trading = b.trading;
+    PROGRESS_TS = b.ts; changed = true;
+  } else if (changed){
+    PROGRESS_TS = Date.now();  /* we hold stops the bundle lacked -> we're newest */
+  }
+  if (changed) try {
+    localStorage.setItem("lgmax-done", JSON.stringify([...DONE]));
+    localStorage.setItem("lgmax-play", JSON.stringify(PLAY));
+    localStorage.setItem("lgmax-ui", JSON.stringify(
+      {view, starter, trading, sec: selectedSec, leg: selectedLeg, enc: selected}));
+    localStorage.setItem("lgmax-ts", String(PROGRESS_TS));
+  } catch (e) {}
+  return changed;
+}
+
+/* Redraw every view's derived content after a merge. Runs with syncApplying set
+   so the renders' own saves stay quiet. */
+function syncRerender(){
+  document.querySelectorAll("[data-starter]").forEach(x =>
+    x.setAttribute("aria-pressed", x.dataset.starter === starter));
+  document.querySelectorAll("[data-trade]").forEach(x =>
+    x.setAttribute("aria-pressed", String((x.dataset.trade === "yes") === trading)));
+  renderMast(); renderList(); renderSecList(); renderTM();
+  renderPanel(ENC.find(x => x.id === selected));
+  renderSecPanel(selectedSec, selectedLeg);
+  renderPlay();
+}
+function syncAdopt(b){
+  syncApplying = true;
+  if (applyBundle(b)) syncRerender();
+  syncApplying = false;
+}
+
+function syncSetStatus(text, cls){
+  syncStatusText = text; syncStatusCls = cls || "";
+  const el = document.getElementById("syncStatus");
+  if (el){ el.textContent = text; el.className = syncStatusCls; }
+  const btn = document.getElementById("syncBtn");
+  if (btn) btn.dataset.state = cls || "";
+}
+const syncClock = () => new Date().toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
+
+/* A real local change: advance the clock and (if wired up) schedule a push. */
+function syncTouch(){
+  if (!syncReady || syncApplying) return;
+  PROGRESS_TS = Date.now();
+  try { localStorage.setItem("lgmax-ts", String(PROGRESS_TS)); } catch (e) {}
+  if (syncEnabled()){
+    clearTimeout(syncPushTimer);
+    syncPushTimer = setTimeout(syncPush, 4000);  /* debounce a flurry of checks */
+    syncSetStatus("saving…", "pend");
+  }
+}
+
+async function syncPush(){
+  if (!syncEnabled()) return;
+  clearTimeout(syncPushTimer);
+  try {
+    syncSetStatus("saving…", "pend");
+    const res = await fetch(syncUrl(), {method: "PUT",
+      headers: {"Content-Type": "application/json"}, body: JSON.stringify(syncBundle())});
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    syncAdopt(await res.json());  /* server merged; converge on its result */
+    syncSetStatus("synced · " + syncClock(), "ok");
+  } catch (e){ syncSetStatus("offline — will retry on next change", "err"); }
+}
+
+async function syncPull(){
+  if (!syncEnabled()) return;
+  try {
+    syncSetStatus("checking…", "pend");
+    const res = await fetch(syncUrl(), {method: "GET"});
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const remote = await res.json();
+    const remoteDone = new Set(remote.done || []);
+    const weAhead = (PROGRESS_TS > (remote.ts || 0)) || [...DONE].some(k => !remoteDone.has(k));
+    syncAdopt(remote);
+    if (weAhead) syncPush();  /* seed the server with what only we have */
+    else syncSetStatus("synced · " + syncClock(), "ok");
+  } catch (e){ syncSetStatus("offline", "err"); }
+}
+
+/* Backend-free escape hatch: the whole bundle as one copy-paste code. */
+const syncCodeOut = () => btoa(unescape(encodeURIComponent(JSON.stringify(syncBundle()))));
+function syncCodeIn(code){
+  try { syncAdopt(JSON.parse(decodeURIComponent(escape(atob(code.trim()))))); return true; }
+  catch (e){ return false; }
+}
+
+function copyText(text, btn){
+  const ok = () => { if (btn){ const t = btn.textContent; btn.textContent = "copied"; setTimeout(() => btn.textContent = t, 1200); } };
+  try { navigator.clipboard.writeText(text).then(ok, ok); } catch (e){ ok(); }
+}
+
+function renderSyncPanel(){
+  const box = document.getElementById("syncBody");
+  if (!box) return;
+  const server = SYNC_ENDPOINT
+    ? `<div class="sync-sec">
+         <h4>Live sync</h4>
+         ${SYNC_KEY ? `<div class="sync-p">This device's sync key. Enter the same key on another
+             device to keep both in step — progress saves a few seconds after each change.</div>
+           <div class="sync-key" id="syncKeyView">${esc(SYNC_KEY)}</div>
+           <div class="sync-row">
+             <button class="sync-btn" data-act="copykey">Copy key</button>
+             <button class="sync-btn" data-act="newkey">New key…</button>
+           </div>
+           <div id="syncStatus" class="${syncStatusCls}">${esc(syncStatusText)}</div>`
+         : `<div class="sync-p">Turn on sync to carry your progress between devices. It's anonymous —
+             the key is the only identity, no account or email.</div>
+           <div class="sync-row"><button class="sync-btn pri" data-act="newkey">Create a sync key</button></div>`}
+         <div class="sync-row">
+           <input class="sync-in" id="syncKeyIn" placeholder="or enter a key from another device"
+             autocomplete="off" spellcheck="false">
+           <button class="sync-btn" data-act="connect">Connect</button>
+         </div>
+         <span class="sync-p" id="syncConnMsg"></span>
+       </div>`
+    : `<div class="sync-sec">
+         <h4>Live sync</h4>
+         <div class="sync-p">Automatic server sync isn't wired into this build yet. Use a
+           <b>sync code</b> below to move progress between devices, or deploy the free sync Worker
+           (see <span class="mono">sync/README.md</span>) and paste its URL under Advanced.</div>
+       </div>`;
+
+  box.innerHTML = server + `
+    <div class="sync-sec">
+      <h4>Sync code — works offline</h4>
+      <div class="sync-p">Copy this on one device, paste it on another. Captures every checked
+        stop, your play position, starter and trading choice.</div>
+      <textarea class="sync-code" id="syncCodeOut" readonly>${esc(syncCodeOut())}</textarea>
+      <div class="sync-row"><button class="sync-btn" data-act="copycode">Copy code</button></div>
+      <input class="sync-in" id="syncCodeIn" placeholder="paste a sync code to import" autocomplete="off" spellcheck="false">
+      <div class="sync-row"><button class="sync-btn" data-act="importcode">Import</button>
+        <span class="sync-p" id="syncCodeMsg"></span></div>
+    </div>
+    <div class="sync-sec sync-adv">
+      <h4>Advanced — server URL</h4>
+      <div class="sync-p">Point at your deployed sync Worker without rebuilding.</div>
+      <div class="sync-row">
+        <input class="sync-in" id="syncUrlIn" placeholder="https://lgmax-sync.…workers.dev"
+          value="${esc(SYNC_ENDPOINT)}" autocomplete="off" spellcheck="false">
+        <button class="sync-btn" data-act="saveurl">Save</button>
+      </div>
+    </div>`;
+}
+
+document.getElementById("syncBtn").addEventListener("click", () => {
+  renderSyncPanel();
+  document.getElementById("syncModal").hidden = false;
+});
+document.getElementById("syncClose").addEventListener("click", () =>
+  document.getElementById("syncModal").hidden = true);
+document.getElementById("syncModal").addEventListener("click", ev => {
+  if (!ev.target.closest("#syncBox")) document.getElementById("syncModal").hidden = true;
+});
+document.getElementById("syncBody").addEventListener("click", ev => {
+  const b = ev.target.closest("[data-act]"); if (!b) return;
+  const act = b.dataset.act;
+  if (act === "newkey"){
+    /* replacing an existing key is a two-tap confirm, so no native dialog */
+    if (SYNC_KEY && b.dataset.arm !== "1"){
+      b.dataset.arm = "1"; b.textContent = "Tap again to replace"; b.classList.add("pri");
+      return;
+    }
+    SYNC_KEY = newSyncKey();
+    try { localStorage.setItem("lgmax-sync-key", SYNC_KEY); } catch (e) {}
+    renderSyncPanel();
+    syncPush();  /* seed the new key with this device's progress */
+  } else if (act === "connect"){
+    const k = (document.getElementById("syncKeyIn").value || "").trim();
+    const msg = document.getElementById("syncConnMsg");
+    if (!validKey(k)){
+      if (msg){ msg.textContent = "A key is 8–64 letters, digits, dashes or underscores."; msg.style.color = "var(--bad)"; }
+      return;
+    }
+    SYNC_KEY = k;
+    try { localStorage.setItem("lgmax-sync-key", SYNC_KEY); } catch (e) {}
+    renderSyncPanel();
+    syncPull();  /* adopt whatever that key already holds, then push our extras */
+  } else if (act === "copykey"){
+    copyText(SYNC_KEY, b);
+  } else if (act === "copycode"){
+    copyText(document.getElementById("syncCodeOut").value, b);
+  } else if (act === "importcode"){
+    const ok = syncCodeIn(document.getElementById("syncCodeIn").value);
+    if (ok){ renderSyncPanel(); if (syncEnabled()) syncPush(); }  /* re-render first, then message */
+    const msg = document.getElementById("syncCodeMsg");
+    if (msg){ msg.textContent = ok ? "imported ✓" : "not a valid code"; msg.style.color = ok ? "var(--accent-ink)" : "var(--bad)"; }
+  } else if (act === "saveurl"){
+    const u = (document.getElementById("syncUrlIn").value || "").trim();
+    SYNC_ENDPOINT = u;
+    try { u ? localStorage.setItem("lgmax-sync-url", u) : localStorage.removeItem("lgmax-sync-url"); } catch (e) {}
+    renderSyncPanel();
+    if (syncEnabled()) syncPull();
+  }
+});
+
 /* ---------------- boot ---------------- */
 renderMast();
 renderList();
@@ -2709,5 +2996,8 @@ const _selRow = document.querySelector(`.sec-row[data-sec="${selectedSec}"][data
 if (_selRow) _selRow.scrollIntoView({block: "center"});
 window.scrollTo(0, 0);
 renderPlay();
+/* boot done — from here a save is a real change, so let it sync */
+syncReady = true;
+if (syncEnabled()) syncPull();  /* adopt anything newer from another device */
 })();
 </script>

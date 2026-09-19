@@ -5,6 +5,7 @@ app.html
 PIPELINE_DONE
 
 # Scratch
+.idea/
 __pycache__/
 *.pyc
 node_modules/

@@ -45,6 +45,12 @@ JSON in `data/`. `tour.py` runs before `sections.py`, so `sections.py` may read 
   function, and the `assign_hms` loop mutates a shared `uncovered` list — guard every `.remove`.
 - **`app_template.html` is authored, not generated.** `app.html`/`data/` are build outputs and are
   gitignored; commit source (`app_template.html`, the `.py` files), never the built artifacts.
+- **The sync bundle shape is a second cross-file contract.** `app_template.html`'s `syncBundle`
+  (`{v, done, play, starter, trading, ts}`) and `sync/worker.js`'s `merge` must agree. The rules
+  that keep two devices from clobbering each other: `done` is always **unioned**, `play`/`starter`/
+  `trading` are taken from the **newer `ts`**. Change one side and change the other. `syncTouch` is
+  gated by `syncReady`/`syncApplying` so boot and merge-driven re-renders don't bump the clock —
+  don't remove those guards.
 
 ## Quality workflow
 

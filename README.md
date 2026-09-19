@@ -37,6 +37,7 @@ single amended commit so the page never piles up in history).
 | **Choices** | starter, fossil, Fighting Dojo, Eevee stone, Game Corner prize — each ranked on whole evolution lines |
 | **Play mode** | the default screen: one viewport, no scrolling — the current objective on top, the party (game sprites, tap for moves and PP), the current map fitted to fill the view with the walk and numbered stops, and this step's battle plan below; floor changes, doors, ferries and flights are their own steps |
 | **The route** | one continuous ~25,000-step walk through the whole game — every item ball, hidden item, trainer, one-off and first-catch, ordered by a travelling-salesman pass over the real tile graph and drawn onto the maps |
+| **Cross-device sync** | check-off progress and play position follow you between devices via an anonymous **sync key** — no account, no personal data. Backed by a free Cloudflare Worker (see [`sync/`](sync/README.md)); an offline copy-paste **sync code** works with no backend at all |
 
 Toggles for **starter** and **trading on/off** re-solve the recommendations rather than filtering
 them.
