@@ -606,7 +606,9 @@ textarea.sync-code{width:100%;height:60px;resize:vertical;font-family:var(--mono
 #dexSearch{max-width:320px}
 #dexGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
 .dex-card{border:1px solid var(--line);background:var(--surface);padding:10px;position:relative;
-  display:flex;flex-direction:column;gap:5px}
+  display:flex;flex-direction:column;gap:5px;cursor:pointer;user-select:none}
+.dex-card:hover{border-color:var(--accent)}
+.dex-manual{color:var(--accent);font-size:10px}
 .dex-card.need{opacity:.6}
 .dex-card.off{opacity:.5;border-style:dashed}
 .dex-card.reg{box-shadow:inset 3px 0 0 var(--accent)}
@@ -852,6 +854,12 @@ let selected = null, selectedSec = 18, selectedLeg = 0, tab = "team";
 /* ---- play-through progress + where-you-were, kept in this browser ---- */
 let DONE = new Set();
 try { DONE = new Set(JSON.parse(localStorage.getItem("lgmax-done") || "[]")); } catch (e) {}
+/* Manual Dex overrides: species -> true/false, layered over the route-derived
+   registration so you can tick something the route doesn't collect (a Game
+   Corner prize you bought) or untick one you haven't actually got yet. */
+let DEXMANUAL = {};
+try { DEXMANUAL = JSON.parse(localStorage.getItem("lgmax-dex") || "{}") || {}; } catch (e) {}
+const saveDex = () => { try { localStorage.setItem("lgmax-dex", JSON.stringify(DEXMANUAL)); } catch (e) {} syncTouch(); };
 let MAPZOOM = "1", HIDEDONE = false;
 try { MAPZOOM = localStorage.getItem("lgmax-zoom") || "1"; } catch (e) {}
 try { HIDEDONE = localStorage.getItem("lgmax-hidedone") === "1"; } catch (e) {}
@@ -2797,7 +2805,7 @@ const validKey = k => /^[A-Za-z0-9_-]{8,64}$/.test(k);
 /* The whole of a device's progress, as one portable bundle. */
 const syncBundle = () => ({
   v: 1, done: [...DONE], play: {sec: PLAY.sec, leg: PLAY.leg, node: PLAY.node},
-  starter, trading, ts: PROGRESS_TS,
+  starter, trading, dex: DEXMANUAL, ts: PROGRESS_TS,
 });
 
 /* Fold a bundle (from the server or a pasted code) into this device: never drop
@@ -2808,6 +2816,13 @@ function applyBundle(b){
   if (!b || typeof b !== "object") return false;
   let changed = false;
   for (const k of (b.done || [])) if (!DONE.has(k)){ DONE.add(k); changed = true; }
+  // Dex overrides merge per species (union of keys); on a conflict the bundle
+  // from the newer device wins, mirroring how play/starter are resolved.
+  if (b.dex && typeof b.dex === "object"){
+    const remoteNewer = (b.ts || 0) > PROGRESS_TS;
+    const merged = remoteNewer ? {...DEXMANUAL, ...b.dex} : {...b.dex, ...DEXMANUAL};
+    if (JSON.stringify(merged) !== JSON.stringify(DEXMANUAL)){ DEXMANUAL = merged; changed = true; }
+  }
   if ((b.ts || 0) > PROGRESS_TS){
     if (b.play && typeof b.play.sec === "number"){
       PLAY.sec = b.play.sec; PLAY.leg = b.play.leg || 0; PLAY.node = b.play.node || 0;
@@ -2822,6 +2837,7 @@ function applyBundle(b){
   if (changed) try {
     localStorage.setItem("lgmax-done", JSON.stringify([...DONE]));
     localStorage.setItem("lgmax-play", JSON.stringify(PLAY));
+    localStorage.setItem("lgmax-dex", JSON.stringify(DEXMANUAL));
     localStorage.setItem("lgmax-ui", JSON.stringify(
       {view, starter, trading, sec: selectedSec, leg: selectedLeg, enc: selected}));
     localStorage.setItem("lgmax-ts", String(PROGRESS_TS));
@@ -2839,7 +2855,7 @@ function syncRerender(){
   renderMast(); renderList(); renderSecList(); renderTM();
   renderPanel(ENC.find(x => x.id === selected));
   renderSecPanel(selectedSec, selectedLeg);
-  renderPlay();
+  renderPlay(); renderDex();
 }
 function syncAdopt(b){
   syncApplying = true;
@@ -3069,16 +3085,26 @@ function dexChain(base){
 const DEX_FILTERS = [["all", "All"], ["caught", "Registered"], ["missing", "Still to get"],
                      ["offroute", "Off-route"], ["trade", "Trade-only"]];
 
+let DEX_DERIVED = new Set();    // route-derived registration, for the toggle handler
+function dexRegistered(name){    // effective status: manual override wins over derived
+  return name in DEXMANUAL ? DEXMANUAL[name] : DEX_DERIVED.has(name);
+}
 function renderDex(){
   const {caught, onRoute} = dexScan();
-  const registered = dexChain(caught), collectable = dexChain(onRoute);
+  DEX_DERIVED = dexChain(caught);
+  const collectable = dexChain(onRoute);
   const shown = DEX.filter(d => !(d[6] === 1 && !trading));   // hide trade-only in a solo run
   const nm = dexName;
-  const total = shown.filter(d => collectable.has(nm(d))).length;
-  const have = shown.filter(d => collectable.has(nm(d)) && registered.has(nm(d))).length;
-  const kTot = shown.filter(d => d[0] <= 151 && collectable.has(nm(d))).length;
-  const kHave = shown.filter(d => d[0] <= 151 && collectable.has(nm(d)) && registered.has(nm(d))).length;
-  const off = shown.filter(d => !collectable.has(nm(d))).length;
+  const reg = d => dexRegistered(nm(d));
+  // a species counts toward the total if the route can register it, or you've
+  // manually ticked one it can't (a prize you actually bought)
+  const inTotal = d => collectable.has(nm(d)) || reg(d);
+  const registered = new Set(shown.filter(reg).map(nm));
+  const total = shown.filter(inTotal).length;
+  const have = shown.filter(d => inTotal(d) && reg(d)).length;
+  const kTot = shown.filter(d => d[0] <= 151 && inTotal(d)).length;
+  const kHave = shown.filter(d => d[0] <= 151 && inTotal(d) && reg(d)).length;
+  const off = shown.filter(d => !collectable.has(nm(d)) && !reg(d)).length;
   document.getElementById("dexCount").innerHTML =
     `<span class="dex-big">${have}<span class="dex-slash">/${total}</span></span> registered`
     + ` · <span class="dex-sub">Kanto ${kHave}/${kTot}</span>`
@@ -3088,20 +3114,22 @@ function renderDex(){
 
   const q = dexQuery.trim().toLowerCase();
   const rows = shown.filter(d => {
-    const n = nm(d), reg = registered.has(n), coll = collectable.has(n);
-    if (dexFilter === "caught" && !reg) return false;
-    if (dexFilter === "missing" && (reg || !coll)) return false;
+    const n = nm(d), isReg = registered.has(n), coll = collectable.has(n);
+    if (dexFilter === "caught" && !isReg) return false;
+    if (dexFilter === "missing" && (isReg || !coll)) return false;
     if (dexFilter === "offroute" && coll) return false;
     if (dexFilter === "trade" && d[6] !== 1) return false;
     if (q && !n.toLowerCase().includes(q) && String(d[0]) !== q) return false;
     return true;
   });
   document.getElementById("dexGrid").innerHTML = rows.length ? rows.map(d => {
-    const n = nm(d), reg = registered.has(n), coll = collectable.has(n), spr = SPRITES[n];
-    return `<div class="dex-card ${reg ? "reg" : (coll ? "need" : "off")}">
-      <div class="dex-no">#${String(d[0]).padStart(3, "0")}</div>
+    const n = nm(d), isReg = registered.has(n), coll = collectable.has(n), spr = SPRITES[n];
+    const manual = n in DEXMANUAL;
+    return `<div class="dex-card ${isReg ? "reg" : (coll ? "need" : "off")}" data-dex="${esc(n)}"
+      role="button" tabindex="0" title="tap to ${isReg ? "unmark" : "mark"} registered">
+      <div class="dex-no">#${String(d[0]).padStart(3, "0")}${manual ? ` <span class="dex-manual" title="manually set">✎</span>` : ""}</div>
       <div class="dex-spr">${spr ? `<img src="data:image/png;base64,${spr}" alt="">`
-        : `<span class="dex-noimg">?</span>`}${reg ? `<span class="dex-tick">✓</span>` : ""}</div>
+        : `<span class="dex-noimg">?</span>`}${isReg ? `<span class="dex-tick">✓</span>` : ""}</div>
       <div class="dex-nm">${esc(n)}</div>
       <div class="dex-types">${typeChips(d[2])}</div>
       <div class="dex-src">${esc(str(d[4]) || "")}${d[6] === 1 ? ` <span class="dex-trade">trade</span>` : ""}</div>
@@ -3114,6 +3142,22 @@ document.getElementById("dexFilters").addEventListener("click", ev => {
 });
 document.getElementById("dexSearch").addEventListener("input", ev => {
   dexQuery = ev.target.value; renderDex();
+});
+/* Tap a card to override its registration; a value matching the route-derived
+   default clears the override so future progress flows through again. */
+function dexToggle(name){
+  const want = !dexRegistered(name);
+  if (want === DEX_DERIVED.has(name)) delete DEXMANUAL[name];
+  else DEXMANUAL[name] = want;
+  saveDex(); renderDex();
+}
+document.getElementById("dexGrid").addEventListener("click", ev => {
+  const c = ev.target.closest("[data-dex]"); if (c) dexToggle(c.dataset.dex);
+});
+document.getElementById("dexGrid").addEventListener("keydown", ev => {
+  if (ev.key !== "Enter" && ev.key !== " ") return;
+  const c = ev.target.closest("[data-dex]");
+  if (c){ ev.preventDefault(); dexToggle(c.dataset.dex); }
 });
 
 /* ---------------- boot ---------------- */

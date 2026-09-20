@@ -275,6 +275,14 @@ def team_sprites():
                 if nm in byname: species.add(byname[nm])
     except Exception as _ex:
         print("  trade sprites skip:", _ex)
+    # every species the Dex can list (obtainable in a run), so its cards all have
+    # art even for Pokémon no party or fight ever puts on screen (the spare
+    # Eeveelutions, fossils you didn't pick, uncaught legendaries, Johto evos)
+    try:
+        import progression as _P
+        species.update(_P.full_availability().keys())
+    except Exception as _ex:
+        print("  dex sprites skip:", _ex)
     sdir = os.path.join(ART, "sprites")
     os.makedirs(sdir, exist_ok=True)
     out = {}
@@ -285,7 +293,14 @@ def team_sprites():
         name = _E.SPECIES[sp]["name"]
         dest = os.path.join(sdir, f"{sp}.png")
         try:
-            w, h, px = read_indexed_png(os.path.join(base, "front.png"))
+            front = os.path.join(base, "front.png")
+            if not os.path.exists(front):
+                # a few species (Unown) keep per-form art in subfolders and share
+                # one palette at the top — show the first form as the dex sprite
+                subs = sorted(d for d in os.listdir(base)
+                              if os.path.exists(os.path.join(base, d, "front.png")))
+                if subs: front = os.path.join(base, subs[0], "front.png")
+            w, h, px = read_indexed_png(front)
             vals = [int(x) for x in
                     open(os.path.join(base, "normal.pal")).read().split()[3:3 + 48]]
             pal = [tuple(vals[i:i + 3]) for i in range(0, 48, 3)]

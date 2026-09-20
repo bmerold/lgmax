@@ -51,12 +51,15 @@ function merge(stored, incoming) {
   const s = stored || {};
   const done = new Set([...(s.done || []), ...(incoming.done || [])]);
   const newer = (incoming.ts || 0) >= (s.ts || 0) ? incoming : s;
+  const older = newer === incoming ? s : incoming;
   return {
     v: 1,
     done: [...done],
     play: newer.play || s.play || null,
     starter: newer.starter || s.starter || null,
     trading: typeof newer.trading === "boolean" ? newer.trading : !!s.trading,
+    // Dex overrides: union of species keys, the newer device winning a conflict.
+    dex: { ...(older.dex || {}), ...(newer.dex || {}) },
     ts: Math.max(s.ts || 0, incoming.ts || 0),
   };
 }

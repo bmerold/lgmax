@@ -66,11 +66,13 @@ JSON in `data/`. `tour.py` runs before `sections.py`, so `sections.py` may read 
   `LGMAX_REUSE_ROUTE=1` reuses `data/route.json` (skip `tour.py` only when routing
   inputs are unchanged).
 - **The sync bundle shape is a second cross-file contract.** `app_template.html`'s `syncBundle`
-  (`{v, done, play, starter, trading, ts}`) and `sync/worker.js`'s `merge` must agree. The rules
-  that keep two devices from clobbering each other: `done` is always **unioned**, `play`/`starter`/
-  `trading` are taken from the **newer `ts`**. Change one side and change the other. `syncTouch` is
-  gated by `syncReady`/`syncApplying` so boot and merge-driven re-renders don't bump the clock —
-  don't remove those guards.
+  (`{v, done, play, starter, trading, dex, ts}`) and `sync/worker.js`'s `merge` must agree. The
+  rules that keep two devices from clobbering each other: `done` is always **unioned**, `dex`
+  (manual Dex overrides, `{species: bool}`) is a **per-key union with the newer `ts` winning a
+  conflict**, and `play`/`starter`/`trading` are taken from the **newer `ts`**. Change one side and
+  change the other — and adding a field means redeploying the Worker (`cd sync && npx wrangler
+  deploy`), or the server drops it. `syncTouch` is gated by `syncReady`/`syncApplying` so boot and
+  merge-driven re-renders don't bump the clock — don't remove those guards.
 
 ## Quality workflow
 
