@@ -863,34 +863,89 @@ def solve(max_stage=34, verbose=True):
                     order.insert(order.index(ia) + 1, ib)
                     changed = True
             if not changed: break
+
+        # trainer-gated doors: a stop shut behind a barrier can't be reached until
+        # the barrier's fight is won, so it is ordered after every gate trainer.
+        # Each barrier's "behind" set is the tiles reachable only once it opens
+        # (bfs with just that door shut). Repaired to a fixpoint like the story
+        # precedence above -- the far stop is pushed to just after the last gate.
+        stage_barriers = []            # (gate consts, set of tiles behind the door)
+        gate_consts = set()
+        for m in {picked[oi - 1]["map"] for oi in order}:
+            for _tiles, _gates in WD.gated_barriers().get(m, ()):
+                if _gates <= ROUTED_FOUGHT: continue   # opened in an earlier stage
+                gate_consts |= set(_gates)
+        if gate_consts:
+            reach_open = set(dist0)
+            for m in {picked[oi - 1]["map"] for oi in order}:
+                for _tiles, _gates in WD.gated_barriers().get(m, ()):
+                    if _gates <= ROUTED_FOUGHT: continue
+                    WD._OPEN_GATES = frozenset(gate_consts - set(_gates))  # this door shut
+                    behind = reach_open - set(WD.bfs(pos, stage))
+                    if behind:
+                        stage_barriers.append((set(_gates), behind))
+            WD._OPEN_GATES = None
+        def _tconst(nn):
+            return (nn.get("enc") or "").split(":")[-1] if nn["kind"] == "trainer" else None
+        for _ in range(len(order) + 4):
+            changed = False
+            for gates, behind in stage_barriers:
+                gpos = [k for k, oi in enumerate(order) if _tconst(picked[oi - 1]) in gates]
+                if not gpos: continue
+                last_gate = max(gpos)
+                for k, oi in enumerate(order):
+                    if k < last_gate and tiles[oi - 1] in behind:
+                        order.pop(k)
+                        gpos2 = [j for j, o in enumerate(order)
+                                 if _tconst(picked[o - 1]) in gates]
+                        order.insert(max(gpos2) + 1, oi)
+                        changed = True
+                        break
+                if changed: break
+            if not changed: break
+
         def build_steps(ordr):
             stps, cur2, prev_idx, cst = [], pos, 0, 0
-            for oi in ordr:
-                n = picked[oi - 1]
-                tgt = tiles[oi - 1]
-                flew = mat[prev_idx][oi] < wmat[prev_idx][oi]
-                if flew:
-                    path = WD.walk_back(cparent, tgt)   # from the landing Center
-                else:
-                    path = WD.draw_path(cur2, tgt, stage) or [cur2, tgt]
-                step = {"kind": n["kind"], "what": n["what"],
-                        "map": n["map"], "at": [n["x"], n["y"]],
-                        "walk": int(mat[prev_idx][oi]),
-                        "path": [[m, x, y] for m, x, y in corners(path)]}
-                if flew:
-                    where = path[0][0] if path else True
-                    step["fly" if fly else "teleport"] = where
-                if n.get("enc"): step["enc"] = n["enc"]
-                nt = STOP_NOTES.get((n["what"], n["map"]))
-                if nt: step["note"] = nt
-                if n.get("underfoot"): step["underfoot"] = True
-                if n.get("renewable"): step["renewable"] = n["renewable"]
-                if n.get("hunt"): step["hunt"] = n["hunt"]
-                if n.get("huntHi"): step["huntHi"] = n["huntHi"]
-                if n.get("species"): step["species"] = n["species"]
-                stps.append(step)
-                cst += mat[prev_idx][oi]
-                cur2, prev_idx = tgt, oi
+            # trainer-gated doors open only for fights already won, so each walked
+            # segment is drawn against the doors' state at that moment -- a
+            # pre-fight leg routes around a locked barrier, a post-fight one
+            # through it (world.gated_barriers / _OPEN_GATES). Reset to "all open"
+            # on the way out so the matrix and later stages are unaffected.
+            fought = set(ROUTED_FOUGHT)
+            try:
+                for oi in ordr:
+                    n = picked[oi - 1]
+                    tgt = tiles[oi - 1]
+                    WD._OPEN_GATES = frozenset(fought)
+                    flew = mat[prev_idx][oi] < wmat[prev_idx][oi]
+                    if flew:
+                        path = WD.walk_back(cparent, tgt)  # from the landing Center
+                    else:
+                        path = WD.draw_path(cur2, tgt, stage) or [cur2, tgt]
+                    step = {"kind": n["kind"], "what": n["what"],
+                            "map": n["map"], "at": [n["x"], n["y"]],
+                            "walk": int(mat[prev_idx][oi]),
+                            "path": [[m, x, y] for m, x, y in corners(path)]}
+                    if flew:
+                        where = path[0][0] if path else True
+                        step["fly" if fly else "teleport"] = where
+                    if n.get("enc"): step["enc"] = n["enc"]
+                    nt = STOP_NOTES.get((n["what"], n["map"]))
+                    if nt: step["note"] = nt
+                    if n.get("underfoot"): step["underfoot"] = True
+                    if n.get("renewable"): step["renewable"] = n["renewable"]
+                    if n.get("hunt"): step["hunt"] = n["hunt"]
+                    if n.get("huntHi"): step["huntHi"] = n["huntHi"]
+                    if n.get("species"): step["species"] = n["species"]
+                    stps.append(step)
+                    cst += mat[prev_idx][oi]
+                    cur2, prev_idx = tgt, oi
+                    # win the fight on arrival -> this trainer's door opens for the
+                    # next leg
+                    if n["kind"] == "trainer" and n.get("enc"):
+                        fought.add(n["enc"].split(":")[-1])
+            finally:
+                WD._OPEN_GATES = None
             return stps, cst, cur2
 
         # a hop that enters an unfought trainer's aggro forces that battle on

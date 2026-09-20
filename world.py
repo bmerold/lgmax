@@ -25,7 +25,7 @@ to them from an adjacent tile; the Seafoam current puzzle and the Strength
 boulder puzzles are not state-modelled (currents count as surfable water once
 Surf is live); collapsing floors and other script tricks are ignored.
 """
-import json, os, struct, functools, collections
+import json, os, struct, functools, collections, glob
 import route_order as R
 import walking as W
 import progression as P
@@ -85,7 +85,8 @@ MB_THIN_ICE = 0x26
 class Grid:
     """One map's tiles: walkability, behavior, and the events standing on it."""
     __slots__ = ("name", "w", "h", "beh", "coll", "enc", "elev", "warps",
-                 "warp_tiles", "obstacles", "scripted_open", "blockers")
+                 "warp_tiles", "obstacles", "scripted_open", "blockers",
+                 "barrier_gates")
     def __init__(self, name):
         mj = R.maps()[name]
         lay = _layouts()[ALT_LAYOUT.get(name) or mj["layout"]]
@@ -140,6 +141,15 @@ class Grid:
         # chambers). The story opens them at the right moment; the map's own
         # stage gate is the approximation of when.
         self.scripted_open = _scripted_open(name)
+        # trainer-gated barrier tiles: passable only once their fight is won.
+        # RemoveBarrier lists them as `setmetatile _, 0` too, so they'd otherwise
+        # land in scripted_open (always-open) -- keep them out of it and gate them.
+        self.barrier_gates = {}
+        for tiles, gates in gated_barriers().get(name, ()):
+            for t in tiles:
+                self.barrier_gates[t] = gates
+        if self.barrier_gates:
+            self.scripted_open = frozenset(self.scripted_open) - self.barrier_gates.keys()
         if name.startswith("PokemonLeague_"):
             # entering a chamber, the game force-walks you up through the
             # sealed entry door (Common_Movement_WalkUp5) -- scripted moves
@@ -196,6 +206,39 @@ def _scripted_open(name):
         for m in _SETMETA.finditer(open(path).read()):
             out.add((int(m.group(1)), int(m.group(2))))
     return frozenset(out)
+
+# A barrier wall the game drops until a specific fight is won, then unlocks
+# (playse SE_UNLOCK). The Rocket Hideout's two doors are the only ones gated on
+# beating a trainer: B1F opens when Grunt 12 falls, B4F when both "door grunts"
+# (16 and 17) do -- data/maps/RocketHideout_B{1,4}F/scripts.inc, the SetBarrier
+# / call_if[_not]_defeated pair. Modelled as tiles that stay impassable until
+# their gate trainers are in the fought set, so the walk can't clip the closed
+# door before earning it. (Victory Road's and Cinnabar's barriers are boulder-
+# and quiz-gated, a different mechanism, so they carry no call_if_defeated and
+# are not caught here.)
+_BARRIER_TILE = _re.compile(
+    r"setmetatile\s+(\d+),\s*(\d+),\s*METATILE_\w*Barrier\w*,\s*1")
+_BARRIER_GATE = _re.compile(r"call_if(?:_not)?_defeated\s+(TRAINER_\w+)")
+
+@functools.lru_cache(maxsize=1)
+def gated_barriers():
+    """map -> [(frozenset of barrier tiles, frozenset of gate trainer consts)].
+    A tile is passable only once every gate trainer of its barrier is beaten."""
+    out = {}
+    for f in glob.glob(f"{REPO}/data/maps/*/scripts.inc"):
+        txt = open(f).read()
+        tiles = {(int(a), int(b)) for a, b in _BARRIER_TILE.findall(txt)}
+        gates = frozenset(_BARRIER_GATE.findall(txt))
+        if tiles and gates:
+            out[os.path.basename(os.path.dirname(f))] = [(frozenset(tiles), gates)]
+    return out
+
+# Trainer consts whose defeat has opened a gated barrier so far. None means
+# "every gate open" -- the default, so reachability, the distance matrix and
+# every non-tour caller behave exactly as before. tour.py sets it to the set of
+# gate trainers fought so far while it draws a leg, so a pre-fight segment routes
+# around a still-closed door and a post-fight one walks through it.
+_OPEN_GATES = None
 
 @functools.lru_cache(maxsize=None)
 def grid(name):
@@ -344,6 +387,12 @@ def _tile_open(g, x, y, stage, surf_ok):
     if not g.inb(x, y): return False
     st = g.obstacles.get((x, y))
     if st is not None and stage < st: return False
+    gates = g.barrier_gates.get((x, y))
+    if gates is not None:
+        # the barrier's floor is drawn by the unlock script, not baked into the
+        # layout, so decide it here outright: open once every gate trainer is
+        # beaten (or when gates aren't being tracked), a wall until then.
+        return _OPEN_GATES is None or gates <= _OPEN_GATES
     if (x, y) in g.warp_tiles: return True
     if _DRAW_BLOCKERS and (x, y) in g.blockers: return False
     if (x, y) in g.scripted_open: return True

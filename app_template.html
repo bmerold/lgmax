@@ -320,6 +320,19 @@ button{font:inherit;color:inherit}
 .mapbox{position:relative;width:max-content}
 .mapbox img{display:block;image-rendering:pixelated}
 .mapbox img.stitch{position:absolute}
+/* the game's own on-map sprite, drawn with its feet on the anchored tile,
+   under the numbered pin. 16px wide (one tile); height comes from the sprite. */
+.owsprite{position:absolute;width:16px;image-rendering:pixelated;pointer-events:none;z-index:1;
+  filter:drop-shadow(0 1px 0 rgba(0,0,0,.35))}
+/* a hidden item has no in-game sprite: a small ghost marker on its tile */
+.owhidden{position:absolute;width:16px;height:16px;pointer-events:none;z-index:1;
+  display:flex;align-items:center;justify-content:center;font:700 11px/1 "IBM Plex Mono",monospace;
+  color:#fff;background:rgba(120,90,160,.55);border:1px dashed rgba(255,255,255,.8);border-radius:3px}
+/* when a stop carries a sprite, its walk-order pin shrinks to a badge above the
+   sprite's head so the character stays fully visible */
+.mark.onspr{min-width:15px;width:15px;height:15px;padding:0;border-radius:8px;
+  font-size:9px;line-height:11px;z-index:2}
+.mark.onspr:hover{transform:translate(-50%,-50%) scale(1.3);z-index:4}
 .mark{position:absolute;transform:translate(-50%,-50%);min-width:20px;height:20px;padding:0 4px;
   border:2px solid #fff;border-radius:11px;color:#fff;text-align:center;cursor:pointer;
   font:700 11px/16px "IBM Plex Mono",monospace;box-shadow:0 1px 5px rgba(0,0,0,.55)}
@@ -846,6 +859,10 @@ const DEX = DATA.dex || [];
 /* The money model: prize-money income by stage vs the run's real purchases. */
 const ECON = DATA.economy || {};
 const TPICS = DATA.tpics || {};
+/* The game's own overworld sprites (keyed by graphics id) plus, per map, the
+   tile each trainer/NPC/item-ball stop is anchored to: {map: {"x,y": [key,h]}}. */
+const OW = DATA.ow || {};
+const OWBYMAP = DATA.owByMap || {};
 /* Choices the run makes once and keeps; the section parties are solved with
    these locked, so a single Eevee can't become a Vaporeon in one town and a
    Jolteon in the next. */
@@ -1621,13 +1638,26 @@ function renderSecPanel(id, leg){
         const names = members.map(c => prettyMap(c[0]));
         const shown = names.length > 3 ? names.slice(0, 3).join(" · ") + " …"
                                        : names.join(" · ");
-        let pinsHtml = "", nPins = 0;
+        let pinsHtml = "", owHtml = "", nPins = 0;
         const svgs = members.map(c => {
           const [name, ox, oy] = c;
+          const anc = OWBYMAP[name] || {};
           (pinsByMap[name] || []).forEach(p => {
             nPins++;
-            pinsHtml += `<button class="mark${p.done ? " done" : ""}${p.next ? " next" : ""}" data-n="${p.n}"
-              style="left:${(ox + p.x + 0.5) * 16}px;top:${(oy + p.y + 0.5) * 16}px;
+            // the game's own graphic under the numbered pin: a sprite for the
+            // trainer/NPC/item ball you interact with, its feet on the tile; a
+            // ghost marker for a hidden item, which has no on-screen sprite.
+            const a = anc[p.x + "," + p.y], spr = a && OW[a[0]];
+            if (spr) owHtml += `<img class="owsprite" alt="" aria-hidden="true"
+              src="data:image/png;base64,${OW[a[0]]}"
+              style="left:${(ox + p.x) * 16}px;top:${(oy + p.y + 1) * 16 - a[1]}px;height:${a[1]}px">`;
+            else if (p.kind === "hidden") owHtml += `<span class="owhidden"
+              style="left:${(ox + p.x) * 16}px;top:${(oy + p.y) * 16}px" title="hidden item — no sprite">?</span>`;
+            // with a sprite, the number is a small badge on the head; without, the
+            // usual centred pin marks the tile
+            const py = spr ? (oy + p.y + 1) * 16 - a[1] : (oy + p.y + 0.5) * 16;
+            pinsHtml += `<button class="mark${spr ? " onspr" : ""}${p.done ? " done" : ""}${p.next ? " next" : ""}" data-n="${p.n}"
+              style="left:${(ox + p.x + 0.5) * 16}px;top:${py}px;
               background:${(RKIND[p.kind] || RKIND.event).color}"
               title="${p.n}. ${esc(p.what || "")}">${p.n}</button>`;
           });
@@ -1672,7 +1702,7 @@ function renderSecPanel(id, leg){
                 style="left:${c[1] * 16}px;top:${c[2] * 16}px"
                 alt="Map of ${esc(c[0])}" loading="lazy">`).join("")}
             <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${svgs}</svg>
-            ${pinsHtml}${ambPins}
+            ${owHtml}${pinsHtml}${ambPins}
           </div></div></div>
           ${clusterPins.length || ambNote ? `<aside class="mapside">
             <div class="side-h">${nPins ? nPins + " stop" + (nPins === 1 ? "" : "s") : "just the walk"}</div>
@@ -2560,14 +2590,22 @@ function renderPlayMap(ctx){
   const L = ctx.L;
   const segsByMap = Object.fromEntries((L.mp || []).map(m => [m[0], m[1] || []]));
   const dim = segsByMap[node.map] || [];
-  // pins: every stop of this leg on this map
-  let pins = "";
+  // pins: every stop of this leg on this map, each under the game's own sprite
+  let pins = "", owHtml = "";
+  const anc = OWBYMAP[node.map] || {};
   (L.rt || []).forEach((st, i) => {
     if (st[2] !== node.map) return;
     const key = stopKey(st);
     const cur = node.stop && node.stopIdx === i;
-    pins += `<button class="mark${DONE.has(key) ? " done" : ""}${cur ? " cur" : ""}"
-      data-jump="${i}" style="left:${(st[3] + 0.5) * 16}px;top:${(st[4] + 0.5) * 16}px;
+    const a = anc[st[3] + "," + st[4]], spr = a && OW[a[0]];
+    if (spr) owHtml += `<img class="owsprite" alt="" aria-hidden="true"
+      src="data:image/png;base64,${OW[a[0]]}"
+      style="left:${st[3] * 16}px;top:${(st[4] + 1) * 16 - a[1]}px;height:${a[1]}px">`;
+    else if (str(st[0]) === "hidden") owHtml += `<span class="owhidden"
+      style="left:${st[3] * 16}px;top:${st[4] * 16}px" title="hidden item — no sprite">?</span>`;
+    const py = spr ? (st[4] + 1) * 16 - a[1] : (st[4] + 0.5) * 16;
+    pins += `<button class="mark${spr ? " onspr" : ""}${DONE.has(key) ? " done" : ""}${cur ? " cur" : ""}"
+      data-jump="${i}" style="left:${(st[3] + 0.5) * 16}px;top:${py}px;
       background:${(RKIND[str(st[0])] || RKIND.event).color}"
       title="${i + 1}. ${esc(str(st[1]) || "")}">${i + 1}</button>`;
   });
@@ -2584,7 +2622,7 @@ function renderPlayMap(ctx){
       ${node.seg ? `<polyline class="rnow0" points="${svgPath(node.seg)}"/>
                     <polyline class="rnow" points="${svgPath(node.seg)}"/>` : ""}
     </svg>
-    ${pins}
+    ${owHtml}${pins}
   </div>`;
   // the viewer boxes itself around what matters on this map: the leg's path,
   // the gold stretch, and the pinned stops — not the whole map image

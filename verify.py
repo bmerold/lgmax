@@ -422,6 +422,46 @@ for _st in _routej["stages"]:
 check("the walk never enters an unfought trainer aggro zone (sight or body)",
       not _seen_early, str(sorted(set(_seen_early))[:4]))
 
+# Trainer-gated doors (the Rocket Hideout's two barriers) open only once their
+# fight is won, so the walk must never step on a still-locked barrier tile.
+# Replayed in route order, accumulating the trainers beaten so far.
+_tile_gate = {}
+for _m, _bl in WORLD.gated_barriers().items():
+    for _tiles, _gates in _bl:
+        for _t in _tiles:
+            _tile_gate[(_m, _t[0], _t[1])] = _gates
+_door_bad, _door_fought = [], set()
+for _st in _routej["stages"]:
+    for _s in _st["steps"]:
+        for _m, _ts in __import__("tour").walked_tiles(_s["path"]).items():
+            for _x, _y in _ts:
+                _g = _tile_gate.get((_m, _x, _y))
+                if _g and not _g <= _door_fought:
+                    _door_bad.append((_st["stage"], _m, (_x, _y)))
+        if _s["kind"] == "trainer" and _s.get("enc"):
+            _door_fought.add(_s["enc"].split(":")[-1])
+check("the walk never crosses a trainer-gated door before winning its fight",
+      not _door_bad, str(_door_bad[:4]))
+
+# Overworld sprites: every item ball on the route has the game's on-map graphic
+# anchored to its tile, and every anchor resolves to an embedded sprite. (Trainer
+# stops without a static object event -- scripted rivals, Elite Four rematches --
+# legitimately have none and fall back to the numbered pin, so they're exempt.)
+_mapart = json.load(open(f"{OUT}/mapart/index.json"))
+_ow, _owby = _mapart.get("ow", {}), _mapart.get("owByMap", {})
+_ow_dangling = [(m, k, a[0]) for m, anc in _owby.items() for k, a in anc.items()
+                if a[0] not in _ow]
+check("every overworld sprite anchor resolves to a real sprite",
+      not _ow_dangling, str(_ow_dangling[:4]))
+_item_nosprite = []
+for _st in _routej["stages"]:
+    for _s in _st["steps"]:
+        if _s["kind"] != "item": continue
+        if f"{_s['at'][0]},{_s['at'][1]}" not in _owby.get(_s["map"], {}):
+            _item_nosprite.append((_st["stage"], _s["map"], _s["what"]))
+check("every item ball on the route carries its overworld sprite",
+      not _item_nosprite, str(_item_nosprite[:4]))
+
 # Moon Stones are finite: a party can only hold as many stone evolutions as
 # the route has picked up stones by that stage.
 _stones = 0; _stones_by = {}

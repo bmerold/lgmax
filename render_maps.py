@@ -17,7 +17,7 @@ Outputs:
 
 Incremental: an existing PNG is only re-rendered with --force.
 """
-import json, os, re, struct, sys, zlib
+import json, os, re, struct, sys, zlib, functools, collections
 import build_graph as G
 import route_order as R
 
@@ -343,6 +343,110 @@ def trainer_pics():
             print(f"  tpic skip {pic}: {ex}")
     return out
 
+def _read_plte(path):
+    """The PLTE chunk of an indexed PNG -> [(r,g,b), ...]."""
+    d = open(path, "rb").read()
+    pos, pal = 8, []
+    while pos < len(d):
+        ln, typ = struct.unpack(">I4s", d[pos:pos + 8])
+        if typ == b"PLTE":
+            body = d[pos + 8:pos + 8 + ln]
+            pal = [(body[i], body[i + 1], body[i + 2]) for i in range(0, ln, 3)]
+            break
+        pos += 12 + ln
+    return pal
+
+@functools.lru_cache(maxsize=1)
+def _ow_resolve():
+    """OBJ_EVENT_GFX_* -> (source .png, width tiles, height tiles), the overworld
+    sprite the game draws for that object. Walks the decomp's own chain:
+    graphics_info_pointers (gfx id -> info) -> graphics_info (info -> images pic
+    table, w, h) -> pic_tables (table -> first frame's pic symbol) ->
+    graphics.h (pic symbol -> INCBIN path). The source .png sits beside the
+    .4bpp the game compiles, indexed against the sprite's own palette."""
+    oe = f"{REPO}/src/data/object_events"
+    ptr = open(f"{oe}/object_event_graphics_info_pointers.h").read()
+    id2info = dict(re.findall(r"\[(OBJ_EVENT_GFX_\w+)\]\s*=\s*&(\w+)", ptr))
+    ginfo = open(f"{oe}/object_event_graphics_info.h").read()
+    info = {}
+    for m in re.finditer(r"(gObjectEventGraphicsInfo_\w+) =\s*\{(.*?)\};", ginfo, re.S):
+        name, body = m.group(1), m.group(2)
+        img = re.search(r"\.images = (\w+)", body)
+        w = re.search(r"\.width = (\d+)", body)
+        h = re.search(r"\.height = (\d+)", body)
+        if img and w and h:
+            info[name] = (img.group(1), int(w.group(1)), int(h.group(1)))
+    pics = open(f"{oe}/object_event_pic_tables.h").read()
+    tbl2pic = {}
+    for m in re.finditer(r"(\w*PicTable_\w+)\[\] =\s*\{(.*?)\};", pics, re.S):
+        first = re.search(r"overworld_frame\((\w+)", m.group(2))
+        if first: tbl2pic[m.group(1)] = first.group(1)
+    gr = open(f"{oe}/object_event_graphics.h").read()
+    pic2png = dict(re.findall(
+        r"(gObjectEventPic_\w+)\[\] = INCBIN_\w+\(\"([^\"]+)\.4bpp", gr))
+    out = {}
+    for gid, isym in id2info.items():
+        rec = info.get(isym)
+        if not rec: continue
+        img, w, h = rec
+        pic = tbl2pic.get(img)
+        png = pic2png.get(pic) if pic else None
+        if png:
+            out[gid] = (f"{REPO}/{png}.png", w // 8, h // 8)
+    return out
+
+def _ow_frame0(gid):
+    """Compose an object's first (facing-down) frame as an indexed sprite. Frame
+    0 is the top-left w*h of the sheet; palette index 0 is transparent."""
+    png, wt, ht = _ow_resolve()[gid]
+    w, h, px = read_indexed_png(png)
+    pal = _read_plte(png)
+    W, H = wt * 8, ht * 8
+    flat = [px[y * w + x] for y in range(H) for x in range(W)]
+    return W, H, flat, pal
+
+def overworld_sprites():
+    """Overworld sprites for the objects the route actually stops at -- every
+    trainer's body, every item ball, and any NPC/event tile you interact with --
+    so the play maps can layer the real graphic on the tile it's anchored to.
+
+    Returns (files, by_map): `files` maps a sprite key to its written png; by_map
+    maps map -> {"x,y": [key, pixel height]} at each object-event tile a stop
+    lands on. Keyed on the object's graphics id, so identical NPCs share one png.
+    Hidden items are bg_events with no sprite, so they carry no anchor (the page
+    marks them itself)."""
+    rp = f"{OUT}/route.json"
+    if not os.path.exists(rp): return {}, {}
+    route = json.load(open(rp))
+    stops = collections.defaultdict(set)         # map -> {(x,y)} the walk stops at
+    for st in route["stages"]:
+        for s in st["steps"]:
+            stops[s["map"]].add((s["at"][0], s["at"][1]))
+    resolve = _ow_resolve()
+    odir = os.path.join(ART, "ow")
+    os.makedirs(odir, exist_ok=True)
+    files, by_map, written = {}, {}, set()
+    for m, tiles in stops.items():
+        mj = R.maps().get(m) or {}
+        oe = {(o.get("x", 0), o.get("y", 0)): o.get("graphics_id", "")
+              for o in mj.get("object_events", [])}
+        for (x, y) in tiles:
+            gid = oe.get((x, y))
+            if not gid or gid not in resolve: continue
+            key = gid.replace("OBJ_EVENT_GFX_", "")
+            if key not in written:
+                try:
+                    W, H, flat, pal = _ow_frame0(gid)
+                    write_indexed_png(os.path.join(odir, f"{key}.png"),
+                                      W, H, flat, pal, transparent0=True)
+                    files[key] = f"ow/{key}.png"
+                    written.add(key)
+                except Exception as ex:
+                    print(f"  ow skip {key}: {ex}"); continue
+            _, _, ht = resolve[gid]
+            by_map.setdefault(m, {})[f"{x},{y}"] = [key, ht * 8]
+    return files, by_map
+
 def main():
     force = "--force" in sys.argv
     os.makedirs(ART, exist_ok=True)
@@ -375,13 +479,15 @@ def main():
                 rows.append([c["direction"], int(c.get("offset", 0)), nb])
         if rows: conns[m] = rows
     sprites = team_sprites()
+    ow_files, ow_by_map = overworld_sprites()
     with open(os.path.join(ART, "index.json"), "w") as f:
         json.dump({"maps": index, "trainers": trainers,
-                   "connections": conns, "sprites": sprites, "tpics": trainer_pics()}, f)
+                   "connections": conns, "sprites": sprites, "tpics": trainer_pics(),
+                   "ow": ow_files, "owByMap": ow_by_map}, f)
     size = sum(os.path.getsize(os.path.join(ART, f"{m}.png")) for m in index)
     print(f"maps: {len(index)} ({drawn} drawn, {kept} kept), "
           f"{size/1e6:.2f} MB of PNG; trainers placed: {len(trainers)}; "
-          f"sprites: {len(sprites)}")
+          f"sprites: {len(sprites)}; overworld sprites: {len(ow_files)}")
 
 if __name__ == "__main__":
     main()

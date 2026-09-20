@@ -439,6 +439,17 @@ def main():
         if os.path.exists(_fp):
             tpics[_nm] = base64.b64encode(open(_fp, "rb").read()).decode()
 
+    # overworld sprites: the game's own on-map graphic for every trainer/NPC/item
+    # ball the route stops at, embedded once and keyed by graphics id; `owByMap`
+    # anchors them to tiles (only the maps the legs actually draw).
+    ow = {}
+    for _k, _rel in (mapart.get("ow") or {}).items():
+        _fp = f"{OUT}/mapart/{_rel}"
+        if os.path.exists(_fp):
+            ow[_k] = base64.b64encode(open(_fp, "rb").read()).decode()
+    ow_by_map = {mp: a for mp, a in (mapart.get("owByMap") or {}).items()
+                 if mp in used_maps}
+
     # ---- Pokédex: every species obtainable in a LeafGreen run, for the Dex tab.
     # [natNo, name, types, firstStage, source, kind, tradeOnly, evolvesFromName]
     dex = []
@@ -461,7 +472,8 @@ def main():
     economy = json.load(open(f"{OUT}/economy.json")) if os.path.exists(f"{OUT}/economy.json") else {}
 
     payload = {"pool": pool, "stages": stages, "encounters": out_encs,
-               "mapart": art, "sprites": sprites, "tpics": tpics, "dex": dex,
+               "mapart": art, "sprites": sprites, "tpics": tpics,
+               "ow": ow, "owByMap": ow_by_map, "dex": dex,
                "economy": economy,
                "route": {"total": route["stepTotal"]},
                "sections": out_sections, "choices": choices,
