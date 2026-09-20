@@ -110,7 +110,7 @@ def study(stage, enc, sp, level, badges):
 
 def main():
     graph = json.load(open(f"{OUT}/encounters.json"))
-    secs = json.load(open(f"{OUT}/sections.json"))["sections"]["Charmander"]
+    secs = json.load(open(f"{OUT}/sections.json"))["sections"]["no"]["Charmander"]
     C.load_commitments(f"{OUT}/commitments.json")
     rows, considered = [], 0
     for e in graph:

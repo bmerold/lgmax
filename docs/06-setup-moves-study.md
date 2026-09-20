@@ -55,3 +55,24 @@ plays under "fewest turns", winning plays under "don't lose a Pokémon".
 All measured against parties chosen *because* they one-shot. Setup is the classic answer for a
 **solo run or a fixed six** you did not get to tailor per fight. The app's premise is what makes
 setup redundant.
+
+## Re-checked against the current engine and the *actual* plan
+
+The numbers above compare setting up to the same Pokémon **not** setting up — a single-mon baseline.
+When the ability/stat-stage engine landed, a full setup planner was wired into `sections.py`
+(offensive and defensive, every team member tested as a solo sweeper against each trainer) and
+compared against what the optimized plan **actually spends** on that fight, not a single-mon
+baseline. Across all three starters × both trade modes it found **one** applicable case, saving
+**0.01 turns**, and **zero** defensive rescues.
+
+The reason is sharper than "setup ties the plan": it *loses* to it. Gen 3 gives a free switch when a
+trainer's Pokémon faints (SHIFT), so the plan answers each of a trainer's Pokémon with a different
+one-shotter — one turn per KO. A single Pokémon setting up then sweeping cannot beat one-turn-per-KO.
+Concretely, Black Belt Daisuke (Victory Road): the study's best line is Gyarados + Dragon Dance
+soloing in **4.0** turns; the plan clears it in **3.1** (Moltres and Charizard OHKOing, switching
+free between his party). Defensive setup fails too — the plans rarely lose a Pokémon, and a fight
+hard enough to faint one can't be soloed even with a defensive boost.
+
+So the planner does not model setup: it is not that setup is unmodeled, it is that setup is
+dominated by the app's own objective. The engine's stat-stage support remains (Intimidate uses it);
+the setup integration was removed as inert. `setup_study.py` is the standing analysis.
