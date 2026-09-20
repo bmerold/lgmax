@@ -716,6 +716,7 @@ details.notes[open] summary::after{content:"−"}
           <button data-view="sec">full guide</button>
           <button data-view="tm">TM plan</button>
           <button data-view="cho">choices</button>
+          <button data-view="dex">dex</button>
           <button data-view="enc">encounters</button>
         </span>
         <button id="drawerClose">✕</button></div>
@@ -2789,6 +2790,7 @@ document.querySelector("#playDrawer .drawer-links").addEventListener("click", ev
     x.setAttribute("aria-current", x.dataset.view === view));
   ["enc","sec","tm","cho","play","dex"].forEach(v =>
     document.getElementById("view-" + v).hidden = v !== view);
+  if (view === "dex") renderDex();
   saveUi();
 });
 
