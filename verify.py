@@ -515,6 +515,31 @@ check("status-immunity abilities neutralize the matching secondary",
       and E.status_tempo("MOVE_BITE", True, 4, def_ability="INNER_FOCUS")[0] == 1.0
       and E.status_tempo("MOVE_BODY_SLAM", True, 4, def_ability="NONE")[0] < 1.0)
 
+# ------------------------------------------------------------------ stat stages
+# Stat-stage multipliers must match gStatStageRatios exactly (src/pokemon.c).
+check("stat-stage multipliers match the ROM table",
+      E.stage_stat(100, 1) == 150 and E.stage_stat(100, 2) == 200
+      and E.stage_stat(100, -1) == 66 and E.stage_stat(100, -6) == 25
+      and E.stage_stat(100, 6) == 400)
+
+# A critical hit ignores the attacker's own Attack drops (src/pokemon.c crit rule):
+# a -1 Attack attacker's crit damage equals a neutral attacker's crit damage.
+_geo = E.make_mon("SPECIES_GEODUDE", 30)
+_mac = E.make_mon("SPECIES_MACHOP", 30)
+_mac_dn = {**_mac, "boosts": {"attack": -1}}
+check("a crit ignores the attacker's Attack drop",
+      E.damage_rolls(_mac_dn, _geo, "MOVE_KARATE_CHOP", crit=True)[8]
+      == E.damage_rolls(_mac, _geo, "MOVE_KARATE_CHOP", crit=True)[8]
+      and E.damage_rolls(_mac_dn, _geo, "MOVE_KARATE_CHOP", crit=False)[8]
+      < E.damage_rolls(_mac, _geo, "MOVE_KARATE_CHOP", crit=False)[8])
+
+# Intimidate must actually reduce the physical damage its holder faces: an
+# opponent with Intimidate takes longer for a physical attacker to KO.
+_t_plain = E.make_mon("SPECIES_TAUROS", 30, ability="NONE")
+_t_intim = E.make_mon("SPECIES_TAUROS", 30, ability="INTIMIDATE")
+check("Intimidate lowers the foe's Attack at entry",
+      E.matchup(_mac, _t_intim)["turnsToKO"] > E.matchup(_mac, _t_plain)["turnsToKO"])
+
 # ------------------------------------------------------------------ graph sanity
 graph = json.load(open(f"{OUT}/encounters.json"))
 ids = [e["id"] for e in graph]

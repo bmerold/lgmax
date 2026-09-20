@@ -35,6 +35,43 @@ WEIGHTS     = _load("weights")
 
 PHYSICAL_TYPES = {"NORMAL","FIGHTING","FLYING","POISON","GROUND","ROCK","BUG","GHOST","STEEL"}
 
+# Stat-stage multipliers. gStatStageRatios (src/pokemon.c), indexed by stage+6:
+# Attack/Defense/Sp.Atk/Sp.Def/Speed scale by numerator/denominator.
+STAT_STAGE_RATIOS = [(10,40),(10,35),(10,30),(10,25),(10,20),(10,15),(10,10),
+                     (15,10),(20,10),(25,10),(30,10),(35,10),(40,10)]
+# Accuracy/evasion stage multipliers. sAccuracyStageRatios (battle_script_commands.c),
+# indexed by (accuracyStage - evasionStage) + 6.
+ACC_STAGE_RATIOS = [(33,100),(36,100),(43,100),(50,100),(60,100),(75,100),(1,1),
+                    (133,100),(166,100),(2,1),(233,100),(133,50),(3,1)]
+
+def stage_stat(stat, stage):
+    """A battle stat scaled by its stat stage (-6..+6), integer-truncated exactly
+    as APPLY_STAT_MOD does in src/pokemon.c."""
+    n, d = STAT_STAGE_RATIOS[max(-6, min(6, stage)) + 6]
+    return stat * n // d
+
+def effective_speed(mon):
+    """Speed after its stat stage — used only to decide who moves first."""
+    return stage_stat(mon["stats"]["speed"], (mon.get("boosts") or {}).get("speed", 0))
+
+def entry_boosts(base, foe):
+    """Starting stat-stage boosts for a mon given the foe's entry abilities: the
+    foe's Intimidate lowers this mon's Attack as it enters the fight. `base` is
+    whatever boosts the mon already carries (setup, etc.); returns a new dict."""
+    b = dict(base or {})
+    deb = A.entry_foe_debuff(foe.get("ability", "NONE"))
+    if deb:
+        stat, amt = deb
+        b[stat] = max(-6, b.get(stat, 0) - amt)
+    return b
+
+def with_entry_boosts(a, b):
+    """Return shallow copies of two mons about to fight, each carrying its
+    entry-ability stat stages (Intimidate lowers the other's Attack). Copies so
+    shared/cached base mons are never mutated across fights."""
+    return ({**a, "boosts": entry_boosts(a.get("boosts"), b)},
+            {**b, "boosts": entry_boosts(b.get("boosts"), a)})
+
 # ------------------------------------------------------------------ natures
 NATURE_NAMES = ["Hardy","Lonely","Brave","Adamant","Naughty","Bold","Docile","Relaxed",
     "Impish","Lax","Timid","Hasty","Serious","Jolly","Naive","Modest","Mild","Quiet",
@@ -188,6 +225,8 @@ def make_mon(species_const, level, ivs_flat=15, evs=None, nature=0, moves=None,
         "item": item, "types": sp["types"],
         "ability": ability or sp["abilities"][0],
         "stats": calc_stats(species_const, level, ivs, evs or {}, nature),
+        # stat stages in play this fight (-6..+6 per stat); empty means neutral
+        "boosts": {},
     }
 
 # ------------------------------------------------------------------ type effectiveness
@@ -417,20 +456,30 @@ def base_damage(attacker, defender, move_const, crit=False,
     if mv["effect"] == "EXPLOSION":
         defense //= 2
 
+    # Stat stages enter here (APPLY_STAT_MOD in CalculateBaseDamage), applied to
+    # the already badge/ability/item-modified stat. A critical hit ignores the
+    # changes that would cut its damage: the attacker's own offensive drops and
+    # the defender's defensive boosts (src/pokemon.c, gCritMultiplier == 2).
+    ab_boosts = attacker.get("boosts") or {}
+    df_boosts = defender.get("boosts") or {}
     lvl_term = (2 * attacker["level"] // 5 + 2)
     if physical:
-        d = attack
+        off_stage, def_stage = ab_boosts.get("attack", 0), df_boosts.get("defense", 0)
+        d = attack if (crit and off_stage <= 0) else stage_stat(attack, off_stage)
         d = d * power
         d = d * lvl_term
-        d = d // max(1, defense)
+        deff = defense if (crit and def_stage >= 0) else stage_stat(defense, def_stage)
+        d = d // max(1, deff)
         d = d // 50
         if attacker.get("burned") and ab != "GUTS": d //= 2
         if d == 0: d = 1
     else:
-        d = spatk
+        off_stage, def_stage = ab_boosts.get("spAttack", 0), df_boosts.get("spDefense", 0)
+        d = spatk if (crit and off_stage <= 0) else stage_stat(spatk, off_stage)
         d = d * power
         d = d * lvl_term
-        d = d // max(1, spdef)
+        deff = spdef if (crit and def_stage >= 0) else stage_stat(spdef, def_stage)
+        d = d // max(1, deff)
         d = d // 50
     return d + 2
 
@@ -512,7 +561,14 @@ def move_profile(attacker, defender, move_const, badges=None):
     base_acc = mv["accuracy"]
     if base_acc:
         physical = mtype in PHYSICAL_TYPES
-        acc = min(100, round(base_acc * A.accuracy_mult(attacker.get("ability", "NONE"), physical)))
+        # accuracy stage (attacker) vs evasion stage (defender), then the ability
+        # multiplier — the order Cmd_accuracycheck applies them in.
+        ab, db = attacker.get("boosts") or {}, defender.get("boosts") or {}
+        buff = max(-6, min(6, ab.get("accuracy", 0) - db.get("evasion", 0)))
+        n, d = ACC_STAGE_RATIOS[buff + 6]
+        acc = base_acc * n // d
+        acc = int(acc * A.accuracy_mult(attacker.get("ability", "NONE"), physical))
+        acc = min(100, acc)
     else:
         acc = 100
     avg = sum(k * p for k, p in dist.items())
@@ -623,6 +679,8 @@ def best_move(attacker, defender, badges=None, moves=None):
 def matchup(player, opponent, badges=None):
     """Full two-sided analysis of one player mon vs one opposing mon."""
     pb = badges or {}
+    # entry abilities (Intimidate) set each side's starting stat stages
+    player, opponent = with_entry_boosts(player, opponent)
     off = best_move(player, opponent, badges={"atk": pb.get("atk", False),
                                               "spatk": pb.get("spatk", False)})
     # the opponent gets no badge boosts (player side only)

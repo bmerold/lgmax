@@ -20,7 +20,7 @@ export LGMAX_POKEFIRERED=~/pokefirered      # optional; this is the default
 ```
 
 Python 3.10+, no third-party packages. Takes 6–8 minutes; `build.sh` runs the whole pipeline and
-finishes with `verify.py`, which must print 42 OKs. The output is `app.html` — one self-contained
+finishes with `verify.py`, which must print 45 OKs. The output is `app.html` — one self-contained
 file, ~10 MB, no server needed.
 
 `./deploy.sh` publishes the current `app.html` to
@@ -70,7 +70,7 @@ them.
 | `render_maps.py` | renders each section's maps to PNG from the decomp's tilesets/layouts, and pins every trainer to the tile its object event stands on |
 | `sections.py` | two-pass per-section party optimizer + choice evaluation |
 | `compact.py` | array-encoded payload (~25 MB → ~5 MB) |
-| `verify.py` | **42 guard rails; all must pass after every rebuild** |
+| `verify.py` | **45 guard rails; all must pass after every rebuild** |
 | `setup_study.py` | standalone: does setting up beat hit-and-switch? (it does not) |
 
 `sections.py` runs before `optimize.py` because it writes `data/commitments.json`, which the
@@ -99,9 +99,13 @@ See `docs/` for the working notes behind each of these.
 
 ## Known, deliberate limitations
 
-- No stat-stage modelling on either side. Measured cost on the player's side: about one turn across
-  the whole game (`docs/setup-moves-study.md`). The opponent's side still matters — Sabrina, Agatha
-  and the Champion are harder than the numbers suggest.
+- Stat stages ARE modelled in the damage calc on both sides — the exact `gStatStageRatios` table,
+  with Gen 3's crit rule (a crit ignores the attacker's own Attack drops and the defender's Defense
+  boosts). **Intimidate** is applied at fight entry, lowering the foe's Attack. What's not yet
+  modelled: the planner does not proactively *use* setup moves (Swords Dance, Calm Mind…), and the
+  opponent AI doesn't throw stat moves (Leer, Screech, Sand-Attack) — both sides still open at
+  neutral stages unless an entry ability says otherwise. The setup-on-your-side payoff was measured
+  at about one turn across the whole game (`docs/setup-moves-study.md`).
 - Secondary effects of damaging moves ARE folded in, as expected value on both sides: flinch
   (only when faster), freeze with its 20% thaw, paralysis's 25% full-para, burn's attack halving
   and chip, poison chip, and confusion. Deliberate status *moves* (Thunder Wave, Sleep Powder)

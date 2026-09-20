@@ -261,7 +261,11 @@ def rain_dish():   return {"unmodeled": "heals 1/16 HP per turn in rain (no weat
 def sand_veil():   return {"unmodeled": "evasion ×1.25 in a sandstorm (no weather)"}
 def forecast():    return {"unmodeled": "Castform type follows the weather (no weather)"}
 # Switch-in / turn-order / multi-mon tricks (no switching or allies modeled):
-def intimidate():  return {"unmodeled": "lowers the foe's Attack one stage on switch-in"}
+def intimidate():
+    """Lowers the foe's Attack one stage as this mon enters. In a 1v1 that's the
+    start of the fight, so it's modeled as an entry stat drop (battle_util.c
+    ABILITYEFFECT_ON_SWITCHIN, case ABILITY_INTIMIDATE)."""
+    return {"entry_foe_stat_drop": ("attack", 1)}
 def trace():       return {"unmodeled": "copies a foe's ability on switch-in"}
 def speed_boost():   return {"unmodeled": "+1 Speed stage at each turn's end (no stage sim)"}
 def truant():        return {"unmodeled": "acts only every other turn"}
@@ -397,6 +401,12 @@ def secondary_scale(atk_ability, def_ability):
 def sleep_wake_mult(def_ability):
     """How much faster this mon wakes from sleep (Early Bird = 2×)."""
     return descriptor(def_ability).get("sleep_wake_mult", 1.0)
+
+
+def entry_foe_debuff(ability):
+    """(stat, stages) this ability drops on the *opposing* mon as it enters the
+    fight, or None. Intimidate is the only Gen 3 one that touches a battle stat."""
+    return descriptor(ability).get("entry_foe_stat_drop")
 
 
 # The remaining CalculateBaseDamage stat mults (Huge/Pure Power, Hustle, Guts,

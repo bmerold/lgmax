@@ -475,8 +475,11 @@ def profile(pm, opp, move, badges, obey=1.0):
            badges["atk"], badges["spatk"], obey)
     hit = _profile_cache.get(key)
     if hit is None:
-        p = E.move_profile(pm, opp, move, badges={"atk": badges["atk"],
-                                                  "spatk": badges["spatk"]})
+        # entry abilities (Intimidate) set opening stat stages; deterministic
+        # from the pair's species, which the cache key already carries.
+        pm2, opp2 = E.with_entry_boosts(pm, opp)
+        p = E.move_profile(pm2, opp2, move, badges={"atk": badges["atk"],
+                                                    "spatk": badges["spatk"]})
         if p is None or p["immune"]:
             hit = None
         else:
@@ -515,7 +518,9 @@ def threat(opp, pm, badges):
            pm["level"], badges["def"], badges["spdef"])
     hit = _threat_cache.get(key)
     if hit is None:
-        t = E.best_move(opp, pm, badges={"def": badges["def"], "spdef": badges["spdef"]},
+        # our Intimidate lowers the opponent's Attack; theirs lowers ours
+        opp2, pm2 = E.with_entry_boosts(opp, pm)
+        t = E.best_move(opp2, pm2, badges={"def": badges["def"], "spdef": badges["spdef"]},
                         moves=opp["moves"])
         hit = ({"name": t["name"], "avg": t["avg"] * t["accuracy"] / 100.0,
                 "max": t["max"], "const": t["move"],
@@ -1527,7 +1532,45 @@ def build_legs(battles, final, avail, stage):
     _title_legs(legs)
     return legs, sec_log
 
-def solve_section(stage, encs, starter, avail, tm_value=None, carry=None):
+# Moon Stones are scarce and consumed permanently, so a run can hold only as many
+# stone evolutions as it has picked stones up by a given stage (Mt. Moon gives two
+# at stage 5, then Rocket Hideout at 17, Seafoam at 26). Without a budget the party
+# solver will happily field three stone evolutions before the third stone exists,
+# so it tracks which the run has committed and won't introduce a new one over
+# budget. verify.py's Moon-Stone guard is the safety net for this.
+MOON_EVOS = {"SPECIES_NIDOKING", "SPECIES_NIDOQUEEN",
+             "SPECIES_CLEFABLE", "SPECIES_WIGGLYTUFF"}
+_MOON_BUDGET = None
+def moon_budget(stage):
+    """How many Moon-Stone evolutions the run can hold by `stage`: the count of
+    Moon Stones the route picks up on or before it (data/route.json)."""
+    global _MOON_BUDGET
+    if _MOON_BUDGET is None:
+        _MOON_BUDGET = {}
+        try:
+            rt = json.load(open(f"{OUT}/route.json"))
+            n = 0
+            for st in rt["stages"]:
+                for s in st["steps"]:
+                    if "Moon Stone" in s.get("what", "") and s.get("kind") in ("item", "hidden"):
+                        n += 1
+                _MOON_BUDGET[st["stage"]] = n
+        except Exception:
+            _MOON_BUDGET = {}
+    b = 0
+    for s in sorted(_MOON_BUDGET):
+        if s <= stage:
+            b = _MOON_BUDGET[s]
+    return b
+
+def moon_ok(species, stage, moon_used):
+    """A Moon-Stone evolution is allowed only if the run already fields it or
+    still has an unspent stone by this stage."""
+    if species not in MOON_EVOS or moon_used is None:
+        return True
+    return species in moon_used or len(moon_used) < moon_budget(stage)
+
+def solve_section(stage, encs, starter, avail, tm_value=None, carry=None, moon_used=None):
     st = P.STAGE_BY_ID[stage]
     level, badges = st["level"], O.badges_for(stage)
     encs = encs or []
@@ -1586,7 +1629,8 @@ def solve_section(stage, encs, starter, avail, tm_value=None, carry=None):
     # Charmeleon slip into parties they could never legally join
     cands = [sp for sp in O.candidates(stage)
              if C.starter_of(sp) in (None, starter) and C.allowed(sp)
-             and not C.outgrown(sp, stage, avail)]
+             and not C.outgrown(sp, stage, avail)
+             and moon_ok(sp, stage, moon_used)]
 
     # ---- screen with the scalar model
     screened = []
@@ -2095,12 +2139,16 @@ if __name__ == "__main__":
             tm_value[starter] = defaultdict(float)
             reset_hm_held()
             carry = None
+            moon_used = set()      # Moon-Stone evolutions the run has committed
             for stage in sorted(st["id"] for st in P.STAGES):
                 result[starter][stage] = solve_section(
                     stage, sections.get(stage, []), starter, avail,
                     tm_value[starter],
-                    carry=carry if stage in cold_stage_starts() else None)
+                    carry=carry if stage in cold_stage_starts() else None,
+                    moon_used=moon_used)
                 carry = (result[starter][stage] or {}).get("carryOut") or carry
+                for t in (result[starter][stage] or {}).get("team", []):
+                    if t["species"] in MOON_EVOS: moon_used.add(t["species"])
             print(f"  {starter}: pass 1 done ({time.time()-t0:.0f}s)", flush=True)
 
     # the reference starter for the non-starter choices is whichever clears the
@@ -2137,11 +2185,15 @@ if __name__ == "__main__":
             O.set_tm_plan(SCARCE, owners)
             result[starter] = {}
             carry = None
+            moon_used = set()
             for stage in sorted(st["id"] for st in P.STAGES):
                 result[starter][stage] = solve_section(
                     stage, sections.get(stage, []), starter, avail,
-                    carry=carry if stage in cold_stage_starts() else None)
+                    carry=carry if stage in cold_stage_starts() else None,
+                    moon_used=moon_used)
                 carry = (result[starter][stage] or {}).get("carryOut") or carry
+                for t in (result[starter][stage] or {}).get("team", []):
+                    if t["species"] in MOON_EVOS: moon_used.add(t["species"])
             build_party_plans(result[starter], avail)
             print(f"  {starter}: re-solved — {sum(len(p['teach']) for p in plan)} "
                   f"single-use TMs spent ({time.time()-t0:.0f}s)", flush=True)

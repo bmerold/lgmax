@@ -214,9 +214,11 @@ def sweep(player, opp_mons, pool, badges, stage, terrain=None):
     total_turns = 0.0
     per_opp = []
     _ob = obey_mult(player, badges)
-    for opp in opp_mons:
-        off = E.best_move(player, opp, badges={"atk": badges.get("atk", False),
-                                               "spatk": badges.get("spatk", False)},
+    for opp0 in opp_mons:
+        # entry abilities (Intimidate) set each side's opening stat stages
+        pl, opp = E.with_entry_boosts(player, opp0)
+        off = E.best_move(pl, opp, badges={"atk": badges.get("atk", False),
+                                           "spatk": badges.get("spatk", False)},
                           moves=pool)
         if off is None:
             return None                       # cannot damage this Pokemon at all
@@ -225,18 +227,18 @@ def sweep(player, opp_mons, pool, badges, stage, terrain=None):
         if not math.isfinite(t) or t >= 40:
             return None
         t *= _ob
-        thr = E.best_move(opp, player, badges={"def": badges.get("def", False),
-                                               "spdef": badges.get("spdef", False)},
+        thr = E.best_move(opp, pl, badges={"def": badges.get("def", False),
+                                           "spdef": badges.get("spdef", False)},
                           moves=opp["moves"])
-        faster = player["stats"]["speed"] > opp["stats"]["speed"]
+        faster = E.effective_speed(pl) > E.effective_speed(opp)
         # fold secondary-effect tempo both ways (flinch, freeze, paralysis,
         # burn, poison, confusion), exactly as the section simulator does
         act, burnf, chip = E.status_tempo(off["move"], faster, t, terrain,
-            def_ability=opp.get("ability", "NONE"), atk_ability=player.get("ability", "NONE"))
+            def_ability=opp.get("ability", "NONE"), atk_ability=pl.get("ability", "NONE"))
         chip_in = 0.0
         if thr:
             a2, b2, c2 = E.status_tempo(thr["move"], not faster, t, terrain,
-                def_ability=player.get("ability", "NONE"), atk_ability=opp.get("ability", "NONE"))
+                def_ability=pl.get("ability", "NONE"), atk_ability=opp.get("ability", "NONE"))
             t = t / max(a2, 0.25)
             if b2 > 0 and E.MOVES[off["move"]]["category"] == "PHYSICAL":
                 t /= max(1e-6, 1.0 - 0.5 * b2)
@@ -480,17 +482,18 @@ def _weighted_sweep(player, opps, pool, badges):
     hp = player["stats"]["hp"]
     turns = 0.0; taken = 0.0; per = []
     _ob = obey_mult(player, badges)
-    for opp, weight in opps:
-        off = E.best_move(player, opp, badges={"atk": badges["atk"], "spatk": badges["spatk"]},
+    for opp0, weight in opps:
+        pl, opp = E.with_entry_boosts(player, opp0)   # Intimidate at entry
+        off = E.best_move(pl, opp, badges={"atk": badges["atk"], "spatk": badges["spatk"]},
                           moves=pool)
         if off is None: return None
         t = _turn_cost(off, E.expected_turns_to_ko(off["dist"], off["accuracy"],
                                                    opp["stats"]["hp"]))
         if not math.isfinite(t) or t >= 40: return None
         t *= _ob
-        thr = E.best_move(opp, player, badges={"def": badges["def"], "spdef": badges["spdef"]},
+        thr = E.best_move(opp, pl, badges={"def": badges["def"], "spdef": badges["spdef"]},
                           moves=opp["moves"])
-        faster = player["stats"]["speed"] > opp["stats"]["speed"]
+        faster = E.effective_speed(pl) > E.effective_speed(opp)
         swings = max(0.0, t - (1.0 if faster else 0.0))
         tk = (thr["avg"] * thr["accuracy"] / 100.0 * swings) if thr else 0.0
         turns += weight * t
