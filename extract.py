@@ -278,6 +278,8 @@ def parse_trainers(parties):
             "pic": pic.group(1) if pic else None,
             "name": titlecase(nm.group(1)) if nm and nm.group(1) else "",
             "class": cls.group(1).replace("TRAINER_CLASS_", "").replace("_", " ").title() if cls else "",
+            # the raw class constant, so the prize-money table (keyed by it) resolves
+            "classConst": cls.group(1).replace("TRAINER_CLASS_", "") if cls else None,
             "partyLabel": pty.group(2) if pty else None,
             "doubleBattle": dbl,
             "items": items,

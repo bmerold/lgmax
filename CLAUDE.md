@@ -10,7 +10,7 @@ the working contract for changing the code.
    trainer parties, encounter tables, map geometry, item scripts, mechanics — all parsed from
    `$LGMAX_POKEFIRERED` (default `~/pokefirered`). If the ROM disagrees with received wisdom, the
    ROM wins, and a comment should cite the source file (e.g. `src/data/…` or a map's `scripts.inc`).
-2. **`verify.py` is the safety net — it must print all OKs after every rebuild.** It encodes 48
+2. **`verify.py` is the safety net — it must print all OKs after every rebuild.** It encodes 52
    executable invariants (route coverage/continuity, no illegal party, sight-line/aggro legality,
    move/TM legality, Moon-Stone accounting, …). A new guard is the right way to lock in any bug a
    playthrough uncovers. Never weaken a guard to make it pass; fix the cause.
@@ -20,7 +20,7 @@ the working contract for changing the code.
 
 ## Pipeline order (build.sh)
 
-`extract.py` → `build_graph.py` → `tour.py` → `sections.py` → `optimize.py` → `render_maps.py` →
+`extract.py` → `build_graph.py` → `tour.py` → `sections.py` → `optimize.py` → `economy.py` → `render_maps.py` →
 `compact.py` → inject into `app_template.html` → `verify.py`. Each stage reads the previous stage's
 JSON in `data/`. `tour.py` runs before `sections.py`, so `sections.py` may read `data/route.json`.
 

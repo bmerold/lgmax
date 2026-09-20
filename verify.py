@@ -565,6 +565,27 @@ check("every dex evolves-from link resolves to another dex species",
       all(d[7] == -1 or _pool[d[7]] in _dex_names for d in _dex),
       str([_pool[d[1]] for d in _dex if d[7] != -1 and _pool[d[7]] not in _dex_names][:6]))
 
+# ------------------------------------------------------------------ money
+# Prize money follows the ROM: 4 * last-mon level * class value. Two known
+# leaders anchor the formula; the rest of the model builds on it.
+import economy as EC
+check("prize money matches the ROM for known trainers",
+      EC.prize("TRAINER_LEADER_BROCK") == 1400 and EC.prize("TRAINER_LEADER_MISTY") == 2100,
+      f"Brock={EC.prize('TRAINER_LEADER_BROCK')} Misty={EC.prize('TRAINER_LEADER_MISTY')}")
+_econ = _pl.get("economy", {})
+check("the money model ships an income curve and a shopping list",
+      _econ.get("totalIncome", 0) > 0 and len(_econ.get("purchases", [])) > 0)
+_seq = [_econ["incomeByStage"][k] for k in sorted(_econ.get("incomeByStage", {}), key=int)]
+check("cumulative income never decreases across stages",
+      all(b >= a for a, b in zip(_seq, _seq[1:])))
+# affordability is clamped to when a thing can actually be bought — nothing is
+# ever "affordable" at a stage before its shop opens.
+check("no purchase is affordable before it can be bought",
+      all(p.get("affordAt") is None or p["affordAt"] >= p["stage"]
+          for p in _econ.get("purchases", [])),
+      str([p["what"] for p in _econ.get("purchases", [])
+           if p.get("affordAt") is not None and p["affordAt"] < p["stage"]][:5]))
+
 print()
 if fails:
     print(f"{len(fails)} check(s) FAILED")

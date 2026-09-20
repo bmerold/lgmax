@@ -34,6 +34,7 @@ else
 fi
 python3 sections.py     # solves every section, battles in ROUTE order
 python3 optimize.py     # per-encounter rankings (reads commitments.json)
+python3 economy.py      # money: prize income vs Game Corner / stone costs
 python3 render_maps.py  # map PNGs from the decomp's tilesets (incremental)
 python3 compact.py      # array-encoded payload
 

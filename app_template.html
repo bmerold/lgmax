@@ -630,6 +630,19 @@ textarea.sync-code{width:100%;height:60px;resize:vertical;font-family:var(--mono
 .dex-trade{color:var(--accent-ink);font-weight:600}
 .dex-empty{color:var(--ink-3);padding:20px}
 
+/* ---------- money ---------- */
+#moneyPanel{padding:18px}
+.money-h{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;flex-wrap:wrap;
+  padding-bottom:16px;border-bottom:1px solid var(--line)}
+.money-big{font-family:var(--display);font-weight:800;font-size:32px;color:var(--ink);display:block}
+.money-sub{font-size:12.5px;color:var(--ink-3);max-width:40ch;display:block;margin-top:2px}
+.money-stats{display:flex;gap:22px}
+.money-stats .mstat b{font-family:var(--display);font-size:18px}
+.money-note{font-size:13.5px;color:var(--ink-2);line-height:1.55;padding:14px 0;max-width:72ch}
+.money-note b{color:var(--ink)}
+.ctab .coins{display:block;font-size:10.5px;color:var(--ink-3);letter-spacing:.02em}
+.money-note code,#moneyPanel .foot code{font-family:var(--mono);font-size:.92em}
+
 /* ---------- choices ---------- */
 .choice-h{padding:16px 18px 14px}
 .choice-h h3{font-size:18px;font-weight:700}
@@ -702,6 +715,7 @@ details.notes[open] summary::after{content:"−"}
       <button class="navb" data-view="tm" aria-current="false">TM plan</button>
       <button class="navb" data-view="cho" aria-current="false">Choices</button>
       <button class="navb" data-view="dex" aria-current="false">Dex</button>
+      <button class="navb" data-view="money" aria-current="false">Money</button>
       <button class="navb sync-navb" id="syncBtn" title="carry your progress between devices">⇄ Sync</button>
     </nav>
   </header>
@@ -723,6 +737,7 @@ details.notes[open] summary::after{content:"−"}
           <button data-view="tm">TM plan</button>
           <button data-view="cho">choices</button>
           <button data-view="dex">dex</button>
+          <button data-view="money">money</button>
           <button data-view="enc">encounters</button>
         </span>
         <button id="drawerClose">✕</button></div>
@@ -770,6 +785,10 @@ details.notes[open] summary::after{content:"−"}
     <main class="panel" id="choPanel"></main>
   </div>
 
+  <div id="view-money" hidden>
+    <main class="panel" id="moneyPanel"></main>
+  </div>
+
   <div id="view-dex" hidden>
     <div id="dexHead">
       <div id="dexCount"></div>
@@ -812,6 +831,8 @@ const SPRITES = DATA.sprites || {};
 /* The Pokédex: every species obtainable in a run. Field map matches compact.py:
    [natNo, name, types, firstStage, source, kind, tradeOnly, evolvesFromName]. */
 const DEX = DATA.dex || [];
+/* The money model: prize-money income by stage vs the run's real purchases. */
+const ECON = DATA.economy || {};
 const TPICS = DATA.tpics || {};
 /* Choices the run makes once and keeps; the section parties are solved with
    these locked, so a single Eevee can't become a Vaporeon in one town and a
@@ -882,7 +903,7 @@ try {
     trading = !!u.trading;
     if (typeof u.sec === "number") selectedSec = u.sec;
     if (typeof u.leg === "number") selectedLeg = u.leg;
-    if (["enc","sec","tm","cho","play","dex"].includes(u.view)) view = u.view;
+    if (["enc","sec","tm","cho","play","dex","money"].includes(u.view)) view = u.view;
     if (typeof u.enc === "string") selected = u.enc;
   }
 } catch (e) {}
@@ -964,9 +985,10 @@ document.getElementById("nav").addEventListener("click", ev => {
   view = b.dataset.view;
   document.querySelectorAll("[data-view]").forEach(x =>
     x.setAttribute("aria-current", x.dataset.view === view));
-  ["enc","sec","tm","cho","play","dex"].forEach(v =>
+  ["enc","sec","tm","cho","play","dex","money"].forEach(v =>
     document.getElementById("view-" + v).hidden = v !== view);
   if (view === "dex") renderDex();     // reflects whatever you've checked off so far
+  if (view === "money") renderMoney();
   updateSticky();
   saveUi();
 });
@@ -1986,7 +2008,7 @@ function openEncounter(id, fromN){
   selected = id; view = "enc";
   document.querySelectorAll("[data-view]").forEach(x =>
     x.setAttribute("aria-current", x.dataset.view === "enc"));
-  ["enc","sec","tm","cho","play","dex"].forEach(v =>
+  ["enc","sec","tm","cho","play","dex","money"].forEach(v =>
     document.getElementById("view-" + v).hidden = v !== "enc");
   renderList();
   renderPanel(e);
@@ -2007,7 +2029,7 @@ function backToGuide(){
   view = dest;
   document.querySelectorAll("[data-view]").forEach(x =>
     x.setAttribute("aria-current", x.dataset.view === dest));
-  ["enc","sec","tm","cho","play","dex"].forEach(v =>
+  ["enc","sec","tm","cho","play","dex","money"].forEach(v =>
     document.getElementById("view-" + v).hidden = v !== dest);
   saveUi();
   if (dest === "play"){ guideReturn = null; renderPlay(); return; }
@@ -2794,9 +2816,10 @@ document.querySelector("#playDrawer .drawer-links").addEventListener("click", ev
   view = b.dataset.view;
   document.querySelectorAll("#nav [data-view]").forEach(x =>
     x.setAttribute("aria-current", x.dataset.view === view));
-  ["enc","sec","tm","cho","play","dex"].forEach(v =>
+  ["enc","sec","tm","cho","play","dex","money"].forEach(v =>
     document.getElementById("view-" + v).hidden = v !== view);
   if (view === "dex") renderDex();
+  if (view === "money") renderMoney();
   saveUi();
 });
 
@@ -3168,6 +3191,45 @@ document.getElementById("dexGrid").addEventListener("keydown", ev => {
   if (c){ ev.preventDefault(); dexToggle(c.dataset.dex); }
 });
 
+/* ---------------- money ---------------- */
+const yen = n => "¥" + (n || 0).toLocaleString();
+const stageName = id => (STAGE_BY_ID[id] || {}).name || ("stage " + id);
+
+function renderMoney(){
+  const el = document.getElementById("moneyPanel");
+  if (!ECON.totalIncome){ el.innerHTML = `<p class="foot">No economy data.</p>`; return; }
+  const gcOpen = ECON.incomeByGameCorner, bill = ECON.gameCornerBill, coins = ECON.gameCornerCoins;
+  const verdict = ECON.gcAffordAtOpen
+    ? `You have ${yen(gcOpen)} by Celadon — enough to buy the coins for all three at the counter.`
+    : `You have only ${yen(gcOpen)} by Celadon, so on battle money alone you couldn't buy the
+       ${coins.toLocaleString()} coins for all three until <b>${esc(stageName(ECON.gcAffordAt))}</b>.
+       In practice you win coins on the slots — the ¥ figure is the counter's buy price
+       (${yen(ECON.coinYen)}/coin), a ceiling.`;
+  const rows = (ECON.purchases || []).map(p => `<tr>
+    <td><b>${esc(p.what)}</b></td>
+    <td>${esc(p.kind)}${p.item ? ` · ${esc(p.item)}` : ""}</td>
+    <td class="r">${yen(p.yen)}${p.coins ? `<span class="coins">${p.coins.toLocaleString()} coins</span>` : ""}</td>
+    <td>${esc(p.where || "")}</td>
+    <td>${p.affordAt != null ? esc(stageName(p.affordAt)) : "—"}</td></tr>`).join("");
+  el.innerHTML = `
+    <div class="money-h">
+      <div><span class="money-big">${yen(ECON.totalIncome)}</span>
+        <span class="money-sub">prize money across the whole run — no grinding, no Amulet Coin</span></div>
+      <div class="money-stats">
+        <div class="mstat"><b>${yen(gcOpen)}</b><span>earned by Celadon</span></div>
+        <div class="mstat"><b>${yen(bill)}</b><span>Game Corner prizes · ${coins.toLocaleString()} coins</span></div>
+      </div>
+    </div>
+    <div class="money-note"><b>The Game Corner is the one real money sink.</b> ${verdict}</div>
+    <div class="ctab-wrap"><table class="ctab">
+      <thead><tr><th>Buy</th><th>What</th><th class="r">Cost</th><th>Where</th><th>Affordable by</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
+    <p class="foot">Income is Gen 3 prize money — 4 × the trainer's last Pokémon's level × its class
+      value (<code>gTrainerMoneyTable</code>) — over every trainer the route beats, each once. Stones
+      are the Celadon Dept. Store price; Game Corner costs are the LeafGreen coin prices at
+      ${yen(ECON.coinYen)}/coin.</p>`;
+}
+
 /* ---------------- boot ---------------- */
 renderMast();
 renderList();
@@ -3175,6 +3237,7 @@ renderSecList();
 renderChoices();
 renderTM();
 renderDex();
+renderMoney();
 if (!selected || !ENC.some(e => e.id === selected && forStarter(e)))
   selected = (ENC.find(e => e.id === "trainer:TRAINER_LEADER_BROCK") || ENC[0]).id;
 renderPanel(ENC.find(e => e.id === selected));
@@ -3189,7 +3252,7 @@ document.querySelectorAll("[data-trade]").forEach(x =>
   x.setAttribute("aria-pressed", String((x.dataset.trade === "yes") === trading)));
 document.querySelectorAll("#nav [data-view]").forEach(x =>
   x.setAttribute("aria-current", x.dataset.view === view));
-["enc","sec","tm","cho","play","dex"].forEach(v =>
+["enc","sec","tm","cho","play","dex","money"].forEach(v =>
   document.getElementById("view-" + v).hidden = v !== view);
 const _selRow = document.querySelector(`.sec-row[data-sec="${selectedSec}"][data-leg="${selectedLeg}"]`);
 if (_selRow) _selRow.scrollIntoView({block: "center"});

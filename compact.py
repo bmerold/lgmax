@@ -446,8 +446,13 @@ def main():
         ])
     dex.sort(key=lambda d: (d[0] or 999))
 
+    # The money model is small (an income curve + a shopping list), so it ships
+    # as-is rather than through the string pool.
+    economy = json.load(open(f"{OUT}/economy.json")) if os.path.exists(f"{OUT}/economy.json") else {}
+
     payload = {"pool": pool, "stages": stages, "encounters": out_encs,
                "mapart": art, "sprites": sprites, "tpics": tpics, "dex": dex,
+               "economy": economy,
                "route": {"total": route["stepTotal"]},
                "sections": out_sections, "choices": choices,
                "commitments": secs.get("tradeCommitments", {}),
