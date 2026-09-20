@@ -347,6 +347,11 @@ def set_allow_trade(on):
     ALLOW_TRADE = bool(on)
     _pool_cache.clear(); _mon_cache.clear()
 
+def reset_caches():
+    """Drop the move-pool and player-mon memoization. The move pool depends on
+    the current TM plan, so an independent starter solve must not reuse another's."""
+    _pool_cache.clear(); _mon_cache.clear()
+
 def candidates(stage, allow_trade=None):
     if allow_trade is None: allow_trade = ALLOW_TRADE
     out = []
@@ -530,22 +535,31 @@ def _weighted_sweep(player, opps, pool, badges):
             "hpLeftPct": max(0.0, hp - taken) / hp * 100, "perOpponent": per}
 
 # ------------------------------------------------------------------ run
+# Each encounter's analysis is independent and pure given the module globals
+# (availability, commitments, the TM plan), so they fan out across cores. Workers
+# are forked, inheriting those globals; ex.map keeps input order, so the output is
+# byte-identical to the serial run regardless of how many workers run.
+def _analyze_one(enc):
+    # built with trades allowed and each entry tagged, so the page can hide the
+    # trade evolutions rather than the pipeline building everything twice
+    return enc["id"], analyze(enc, allow_trade=True)
+
 if __name__ == "__main__":
-    import sys, time
+    import sys, time, concurrent.futures as cf, multiprocessing as mp
     graph = json.load(open(os.path.join(OUT, "encounters.json")))
     only = sys.argv[1] if len(sys.argv) > 1 else None
+    graph = [enc for enc in graph if not only or only in enc["id"]]
     t0 = time.time()
     out = {}
     done = 0
-    for enc in graph:
-        if only and only not in enc["id"]: continue
-        # built with trades allowed and each entry tagged, so the page can hide
-        # the trade evolutions rather than the pipeline building everything twice
-        res = analyze(enc, allow_trade=True)
-        if res: out[enc["id"]] = res
-        done += 1
-        if done % 50 == 0:
-            print(f"  {done}/{len(graph)}  {time.time()-t0:.0f}s", flush=True)
+    workers = min(len(graph), os.cpu_count() or 4) or 1
+    ctx = mp.get_context("fork")   # inherit the loaded globals; pure CPU work
+    with cf.ProcessPoolExecutor(max_workers=workers, mp_context=ctx) as ex:
+        for eid, res in ex.map(_analyze_one, graph, chunksize=8):
+            if res: out[eid] = res
+            done += 1
+            if done % 100 == 0:
+                print(f"  {done}/{len(graph)}  {time.time()-t0:.0f}s", flush=True)
     with open(os.path.join(OUT, "recommendations.json"), "w") as f:
         json.dump(out, f, separators=(",", ":"))
     print(f"done: {len(out)} encounters analyzed in {time.time()-t0:.0f}s")

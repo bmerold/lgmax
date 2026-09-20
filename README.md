@@ -19,9 +19,12 @@ export LGMAX_POKEFIRERED=~/pokefirered      # optional; this is the default
 ./build.sh
 ```
 
-Python 3.10+, no third-party packages. Takes 6–8 minutes; `build.sh` runs the whole pipeline and
-finishes with `verify.py`, which must print 45 OKs. The output is `app.html` — one self-contained
-file, ~10 MB, no server needed.
+Python 3.10+, no third-party packages. `build.sh` runs the whole pipeline and finishes with
+`verify.py`, which must print 45 OKs. The output is `app.html` — one self-contained file, ~10 MB,
+no server needed. The per-starter solves run in parallel (one process each) and the build pins
+`PYTHONHASHSEED=0`, so it's byte-reproducible; `route.json` (map-geometry TSP) is the one slow
+stage, so `LGMAX_REUSE_ROUTE=1 ./build.sh` reuses it and turns an engine-only rebuild into ~2
+minutes. Set it only when `tour.py`/`world.py`/routing inputs are unchanged.
 
 `./deploy.sh` publishes the current `app.html` to
 **https://lgmax.arcane-collectibles.com/** (GitHub Pages, `gh-pages` branch, kept at a

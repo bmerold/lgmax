@@ -4,6 +4,11 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# Reproducible builds: pin the hash seed so set/dict iteration (a few greedy
+# tie-breaks in the solver) is stable run to run, and the parallel solve is
+# byte-identical to a serial one. LGMAX_WORKERS caps the per-starter pool.
+export PYTHONHASHSEED=0
+
 : "${LGMAX_POKEFIRERED:=$HOME/pokefirered}"
 export LGMAX_POKEFIRERED
 [ -d "$LGMAX_POKEFIRERED/src/data/pokemon" ] || {
@@ -17,7 +22,16 @@ mkdir -p data
 [ -f data/species.json ] || python3 extract.py      # decomp -> data/*.json
 [ -f data/encounters.json ] || python3 build_graph.py
 
-python3 tour.py         # the completionist route: every item, trainer, catch
+# tour.py is the slow stage (minutes, dominated by the post-game route) and its
+# output depends only on map geometry + gating, never on the damage/party model.
+# LGMAX_REUSE_ROUTE=1 reuses an existing data/route.json to skip it while iterating
+# on the engine; leave it unset (the default) whenever tour.py, world.py or any
+# routing input changed, so the route is recomputed.
+if [ -n "${LGMAX_REUSE_ROUTE:-}" ] && [ -f data/route.json ]; then
+  echo "reusing existing data/route.json (LGMAX_REUSE_ROUTE set)"
+else
+  python3 tour.py       # the completionist route: every item, trainer, catch
+fi
 python3 sections.py     # solves every section, battles in ROUTE order
 python3 optimize.py     # per-encounter rankings (reads commitments.json)
 python3 render_maps.py  # map PNGs from the decomp's tilesets (incremental)

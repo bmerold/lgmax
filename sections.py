@@ -2096,6 +2096,77 @@ def evaluate_choices(result, avail, sections, ref_starter):
                         "rows": rows, "best": rows[0]["name"]})
     return out
 
+# ------------------------------------------------------------------ parallel solve
+# The six (starter, mode) solves are independent, so each runs in its own forked
+# worker. The big read-only inputs (the per-stage encounter graph, the availability
+# table) are shared through these module globals — inherited across the fork rather
+# than pickled per task. Mode-level state (trade flag, commitments) is set in the
+# parent before the pool forks, so every worker inherits the right snapshot;
+# per-starter state (usage, TM plan) is passed in and applied inside the worker.
+# ProcessPoolExecutor.map preserves input order and each solve is deterministic, so
+# the parallel result is identical to the serial one.
+_SECTIONS_GRAPH = None
+_AVAIL_TABLE = None
+
+def _set_solve_inputs(sections, avail):
+    global _SECTIONS_GRAPH, _AVAIL_TABLE
+    _SECTIONS_GRAPH, _AVAIL_TABLE = sections, avail
+
+def _solve_all_stages(starter, tm_value):
+    """Every stage for one starter, threading carry-over and the Moon-Stone budget
+    exactly as the serial loop did."""
+    result, carry, moon_used = {}, None, set()
+    for stage in sorted(st["id"] for st in P.STAGES):
+        result[stage] = solve_section(
+            stage, _SECTIONS_GRAPH.get(stage, []), starter, _AVAIL_TABLE,
+            tm_value, carry=carry if stage in cold_stage_starts() else None,
+            moon_used=moon_used)
+        carry = (result[stage] or {}).get("carryOut") or carry
+        for t in (result[stage] or {}).get("team", []):
+            if t["species"] in MOON_EVOS: moon_used.add(t["species"])
+    return result
+
+def reset_solve_caches():
+    """Clear the per-run memoization that must not leak between independent starter
+    solves. Pass 1 compares each starter on even footing and pass 2 gives each its
+    own TM plan, so a fight profile or move pool cached under one starter must not
+    be reused for another. Forked workers start clean; calling this keeps a
+    shared-process solve (single worker / a serial run) identically correct."""
+    _profile_cache.clear()
+    _threat_cache.clear()
+    O.reset_caches()
+
+def _worker_pass1(starter):
+    """Pass 1 for one starter, options on even footing (empty commitments, no TM
+    plan — inherited from the fork). Returns the accumulated per-move TM value."""
+    reset_solve_caches()
+    reset_hm_held()
+    tm_value = defaultdict(float)
+    result = _solve_all_stages(starter, tm_value)
+    return starter, result, dict(tm_value)
+
+def _worker_pass2(args):
+    """Pass 2 for one starter, with commitments locked (inherited) and this
+    starter's own usage + TM plan applied, in the same order as the serial code."""
+    starter, counts, tm_value = args
+    reset_solve_caches()
+    set_usage(counts)
+    owners, plan = assign_tms(tm_value, SCARCE)
+    O.set_tm_plan(SCARCE, owners)
+    reset_hm_held()
+    result = _solve_all_stages(starter, None)
+    build_party_plans(result, _AVAIL_TABLE)
+    return starter, result, plan
+
+def _run_starters(fn, arglist):
+    """Fan the per-starter solves across forked workers, results in input order.
+    LGMAX_WORKERS caps the pool (1 forces a single worker, e.g. for debugging)."""
+    import concurrent.futures as cf, multiprocessing as mp
+    workers = int(os.environ.get("LGMAX_WORKERS", len(STARTERS))) or 1
+    with cf.ProcessPoolExecutor(max_workers=max(1, min(workers, len(arglist))),
+                                mp_context=mp.get_context("fork")) as ex:
+        return list(ex.map(fn, arglist))
+
 # ------------------------------------------------------------------ run
 if __name__ == "__main__":
     import time
@@ -2133,23 +2204,12 @@ if __name__ == "__main__":
         print(f"\n=== solving with trades {'ENABLED' if trading else 'off'}", flush=True)
         C.set_commitments({})      # pass 1 compares the options on even footing
         O.set_tm_plan(SCARCE, None)
-        result, tm_value = {}, {}
-        for starter in STARTERS:
-            result[starter] = {}
-            tm_value[starter] = defaultdict(float)
-            reset_hm_held()
-            carry = None
-            moon_used = set()      # Moon-Stone evolutions the run has committed
-            for stage in sorted(st["id"] for st in P.STAGES):
-                result[starter][stage] = solve_section(
-                    stage, sections.get(stage, []), starter, avail,
-                    tm_value[starter],
-                    carry=carry if stage in cold_stage_starts() else None,
-                    moon_used=moon_used)
-                carry = (result[starter][stage] or {}).get("carryOut") or carry
-                for t in (result[starter][stage] or {}).get("team", []):
-                    if t["species"] in MOON_EVOS: moon_used.add(t["species"])
-            print(f"  {starter}: pass 1 done ({time.time()-t0:.0f}s)", flush=True)
+        _set_solve_inputs(sections, avail)
+        # the three starters are independent here -> fork one worker each
+        res1 = _run_starters(_worker_pass1, list(STARTERS))
+        result = {s: r for (s, r, _tv) in res1}
+        tm_value = {s: tv for (s, _r, tv) in res1}
+        print(f"  pass 1 done ({time.time()-t0:.0f}s)", flush=True)
 
     # the reference starter for the non-starter choices is whichever clears the
     # game in the fewest turns
@@ -2171,32 +2231,23 @@ if __name__ == "__main__":
         print("  commitments:",
               {g: E.SPECIES[sp]["name"] for g, sp in picks.items()}, flush=True)
 
-        tm_plans, pass1, result = {}, result, {}
+        pass1 = result
+        # each starter's run-wide usage (from pass 1) drives its own TM plan; the
+        # plan + usage are applied inside the worker, in the serial order.
+        args2 = []
         for starter in STARTERS:
             counts = collections.Counter()
-            reset_hm_held()
             for sec in (pass1[starter] or {}).values():
                 if not sec: continue
                 for t in sec["team"]:
                     counts[t["species"]] += 1
-            set_usage(counts)
-            owners, plan = assign_tms(tm_value[starter], SCARCE)
-            tm_plans[starter] = plan
-            O.set_tm_plan(SCARCE, owners)
-            result[starter] = {}
-            carry = None
-            moon_used = set()
-            for stage in sorted(st["id"] for st in P.STAGES):
-                result[starter][stage] = solve_section(
-                    stage, sections.get(stage, []), starter, avail,
-                    carry=carry if stage in cold_stage_starts() else None,
-                    moon_used=moon_used)
-                carry = (result[starter][stage] or {}).get("carryOut") or carry
-                for t in (result[starter][stage] or {}).get("team", []):
-                    if t["species"] in MOON_EVOS: moon_used.add(t["species"])
-            build_party_plans(result[starter], avail)
-            print(f"  {starter}: re-solved — {sum(len(p['teach']) for p in plan)} "
-                  f"single-use TMs spent ({time.time()-t0:.0f}s)", flush=True)
+            args2.append((starter, counts, tm_value[starter]))
+        res2 = _run_starters(_worker_pass2, args2)
+        result = {s: r for (s, r, _p) in res2}
+        tm_plans = {s: p for (s, _r, p) in res2}
+        print(f"  re-solved — "
+              f"{ {s: sum(len(p['teach']) for p in tm_plans[s]) for s in STARTERS} } "
+              f"single-use TMs spent ({time.time()-t0:.0f}s)", flush=True)
         O.set_tm_plan(SCARCE, None)
         for per_stage in result.values():
             keep_lists(per_stage, avail)

@@ -53,6 +53,18 @@ JSON in `data/`. `tour.py` runs before `sections.py`, so `sections.py` may read 
   helper, or they double-apply. New ability effect that fits the 1v1 model → add a consumer helper
   and call it from the engine; effect outside the model → still give the ability a documented
   `unmodeled` descriptor so the registry stays complete (`verify.py` checks that).
+- **The per-starter solve runs in parallel, so its caches must not leak.**
+  `sections.py` forks one worker per `(starter, mode)` solve (`_run_starters`; the
+  three starters are independent — pass 1 compares them on even footing, pass 2
+  gives each its own TM plan). The memoization that depends on that per-starter
+  context — `_profile_cache`, `_threat_cache`, and optimize's move-pool/mon caches
+  — is cleared at the top of every worker via `reset_solve_caches()`. Do **not**
+  remove that reset or add a new solve cache that outlives one starter without
+  clearing it there: a value cached under one starter must never be reused for
+  another (this was a real bug the parallel port surfaced). Builds pin
+  `PYTHONHASHSEED=0` and are byte-reproducible; `LGMAX_WORKERS` caps the pool and
+  `LGMAX_REUSE_ROUTE=1` reuses `data/route.json` (skip `tour.py` only when routing
+  inputs are unchanged).
 - **The sync bundle shape is a second cross-file contract.** `app_template.html`'s `syncBundle`
   (`{v, done, play, starter, trading, ts}`) and `sync/worker.js`'s `merge` must agree. The rules
   that keep two devices from clobbering each other: `done` is always **unioned**, `play`/`starter`/
