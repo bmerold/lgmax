@@ -706,6 +706,15 @@ def center_doors():
                     _CENTER_DOORS.setdefault(nm, []).append((w.get("x", 0), w.get("y", 0)))
     return _CENTER_DOORS
 
+def stop_short(path, mp, x, y):
+    """Trim a trailing trainer/NPC body tile so the walk stops on the tile beside
+    it -- you talk from there or trip its sight line, never standing on the body.
+    The dropped tile's predecessor is orthogonally adjacent and already on the
+    drawn path, so it's a real reachable tile even on the spin-floor puzzles."""
+    if len(path) >= 2 and tuple(path[-1]) == (mp, x, y) and (x, y) in WD.grid(mp).bodies:
+        return path[:-1]
+    return path
+
 def _passes_heal(step):
     """Mirror of sections._step_heal, on this route step: a flight or teleport
     (both land you at a Center), a Center interior, or any walked tile within 4
@@ -762,13 +771,15 @@ def insert_heal(steps, stage, start_pos, fought_in):
 
     detour, k, door = best
     s = steps[k]
-    a = start_pos if k == 0 else (steps[k-1]["map"],
-                                  steps[k-1]["at"][0], steps[k-1]["at"][1])
-    a = WD.reach_tile(a, stage)
+    # start the detour where the walk actually stands after the previous step --
+    # its trimmed endpoint, beside any body -- not on the previous stop's tile
+    a = start_pos if k == 0 else tuple(steps[k-1]["path"][-1])
     b = WD.reach_tile((s["map"], s["at"][0], s["at"][1]), stage)
     p1 = WD.draw_path(a, door, stage)
     p2 = WD.draw_path(door, b, stage)
     if not p1 or not p2: return 0
+    # the post-heal leg stops beside a trainer/NPC just like the main walk does
+    p2 = stop_short(p2, s["map"], s["at"][0], s["at"][1])
     # the heal is its own stop, so the guide can say "heal here" out loud
     steps.insert(k, {
         "kind": "heal",
@@ -922,6 +933,8 @@ def solve(max_stage=34, verbose=True):
                         path = WD.walk_back(cparent, tgt)  # from the landing Center
                     else:
                         path = WD.draw_path(cur2, tgt, stage) or [cur2, tgt]
+                    path = stop_short(path, n["map"], n["x"], n["y"])
+                    end = tuple(path[-1]) if path else tgt
                     step = {"kind": n["kind"], "what": n["what"],
                             "map": n["map"], "at": [n["x"], n["y"]],
                             "walk": int(mat[prev_idx][oi]),
@@ -939,7 +952,7 @@ def solve(max_stage=34, verbose=True):
                     if n.get("species"): step["species"] = n["species"]
                     stps.append(step)
                     cst += mat[prev_idx][oi]
-                    cur2, prev_idx = tgt, oi
+                    cur2, prev_idx = end, oi
                     # win the fight on arrival -> this trainer's door opens for the
                     # next leg
                     if n["kind"] == "trainer" and n.get("enc"):

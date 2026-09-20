@@ -86,7 +86,7 @@ class Grid:
     """One map's tiles: walkability, behavior, and the events standing on it."""
     __slots__ = ("name", "w", "h", "beh", "coll", "enc", "elev", "warps",
                  "warp_tiles", "obstacles", "scripted_open", "blockers",
-                 "barrier_gates")
+                 "barrier_gates", "bodies")
     def __init__(self, name):
         mj = R.maps()[name]
         lay = _layouts()[ALT_LAYOUT.get(name) or mj["layout"]]
@@ -118,10 +118,14 @@ class Grid:
         self.warp_tiles = {(w[0], w[1]) for w in self.warps}
         # HM obstacles standing on tiles, with the stage each melts away
         self.obstacles = {}
-        # Standing NPCs and trainers occupy their tile permanently -- the walk
-        # must route AROUND them and stop adjacent, never through them. Movers
-        # (wander/walk paths) can be slipped past, so they don't wall a tile.
+        # A trainer or NPC is a body you never stand on: you talk to it from the
+        # tile beside it, or trip its sight line -- it never steps aside. `bodies`
+        # is every such tile (trainer/NPC, mover or not); the drawn walk stops one
+        # tile short of it. `blockers` is the narrower set that also walls through-
+        # traffic (standing bodies only -- a pacer only holds its spawn tile, so it
+        # can be slipped past). Item balls vanish on pickup, so they're neither.
         self.blockers = set()
+        self.bodies = set()
         for o in mj.get("object_events", []):
             hm = HM.OBSTACLE_SCRIPT.get(o.get("script"))
             if hm:
@@ -130,11 +134,13 @@ class Grid:
                 continue
             gfx = o.get("graphics_id", "")
             if "ITEM_BALL" in gfx: continue
+            xy = (o.get("x", 0), o.get("y", 0))
+            self.bodies.add(xy)
             mt = o.get("movement_type", "") or ""
             moves = ("WANDER" in mt or "RUN" in mt
                      or ("WALK" in mt and "IN_PLACE" not in mt))
             if not moves:
-                self.blockers.add((o.get("x", 0), o.get("y", 0)))
+                self.blockers.add(xy)
 
         # tiles a script ever swaps to a passable metatile: switch-opened
         # barriers (Mansion switches, the Rocket Hideout door, the Elite Four
@@ -367,11 +373,12 @@ def _ferry_edges():
     return dict(out)
 
 # ------------------------------------------------------------------ movement rules
-# Reachability (what is collectable, and the TSP distances) ignores NPC
-# bodies -- the game is always completable, people move or you talk past.
-# Only path DRAWING honors them, so the line the guide shows routes around
-# standing trainers and NPCs; if that leaves no route it falls back to the
-# straight one rather than vanishing.
+# Reachability (what is collectable, and the TSP distances) ignores bodies --
+# the game is always completable, and some rooms sit behind an NPC you talk past
+# or one that paces out of the way. Only path DRAWING honors bodies, so the line
+# the guide shows routes AROUND standing trainers and NPCs and stops on the tile
+# beside them (reach_tile), never on the body; if honoring them leaves no route
+# it falls back to the straight one rather than the path vanishing.
 _DRAW_BLOCKERS = False
 def draw_path(a, b, stage):
     global _DRAW_BLOCKERS
@@ -640,7 +647,11 @@ def path_between(a, b, stage):
 
 def reach_tile(node, stage):
     """Interactables sit ON solid tiles; you stand next to them. The node we
-    route to is the object's own tile if enterable, else any open neighbour."""
+    route to is the object's own tile if enterable, else any open neighbour.
+    (Standing-next-to a trainer/NPC is handled when the path is DRAWN -- the last
+    tile is trimmed so the walk stops beside the body, not on it; here we only
+    need a tile reachability can key on, which the object's own tile gives even on
+    the spin-floor puzzles where a fixed adjacent tile would not be reachable.)"""
     name, x, y = node
     g = grid(name)
     surf = _surf_ok(g, stage)

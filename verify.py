@@ -422,6 +422,27 @@ for _st in _routej["stages"]:
 check("the walk never enters an unfought trainer aggro zone (sight or body)",
       not _seen_early, str(sorted(set(_seen_early))[:4]))
 
+# A trainer with a body on the map is fought from the tile beside it (or by
+# tripping its sight line), never by standing on it -- so the walk stops one tile
+# short: its last tile is orthogonally adjacent to the body, not the body itself.
+# Scripted battles with no object-event body (the Rival, some one-offs) trigger on
+# their own tile and are exempt.
+_stand_on = []
+for _st in _routej["stages"]:
+    for _s in _st["steps"]:
+        if _s["kind"] != "trainer" or not _s["path"]: continue
+        _bxy = (_s["at"][0], _s["at"][1])
+        try:
+            if _bxy not in WORLD.grid(_s["map"]).bodies: continue   # scripted, no body
+        except Exception:
+            continue
+        _end = tuple(_s["path"][-1])
+        if _end == (_s["map"],) + _bxy or _end[0] != _s["map"] or \
+           abs(_end[1] - _bxy[0]) + abs(_end[2] - _bxy[1]) != 1:
+            _stand_on.append((_st["stage"], _s["map"], _bxy))
+check("every trainer with a body is reached from the tile beside it, not on it",
+      not _stand_on, str(_stand_on[:5]))
+
 # Trainer-gated doors (the Rocket Hideout's two barriers) open only once their
 # fight is won, so the walk must never step on a still-locked barrier tile.
 # Replayed in route order, accumulating the trainers beaten so far.
