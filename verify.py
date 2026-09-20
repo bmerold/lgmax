@@ -443,6 +443,38 @@ for _st in _routej["stages"]:
 check("every trainer with a body is reached from the tile beside it, not on it",
       not _stand_on, str(_stand_on[:5]))
 
+# A standing trainer never yields its tile -- fought or not, it stays put -- so no
+# walked tile anywhere may land on one, not just at a stop's end (the walk to a
+# LATER stop must route around it too, or trip its sight line). Restricted to
+# stationary trainers (pacers step off their spawn tile). The one allowance is a
+# trainer planted in a one-wide corridor -- the only tile through, so the game
+# marches it up to battle you there; exempt where its tile is the sole passage.
+def _choke(g, x, y):
+    fl = {(dx, dy) for dx, dy in WORLD.DIRS if g.inb(x + dx, y + dy) and g.c(x + dx, y + dy) == 0}
+    return fl in ({(1, 0), (-1, 0)}, {(0, 1), (0, -1)})
+_tbody = {}
+for _m, _mj in RO.maps().items():
+    try: _g = WORLD.grid(_m)
+    except Exception: continue
+    for _o in _mj.get("object_events", []):
+        if _o.get("trainer_type", "TRAINER_TYPE_NONE") == "TRAINER_TYPE_NONE": continue
+        _xy = (_o.get("x", 0), _o.get("y", 0))
+        if _xy in _g.blockers and not _choke(_g, _xy[0], _xy[1]):
+            _tbody.setdefault(_m, set()).add(_xy)
+_cross = []
+for _st in _routej["stages"]:
+    for _s in _st["steps"]:
+        for _m, _ts in TOUR.walked_tiles(_s["path"]).items():
+            # same-map warp/spin maps (Saffron & Silph teleport pads, arrow floors)
+            # jump between distant tiles, so walked_tiles draws a false straight
+            # line across them -- the straight-run guard skips them for the same
+            # reason, so trust the route there rather than the interpolation.
+            if _bendy(_m): continue
+            hit = _ts & _tbody.get(_m, set())
+            if hit: _cross.append((_st["stage"], _m, sorted(hit)[0]))
+check("the walk never crosses a standing trainer's tile (outside a one-wide choke)",
+      not _cross, str(_cross[:5]))
+
 # Trainer-gated doors (the Rocket Hideout's two barriers) open only once their
 # fight is won, so the walk must never step on a still-locked barrier tile.
 # Replayed in route order, accumulating the trainers beaten so far.

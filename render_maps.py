@@ -375,7 +375,8 @@ def _ow_resolve():
         w = re.search(r"\.width = (\d+)", body)
         h = re.search(r"\.height = (\d+)", body)
         if img and w and h:
-            info[name] = (img.group(1), int(w.group(1)), int(h.group(1)))
+            inanimate = ".inanimate = TRUE" in body
+            info[name] = (img.group(1), int(w.group(1)), int(h.group(1)), inanimate)
     pics = open(f"{oe}/object_event_pic_tables.h").read()
     tbl2pic = {}
     for m in re.finditer(r"(\w*PicTable_\w+)\[\] =\s*\{(.*?)\};", pics, re.S):
@@ -388,21 +389,44 @@ def _ow_resolve():
     for gid, isym in id2info.items():
         rec = info.get(isym)
         if not rec: continue
-        img, w, h = rec
+        img, w, h, inanimate = rec
         pic = tbl2pic.get(img)
         png = pic2png.get(pic) if pic else None
         if png:
-            out[gid] = (f"{REPO}/{png}.png", w // 8, h // 8)
+            out[gid] = (f"{REPO}/{png}.png", w // 8, h // 8, inanimate)
     return out
 
-def _ow_frame0(gid):
-    """Compose an object's first (facing-down) frame as an indexed sprite. Frame
-    0 is the top-left w*h of the sheet; palette index 0 is transparent."""
-    png, wt, ht = _ow_resolve()[gid]
+# Which still frame of a people sheet faces which way, and whether it's mirrored.
+# The standard overworld anim uses frame 0 = south (down), 1 = north (up),
+# 2 = west (left); east (right) reuses the west frame horizontally flipped
+# (sAnimTable_Standard / the OAM hFlip). Frame 0 for anything with fewer frames.
+_FACE_FRAME = {"down": (0, False), "up": (1, False), "left": (2, False), "right": (2, True)}
+_FACE_MOVES = {"FACE_UP": "up", "FACE_DOWN": "down", "FACE_LEFT": "left", "FACE_RIGHT": "right"}
+
+def facing_of(movement_type):
+    """The direction an object stands looking, from its movement type. The four
+    FACE_* types are exact; a pacer looks along the first axis in its name; the
+    rest default to facing the camera (down)."""
+    mt = movement_type or ""
+    for k, v in _FACE_MOVES.items():
+        if k in mt: return v
+    if "LEFT" in mt or "RIGHT" in mt: return "left"     # WALK_LEFT_AND_RIGHT etc.
+    if "UP" in mt or "DOWN" in mt: return "up"
+    return "down"
+
+def _ow_frame(gid, facing):
+    """Compose the object's still frame for `facing` as an indexed sprite (palette
+    index 0 transparent). Inanimate objects (item balls) have one frame."""
+    png, wt, ht, inanimate = _ow_resolve()[gid]
     w, h, px = read_indexed_png(png)
     pal = _read_plte(png)
     W, H = wt * 8, ht * 8
-    flat = [px[y * w + x] for y in range(H) for x in range(W)]
+    idx, flip = (0, False) if inanimate else _FACE_FRAME[facing]
+    if idx * W >= w:                # sheet lacks that frame -> fall back to frame 0
+        idx, flip = 0, False
+    ox = idx * W
+    flat = [px[y * w + ox + (W - 1 - x if flip else x)]
+            for y in range(H) for x in range(W)]
     return W, H, flat, pal
 
 def overworld_sprites():
@@ -428,22 +452,28 @@ def overworld_sprites():
     files, by_map, written = {}, {}, set()
     for m, tiles in stops.items():
         mj = R.maps().get(m) or {}
-        oe = {(o.get("x", 0), o.get("y", 0)): o.get("graphics_id", "")
+        oe = {(o.get("x", 0), o.get("y", 0)):
+              (o.get("graphics_id", ""), o.get("movement_type", ""))
               for o in mj.get("object_events", [])}
         for (x, y) in tiles:
-            gid = oe.get((x, y))
+            gid, mt = oe.get((x, y), ("", ""))
             if not gid or gid not in resolve: continue
-            key = gid.replace("OBJ_EVENT_GFX_", "")
+            _, _, ht, inanimate = resolve[gid]
+            face = facing_of(mt)
+            # one sprite per (graphics id, facing it stands) -- an item ball is
+            # inanimate so it keeps its bare id (and the hidden-item marker keys
+            # off "ITEM_BALL"); a Lass facing right is "LASS_right", so two Lasses
+            # looking opposite ways don't collapse to one png.
+            key = gid.replace("OBJ_EVENT_GFX_", "") + ("" if inanimate else "_" + face)
             if key not in written:
                 try:
-                    W, H, flat, pal = _ow_frame0(gid)
+                    W, H, flat, pal = _ow_frame(gid, face)
                     write_indexed_png(os.path.join(odir, f"{key}.png"),
                                       W, H, flat, pal, transparent0=True)
                     files[key] = f"ow/{key}.png"
                     written.add(key)
                 except Exception as ex:
                     print(f"  ow skip {key}: {ex}"); continue
-            _, _, ht = resolve[gid]
             by_map.setdefault(m, {})[f"{x},{y}"] = [key, ht * 8]
     return files, by_map
 

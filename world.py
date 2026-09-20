@@ -375,19 +375,23 @@ def _ferry_edges():
 # ------------------------------------------------------------------ movement rules
 # Reachability (what is collectable, and the TSP distances) ignores bodies --
 # the game is always completable, and some rooms sit behind an NPC you talk past
-# or one that paces out of the way. Only path DRAWING honors bodies, so the line
-# the guide shows routes AROUND standing trainers and NPCs and stops on the tile
-# beside them (reach_tile), never on the body; if honoring them leaves no route
-# it falls back to the straight one rather than the path vanishing.
-_DRAW_BLOCKERS = False
+# or one that paces out of the way. Only path DRAWING honors bodies, and it does
+# so as a heavy COST rather than a hard wall: stepping onto a standing trainer/NPC
+# is allowed but priced far above any detour, so the drawn line routes AROUND them
+# everywhere it can and steps on one only where there is genuinely no other way
+# (a trainer planted in a one-wide corridor -- in game it walks up and battles you
+# there). A hard wall instead made a stop behind such a choke unreachable, which
+# dropped the whole segment back to a blind straight line that plowed through
+# EVERY trainer on it; the soft cost confines any crossing to the choke itself.
+_DRAW_PENALTY = 0
+BODY_COST = 1 << 16      # dwarfs any real detour, so bodies are a last resort
 def draw_path(a, b, stage):
-    global _DRAW_BLOCKERS
-    _DRAW_BLOCKERS = True
+    global _DRAW_PENALTY
+    _DRAW_PENALTY = BODY_COST
     try:
-        p = path_between(a, b, stage)
+        return path_between(a, b, stage)
     finally:
-        _DRAW_BLOCKERS = False
-    return p or path_between(a, b, stage)
+        _DRAW_PENALTY = 0
 
 def _tile_open(g, x, y, stage, surf_ok):
     """Can the player occupy (x, y) at this stage?"""
@@ -401,7 +405,6 @@ def _tile_open(g, x, y, stage, surf_ok):
         # beaten (or when gates aren't being tracked), a wall until then.
         return _OPEN_GATES is None or gates <= _OPEN_GATES
     if (x, y) in g.warp_tiles: return True
-    if _DRAW_BLOCKERS and (x, y) in g.blockers: return False
     if (x, y) in g.scripted_open: return True
     beh = g.b(x, y)
     if beh in SURFABLE:
@@ -485,7 +488,10 @@ def neighbours(node, stage):
             if (_elev_ok(g, x, y, g, nx, ny)
                     or g.b(x, y) in SURFABLE or beh in SURFABLE
                     or (nx, ny) in g.warp_tiles or (x, y) in g.warp_tiles):
-                out.append(((name, nx, ny), 1))
+                # drawing prices a step onto a standing body far above any detour,
+                # so the line skirts trainers and NPCs except at a real choke
+                cost = 1 + (_DRAW_PENALTY if (nx, ny) in g.blockers else 0)
+                out.append(((name, nx, ny), cost))
     return out
 
 def _spin_slide(g, x, y, stage, surf):

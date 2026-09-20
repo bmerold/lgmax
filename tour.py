@@ -774,11 +774,11 @@ def insert_heal(steps, stage, start_pos, fought_in):
     # start the detour where the walk actually stands after the previous step --
     # its trimmed endpoint, beside any body -- not on the previous stop's tile
     a = start_pos if k == 0 else tuple(steps[k-1]["path"][-1])
-    b = WD.reach_tile((s["map"], s["at"][0], s["at"][1]), stage)
     p1 = WD.draw_path(a, door, stage)
-    p2 = WD.draw_path(door, b, stage)
+    # route to the stop the same body-aware way the main walk does, then trim any
+    # trailing body tile so the post-heal leg stops beside a trainer, not on it
+    p2 = WD.draw_path(door, (s["map"], s["at"][0], s["at"][1]), stage)
     if not p1 or not p2: return 0
-    # the post-heal leg stops beside a trainer/NPC just like the main walk does
     p2 = stop_short(p2, s["map"], s["at"][0], s["at"][1])
     # the heal is its own stop, so the guide can say "heal here" out loud
     steps.insert(k, {
@@ -930,7 +930,12 @@ def solve(max_stage=34, verbose=True):
                     WD._OPEN_GATES = frozenset(fought)
                     flew = mat[prev_idx][oi] < wmat[prev_idx][oi]
                     if flew:
-                        path = WD.walk_back(cparent, tgt)  # from the landing Center
+                        # land at the Center the Fly/Teleport BFS chose, then draw
+                        # the walk from there body-aware (that BFS is body-blind for
+                        # cost, so its raw parent-chain would cut through trainers)
+                        raw = WD.walk_back(cparent, tgt)
+                        landing = raw[0] if raw else cur2
+                        path = WD.draw_path(landing, tgt, stage) or raw
                     else:
                         path = WD.draw_path(cur2, tgt, stage) or [cur2, tgt]
                     path = stop_short(path, n["map"], n["x"], n["y"])
