@@ -20,7 +20,7 @@ export LGMAX_POKEFIRERED=~/pokefirered      # optional; this is the default
 ```
 
 Python 3.10+, no third-party packages. `build.sh` runs the whole pipeline and finishes with
-`verify.py`, which must print 53 OKs. The output is `app.html` — one self-contained file, ~10 MB,
+`verify.py`, which must print 56 OKs. The output is `app.html` — one self-contained file, ~10 MB,
 no server needed. The per-starter solves run in parallel (one process each) and the build pins
 `PYTHONHASHSEED=0`, so it's byte-reproducible; `route.json` (map-geometry TSP) is the one slow
 stage, so `LGMAX_REUSE_ROUTE=1 ./build.sh` reuses it and turns an engine-only rebuild into ~2
@@ -76,7 +76,7 @@ them.
 | `render_maps.py` | renders each section's maps to PNG from the decomp's tilesets/layouts, and pins every trainer to the tile its object event stands on |
 | `sections.py` | two-pass per-section party optimizer + choice evaluation |
 | `compact.py` | array-encoded payload (~25 MB → ~5 MB) |
-| `verify.py` | **53 guard rails; all must pass after every rebuild** |
+| `verify.py` | **56 guard rails; all must pass after every rebuild** |
 | `setup_study.py` | standalone: does setting up beat hit-and-switch? (it does not) |
 
 `sections.py` runs before `optimize.py` because it writes `data/commitments.json`, which the
@@ -132,3 +132,10 @@ See `docs/` for the working notes behind each of these.
   numbers are not monotonic in the size of the candidate pool.
 - The post-game stage lumps Sevii 4–7 and the Elite Four rematch together, so the route fights
   round two of the League straight after round one. That is a staging artifact, not a verdict.
+- **Teleport and Fly are modelled as a return to the *nearest open* Pokémon Center**, not the
+  exact one the game would send you to (Teleport returns to your last heal spot; Fly, to any
+  visited town). Because the route heals as it passes each Center, the nearest open one is almost
+  always that spot anyway. Teleport is treated like an HM — the party fields a Teleport user (the
+  Abra line, catchable at Route 24) for the legs where returning to a Center shortens the walk —
+  but as an *optional* field move: a spare slot or a dedicated carrier takes it, never a sacrificed
+  attack, so a full party that can't spare a seat simply walks those legs instead.

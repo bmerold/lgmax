@@ -281,14 +281,19 @@ def main():
                 "path": [[m, x, y] for m, x, y in hpath]}
 
     def pack_stop(s):
-        # [kind, what, map, x, y, walk, flyLanding, pathRuns, species, buried]
+        # [kind, what, map, x, y, walk, flyLanding, pathRuns, species, buried,
+        #  renewable, hunt, note, huntHi, teleportLanding]
+        # flyLanding (Fly, stage 20+) and teleportLanding (Teleport, stage 7+) are
+        # both "you return to this Center", kept in separate slots so the app can
+        # label the hop as a flight or a teleport.
         return [S(s["kind"]), S(s["what"]), s["map"], s["at"][0], s["at"][1],
                 s["walk"], s["fly"] if isinstance(s.get("fly"), str) else 0,
                 path_runs(s["path"]),
                 [S(x) for x in s.get("species", [])],
                 1 if s.get("underfoot") else 0,
                 S(s.get("renewable")), s.get("hunt", 0), S(s.get("note")),
-                s.get("huntHi", 0)]
+                s.get("huntHi", 0),
+                s["teleport"] if isinstance(s.get("teleport"), str) else 0]
 
     def leg_rows(sec, stage):
         """A section split at its full heals. Each leg carries its own roster
@@ -377,6 +382,11 @@ def main():
                        for h in sec.get("hms", [])],
                 "kit": [[S(k["name"]), S(k["hm"]), k["from"]]
                         for k in sec.get("hmKit", [])],
+                # Teleport carrier for the legs the route teleports on (or 0):
+                # [moveName, carrier, how]. It's a field move like the HMs but not
+                # an HM item, so it rides in its own slot, not the "hm" list.
+                "tp": ([S(sec["teleport"]["name"]), S(sec["teleport"]["by"]),
+                        S(sec["teleport"]["how"])] if sec.get("teleport") else 0),
                 "keep": [[S(k["name"]), k["next"], S(k["nextName"]), k["nextLevel"],
                           k["gap"], k["times"], S(k["why"]), S(k.get("becomes"))]
                          for k in sec.get("keep", [])],

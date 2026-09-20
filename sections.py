@@ -45,6 +45,22 @@ MAX_TEAM = 6
 SCREEN = 26            # candidates promoted to exact evaluation per section
 MIN_GAIN = 0.12        # a 6th member must cut section turns by >=12% to be worth it
 
+# Teleport returns you to the last Pokémon Center, so the route uses it to skip
+# the walk back (tour.py). It is a field move like an HM -- carried by whoever
+# can hold it -- but a level-up move, not an HM item, so it lives outside the
+# HM tables. In Kanto that is the Abra line (Route 24); the availability gate on
+# the carrier pool keeps other Teleport learners (Natu, Ralts…) to where a run
+# can actually obtain them.
+TELE_MOVE = "MOVE_TELEPORT"
+TELE_LEARNERS = {sp for sp in E.LEVELUP if any(mv == TELE_MOVE for _, mv in E.LEVELUP[sp])}
+
+def field_can_learn(species, move):
+    """Can this species hold this field move? HMs from the TM/HM table; Teleport
+    from its level-up learnset (it isn't an HM)."""
+    if move == TELE_MOVE:
+        return species in TELE_LEARNERS
+    return HM.can_learn(species, move)
+
 # Where the party gets patched up mid-section. Two kinds:
 #
 #   * a Pokemon Center you walk past. Read from the game's heal-location table,
@@ -291,6 +307,9 @@ def _step_heal(step, doors, zones):
     if step.get("fly"):
         return (f"flying — you land at the {G.pretty_location(step['fly'])} "
                 "Pokémon Center")
+    if step.get("teleport"):
+        return (f"teleporting — you return to the "
+                f"{G.pretty_location(step['teleport'])} Pokémon Center")
     prev = None
     for m, x, y in step["path"]:
         if "PokemonCenter" in m:
@@ -361,6 +380,20 @@ def tm_joins():
                 if mv and seen > 0: joins.setdefault(mv, seen)
         if joins: _TM_JOINS[st["stage"]] = joins
     return _TM_JOINS
+
+_TELE_STAGES = None
+def teleport_stages():
+    """The set of stages whose route uses Teleport to shorten the walk (tour.py
+    marks each stage). Those legs want a Teleport user on the party, assigned
+    like an HM -- see assign_hms."""
+    global _TELE_STAGES
+    if _TELE_STAGES is not None: return _TELE_STAGES
+    _TELE_STAGES = set()
+    path = f"{OUT}/route.json"
+    if os.path.exists(path):
+        rt = json.load(open(path))
+        _TELE_STAGES = {st["stage"] for st in rt["stages"] if st.get("teleport")}
+    return _TELE_STAGES
 
 JOIN_AT = {}     # species const -> trainer ordinal it becomes usable at, this section
 MOVE_JOIN = {}   # move const -> trainer ordinal its TM is picked up at, this section
@@ -712,7 +745,7 @@ def drop_key(member, move, level, stage, opponents, badges):
             move_value(member.mon, move, opponents, badges))
 
 def assign_hms(team, stage, level, badges, avail, opponents, starter,
-               held_roots, held_groups, chosen):
+               held_roots, held_groups, chosen, teleport=False, moon_used=None):
     """Make sure the party can actually cross the section, not just win in it.
 
     Field moves are cheap to carry and expensive to be without, so they are
@@ -734,7 +767,13 @@ def assign_hms(team, stage, level, badges, avail, opponents, starter,
 
     Returns (plan, extra members to add to the party).
     """
-    req = HM.moves_here(stage)
+    req = list(HM.moves_here(stage))
+    # Teleport rides along as a field move on the legs the route uses it (it saves
+    # the walk back to a Center). Unlike an HM it's optional -- worth a spare slot
+    # or a carrier, never a sacrificed attack -- so it's pulled out before the
+    # last-resort branch below.
+    if teleport and TELE_MOVE not in req:
+        req.append(TELE_MOVE)
     plan, extra = [], []
 
     # Before Fuchsia there is no Move Deleter, so an HM taught in an earlier
@@ -770,7 +809,7 @@ def assign_hms(team, stage, level, badges, avail, opponents, starter,
                          "permanent": False})
             continue
         free = [m for m in team + extra
-                if HM.can_learn(m.species, mv) and len(m.moves) < 4]
+                if field_can_learn(m.species, mv) and len(m.moves) < 4]
         if free:
             m = min(free, key=lambda x: (len(x.moves), x.name))
             m.teach(mv)
@@ -792,9 +831,16 @@ def assign_hms(team, stage, level, badges, avail, opponents, starter,
         roots = set(held_roots) | {C.line_root(m.species) for m in extra}
         groups = set(held_groups) | {g for g in
                                      (C.exclusive_group(m.species) for m in extra) if g}
+        # A carrier is still a party member, so a Moon-Stone evolution brought in
+        # to hold an HM counts against the run's stone budget just like a fighter
+        # would -- otherwise Cut could smuggle a third Nidoking in before the third
+        # stone exists (a real bug this guard caught).
+        live_moon = (moon_used or set()) | {m.species for m in team + extra
+                                            if m.species in MOON_EVOS}
         for sp in pool:
             if C.conflicts(sp, roots, groups): continue
-            covers = [mv for mv in uncovered if HM.can_learn(sp, mv)]
+            if not moon_ok(sp, stage, live_moon): continue
+            covers = [mv for mv in uncovered if field_can_learn(sp, mv)]
             if not covers: continue
             pm = O.player_mon(sp, level)
             fight = max((move_value(pm, mv, opponents, badges)
@@ -817,6 +863,11 @@ def assign_hms(team, stage, level, badges, avail, opponents, starter,
                          "permanent": False})
         uncovered = [mv for mv in uncovered if mv not in covers]
 
+    # Teleport is a convenience, not a barrier: if no spare slot or carrier took
+    # it, leave it -- the route's teleport hops just cost the full walk instead.
+    # Nobody gives up an attack for it.
+    uncovered = [mv for mv in uncovered if mv != TELE_MOVE]
+
     # ---- 4: last resort, someone gives up a move
     for mv in list(uncovered):
         if mv not in uncovered: continue   # a prior swap already covered it
@@ -836,6 +887,11 @@ def assign_hms(team, stage, level, badges, avail, opponents, starter,
                 if C.starter_of(sp) not in (None, starter): continue
                 if C.outgrown(sp, stage, avail): continue
                 if not HM.can_learn(sp, mv): continue
+                # same stone budget as the carrier step: a swapped-in body that is
+                # a Moon-Stone evolution still needs a stone the run has by now.
+                if not moon_ok(sp, stage, (moon_used or set()) |
+                               {x.species for x in team + extra if x.species in MOON_EVOS}):
+                    continue
                 pm = O.player_mon(sp, level)
                 mpool = O.move_pool(sp, level, stage)
                 covers = sum(1 for x in uncovered if HM.can_learn(sp, x))
@@ -1415,7 +1471,9 @@ def build_party_plans(per_stage, avail):
     (fighters, then pure HM carriers), then the seats filled with the already-
     caught Pokémon the run will need soonest, so nothing that matters later
     sits in the PC. Attached to each section as `partyPlan`."""
-    hm_names = {E.MOVES[mv]["name"] for mv in HM.HM_MOVE.values()}
+    # Teleport counts as a field move here too, so a party member carrying only
+    # Teleport reads as a field-move slot (role "hm"), not an idle fighter.
+    hm_names = {E.MOVES[mv]["name"] for mv in HM.HM_MOVE.values()} | {E.MOVES[TELE_MOVE]["name"]}
     ids = sorted(per_stage)
     for i, st in enumerate(ids):
         sec = per_stage[st]
@@ -1715,7 +1773,9 @@ def solve_section(stage, encs, starter, avail, tm_value=None, carry=None, moon_u
     # win the battles in it. Done before the final run so that a move given up
     # for a field move is paid for in the turn count.
     hm_plan, hm_extra = assign_hms(team, stage, level, badges, avail, opponents,
-                                   starter, held_roots, held_groups, chosen)
+                                   starter, held_roots, held_groups, chosen,
+                                   teleport=stage in teleport_stages(),
+                                   moon_used=moon_used)
     for m in hm_extra:
         team.append(m); chosen.append(m.species)
     final = run_section(team, battles, badges, heal_idx, tm_value, carry=carry,
@@ -1807,7 +1867,14 @@ def solve_section(stage, encs, starter, avail, tm_value=None, carry=None, moon_u
                  "why": ("town to town" if HM._hm_of(p["move"]) in HM.ALWAYS else
                          "%d spot%s" % (len(HM.here(stage).get(HM._hm_of(p["move"]), [])),
                                         "" if len(HM.here(stage).get(HM._hm_of(p["move"]), [])) == 1 else "s"))}
-                for p in hm_plan],
+                for p in hm_plan if p["move"] != TELE_MOVE],
+        # Teleport is a field move, not an HM (level-up, no item/badge/obstacle),
+        # so it's reported on its own -- who on the party carries it for the legs
+        # the route teleports on. None when the party couldn't spare a slot.
+        "teleport": next(({"name": E.MOVES[TELE_MOVE]["name"], "by": p["by"],
+                           "species": p["species"], "how": p["how"]}
+                          for p in hm_plan
+                          if p["move"] == TELE_MOVE and p["by"]), None),
         "hmKit": [{"name": E.MOVES[HM.HM_MOVE[h]]["name"],
                    "hm": HM.HM_ITEM[h].replace("ITEM_", ""),
                    "from": st0} for h, st0 in

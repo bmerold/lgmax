@@ -33,6 +33,14 @@ REPO = R.REPO
 
 ITEM_GFX = "OBJ_EVENT_GFX_ITEM_BALL"
 FLY_COST = 30      # menu, animation, landing -- a nominal fare, not a walk
+# Teleport returns you to the last Pokémon Center you healed at, so within a
+# stage it drops you at that town's Center for a nominal cost -- the same
+# Center-return shortcut Fly gives, but usable much earlier (a party Teleport
+# user, i.e. the Abra line, is catchable at Route 24). It's carried like an HM:
+# the party holds a Teleport user for the legs where it saves the walk back
+# (sections.py adds an Abra-line carrier for a stage that uses it).
+TELEPORT_COST = 25
+TELEPORT_STAGE = 7   # Abra (the LeafGreen Teleport user) is catchable at Route 24
 
 # The overworld's fixed Pokémon, found by their own sprites.
 STATIC_MON_GFX = {
@@ -634,7 +642,7 @@ def apply_dig(steps, stage, start_pos):
     escape_at = None          # the outdoor (map,x,y) tile we entered the cave by
     prev = (start_pos[0], start_pos[1], start_pos[2])
     for s in steps:
-        if s.get("fly"):
+        if s.get("fly") or s.get("teleport"):   # a Center-return, not a cave retrace
             prev = tuple(s["path"][-1]) if s["path"] else prev
             escape_at = None
             continue
@@ -699,9 +707,10 @@ def center_doors():
     return _CENTER_DOORS
 
 def _passes_heal(step):
-    """Mirror of sections._step_heal, on this route step: a flight, a Center
-    interior, or any walked tile within 4 of a Center door."""
-    if step.get("fly"): return True
+    """Mirror of sections._step_heal, on this route step: a flight or teleport
+    (both land you at a Center), a Center interior, or any walked tile within 4
+    of a Center door."""
+    if step.get("fly") or step.get("teleport"): return True
     doors = center_doors()
     prev = None
     for m, x, y in step["path"]:
@@ -802,11 +811,16 @@ def solve(max_stage=34, verbose=True):
                            if n.get("what") in EVENT_ANCHORS), None)
         end_i = picked.index(anchor) if anchor in picked else None
 
-        # distance matrix: start + every node tile. Once Fly is live, any hop
-        # can instead fly to the best Pokémon Center and walk from there.
+        # distance matrix: start + every node tile. A hop can instead return to a
+        # Pokémon Center and walk from there -- via Teleport once a party Teleport
+        # user is around (stage 7+), or Fly once HM02 is (stage 20+). Fly is the
+        # more capable move, so from its stage the hop is a Fly; before then it's a
+        # Teleport (a bit cheaper, no flight animation).
         fly = stage >= P.HM_STAGE["FLY"]
+        center_hop = stage >= TELEPORT_STAGE
+        hop_cost = FLY_COST if fly else TELEPORT_COST
         cdist, cparent = ({}, {})
-        if fly:
+        if center_hop:
             centers = [c for c in WD.center_nodes()
                        if WD._open_map(c[0], stage)]
             cdist, cparent = WD.bfs_multi(centers, stage)
@@ -817,10 +831,10 @@ def solve(max_stage=34, verbose=True):
             for j, q in enumerate(pts):
                 if q in d: wmat[i][j] = d[q]
         mat = [row[:] for row in wmat]
-        if fly:
+        if center_hop:
             for j, q in enumerate(pts):
                 if j == 0: continue
-                f = FLY_COST + cdist.get(q, INF)
+                f = hop_cost + cdist.get(q, INF)
                 for i in range(len(pts)):
                     if i != j and f < mat[i][j]: mat[i][j] = f
         groups = scc_groups(mat, len(pts) - 1)
@@ -863,7 +877,9 @@ def solve(max_stage=34, verbose=True):
                         "map": n["map"], "at": [n["x"], n["y"]],
                         "walk": int(mat[prev_idx][oi]),
                         "path": [[m, x, y] for m, x, y in corners(path)]}
-                if flew: step["fly"] = path[0][0] if path else True
+                if flew:
+                    where = path[0][0] if path else True
+                    step["fly" if fly else "teleport"] = where
                 if n.get("enc"): step["enc"] = n["enc"]
                 nt = STOP_NOTES.get((n["what"], n["map"]))
                 if nt: step["note"] = nt
@@ -912,6 +928,11 @@ def solve(max_stage=34, verbose=True):
             if s["kind"] in ("trainer", "catch"): fought_since_heal = True
         route.append({"stage": stage, "steps": steps,
                       "stepTotal": int(cost),
+                      # this stage's walk is cut shorter by a Teleport hop, so the
+                      # recommended party must carry a Teleport user (handled like
+                      # an HM in sections.py). Fly hops don't need a carrier -- HM02
+                      # is a field move any mon can hold from its own item.
+                      "teleport": any(s.get("teleport") for s in steps),
                       "startsAt": [pos[0], pos[1], pos[2]],
                       "endsAt": [cur[0], cur[1], cur[2]]})
         total += cost

@@ -1453,13 +1453,14 @@ function renderSecPanel(id, leg){
       <span><b>${L.b}</b> fight${L.b === 1 ? "" : "s"} · <b>${(L.st || 0).toLocaleString()}</b> steps
         · <b>${L.t}</b> turns${L.f ? ` · <b class="bad">${L.f} faint${L.f === 1 ? "" : "s"}</b>` : ""}</span>
       ${stops.length ? `<span class="prog"><b>${doneCount}</b> of <b>${stops.length}</b> done</span>` : ""}</div>
-    ${arrive || ends || L.cold || size || (d.hm || []).length ? `<div class="hchips">${
+    ${arrive || ends || L.cold || size || (d.hm || []).length || d.tp ? `<div class="hchips">${
         L.cold ? `<span class="hchip bad" title="No Pokémon Center since the previous section">HP·PP carry over</span>` : ""}${
         arrive ? `<span class="hchip good" title="You start fully healed — ${esc(arrive)}">healed start</span>` : ""}${
         ends ? `<span class="hchip good" title="Ends with a full heal at ${esc(ends)}">ends healed</span>` : ""}${
         size ? L.team.map(t => `<span class="hchip" title="party — details below">${esc(str(t[0]))}</span>`).join("") : ""}${
         (d.hm || []).filter(h => h[2] !== -1).map(h =>
-          `<span class="hchip hm2" title="field move — carried by ${esc(str(h[2]))}">${esc(str(h[0]))} · ${esc(str(h[2]))}</span>`).join("")}
+          `<span class="hchip hm2" title="field move — carried by ${esc(str(h[2]))}">${esc(str(h[0]))} · ${esc(str(h[2]))}</span>`).join("")}${
+        d.tp ? `<span class="hchip hm2" title="Teleport shortcuts the walk back to a Pokémon Center on this stretch — carried by ${esc(str(d.tp[1]))}">${esc(str(d.tp[0]))} · ${esc(str(d.tp[1]))}</span>` : ""}
       </div>` : ""}
     </div></section>`;
 
@@ -1554,7 +1555,7 @@ function renderSecPanel(id, leg){
     if (!MAPART[mp]) return;
     (pinsByMap[mp] = pinsByMap[mp] || []).push(
       {n: i + 1, x: s[3], y: s[4], kind: str(s[0]), what: str(s[1]),
-       walk: s[5], fly: s[6], species: (s[8] || []).length,
+       walk: s[5], fly: s[6], teleport: s[14], species: (s[8] || []).length,
        underfoot: s[9], renew: str(s[10]), hunt: s[11] || 0, huntHi: s[13] || 0,
        key: keys[i], done: DONE.has(keys[i]),
        next: i === nextIdx, plan: planByStop[i + 1]});
@@ -1563,6 +1564,7 @@ function renderSecPanel(id, leg){
     const k = RKIND[p.kind] || RKIND.event;
     const bits = [k.label, p.walk + " steps"];
     if (p.fly) bits.push("✈ fly to " + prettyMap(p.fly));
+    if (p.teleport) bits.push("⤢ teleport to " + prettyMap(p.teleport));
     if (p.underfoot) bits.push("needs Itemfinder");
     else if (p.renew) bits.push(`renewable — there ${RENEW_ODDS[p.renew] || "?"} of the time`);
     else if (p.kind === "hidden") bits.push("invisible — press A");
@@ -1812,7 +1814,7 @@ function partyCard(t){
 
 function rtRow(s, n, st){
   const kind = str(s[0]), what = str(s[1]), mp = s[2], walk = s[5],
-        flyFrom = s[6], species = s[8] || [], underfoot = s[9],
+        flyFrom = s[6], teleFrom = s[14], species = s[8] || [], underfoot = s[9],
         renew = str(s[10]), hunt = s[11] || 0, huntHi = s[13] || 0;
   st = st || {};
   return `<div class="rt-row${st.done ? " done" : ""}${st.next ? " next" : ""}" id="fight-${n}">
@@ -1826,6 +1828,7 @@ function rtRow(s, n, st){
         : kind === "hidden" ? `<span class="note" title="hidden items have no sprite — they're there from the start of the game">invisible — face the pinned tile, press A</span>` : ""}
       ${str(s[12] || "") ? `<div class="stop-note">⚠ ${esc(str(s[12]))}</div>` : ""}
       ${flyFrom ? `<div class="rt-fly">✈ Fly to ${esc(prettyMap(flyFrom))}, then walk</div>` : ""}
+      ${teleFrom ? `<div class="rt-fly">⤢ Teleport back to ${esc(prettyMap(teleFrom))}, then walk</div>` : ""}
       ${species.length ? `<div class="rt-species">${species.map(x => esc(str(x))).join(" · ")}${
         hunt > 3 ? ` <span class="note">— ~${hunt} encounters on average for the rarest${huntHi > hunt ? `, up to ~${huntHi} on an unlucky run` : ""}</span>` : ""}</div>` : ""}
     </span>
@@ -2294,6 +2297,8 @@ function playNodes(L){
     const runs = (st[7] || []).filter(r => MAPART[r[0]]);
     if (st[6]) nodes.push({t: "fly", map: (runs[0] || [st[2]])[0],
       label: "✈ Fly to " + prettyMap(st[6]), seg: null, stop: null});
+    if (st[14]) nodes.push({t: "fly", tele: true, map: (runs[0] || [st[2]])[0],
+      label: "⤢ Teleport back to " + prettyMap(st[14]), seg: null, stop: null});
     for (let ri = 0; ri < runs.length - 1; ri++)
       nodes.push({t: "move", map: runs[ri][0], seg: runs[ri][1], to: runs[ri + 1][0],
         label: moveVerb(runs[ri][0], runs[ri + 1][0]), stop: null});
@@ -2357,8 +2362,12 @@ function playDesc(ctx, row){
     (RKIND[str(nxt.node.stop[0])] || {}).label ? ` (${esc((RKIND[str(nxt.node.stop[0])] || {}).label)})` : ""}.` : "";
 
   if (node.t === "fly")
-    return `Use Fly from the party menu — you land at the Pokémon Center, which
-      counts as a full heal, then walk on from there.${nextBit}`;
+    return node.tele
+      ? `Use Teleport from the party menu — it returns you to the last Pokémon
+         Center you healed at, which counts as a full heal, then walk on from
+         there.${nextBit}`
+      : `Use Fly from the party menu — you land at the Pokémon Center, which
+         counts as a full heal, then walk on from there.${nextBit}`;
   if (node.t === "move"){
     const l = node.label, to = node.to ? prettyMap(node.to) : "";
     let how = `Follow the green path across into ${esc(to)}.`;
