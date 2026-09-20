@@ -324,6 +324,8 @@ button{font:inherit;color:inherit}
    under the numbered pin. 16px wide (one tile); height comes from the sprite. */
 .owsprite{position:absolute;width:16px;image-rendering:pixelated;pointer-events:none;z-index:1;
   filter:drop-shadow(0 1px 0 rgba(0,0,0,.35))}
+/* a hidden item shows no sprite in-game, so its item ball is drawn ghosted */
+.owsprite.owfaded{opacity:.4;filter:none}
 /* a hidden item has no in-game sprite: a small ghost marker on its tile */
 .owhidden{position:absolute;width:16px;height:16px;pointer-events:none;z-index:1;
   display:flex;align-items:center;justify-content:center;font:700 11px/1 "IBM Plex Mono",monospace;
@@ -1648,15 +1650,21 @@ function renderSecPanel(id, leg){
             // trainer/NPC/item ball you interact with, its feet on the tile; a
             // ghost marker for a hidden item, which has no on-screen sprite.
             const a = anc[p.x + "," + p.y], spr = a && OW[a[0]];
-            if (spr) owHtml += `<img class="owsprite" alt="" aria-hidden="true"
-              src="data:image/png;base64,${OW[a[0]]}"
-              style="left:${(ox + p.x) * 16}px;top:${(oy + p.y + 1) * 16 - a[1]}px;height:${a[1]}px">`;
+            // a hidden item shows no sprite in-game, so its item ball is drawn
+            // ghosted; both it and a real sprite are "art" the number badges above
+            const ghost = !spr && p.kind === "hidden" && OW["ITEM_BALL"];
+            const artH = spr ? a[1] : 16;
+            if (spr || ghost) owHtml += `<img class="owsprite${ghost ? " owfaded" : ""}" alt="" aria-hidden="true"
+              src="data:image/png;base64,${OW[spr ? a[0] : "ITEM_BALL"]}"
+              style="left:${(ox + p.x) * 16}px;top:${(oy + p.y + 1) * 16 - artH}px;height:${artH}px"${
+              ghost ? ' title="hidden item — no sprite shows in-game"' : ""}>`;
             else if (p.kind === "hidden") owHtml += `<span class="owhidden"
               style="left:${(ox + p.x) * 16}px;top:${(oy + p.y) * 16}px" title="hidden item — no sprite">?</span>`;
-            // with a sprite, the number is a small badge on the head; without, the
-            // usual centred pin marks the tile
-            const py = spr ? (oy + p.y + 1) * 16 - a[1] : (oy + p.y + 0.5) * 16;
-            pinsHtml += `<button class="mark${spr ? " onspr" : ""}${p.done ? " done" : ""}${p.next ? " next" : ""}" data-n="${p.n}"
+            // over art (sprite or ghost ball) the number is a small badge on top;
+            // otherwise the usual centred pin marks the tile
+            const onArt = spr || ghost;
+            const py = onArt ? (oy + p.y + 1) * 16 - artH : (oy + p.y + 0.5) * 16;
+            pinsHtml += `<button class="mark${onArt ? " onspr" : ""}${p.done ? " done" : ""}${p.next ? " next" : ""}" data-n="${p.n}"
               style="left:${(ox + p.x + 0.5) * 16}px;top:${py}px;
               background:${(RKIND[p.kind] || RKIND.event).color}"
               title="${p.n}. ${esc(p.what || "")}">${p.n}</button>`;
@@ -2598,13 +2606,17 @@ function renderPlayMap(ctx){
     const key = stopKey(st);
     const cur = node.stop && node.stopIdx === i;
     const a = anc[st[3] + "," + st[4]], spr = a && OW[a[0]];
-    if (spr) owHtml += `<img class="owsprite" alt="" aria-hidden="true"
-      src="data:image/png;base64,${OW[a[0]]}"
-      style="left:${st[3] * 16}px;top:${(st[4] + 1) * 16 - a[1]}px;height:${a[1]}px">`;
+    const ghost = !spr && str(st[0]) === "hidden" && OW["ITEM_BALL"];   // faded ball
+    const artH = spr ? a[1] : 16;
+    if (spr || ghost) owHtml += `<img class="owsprite${ghost ? " owfaded" : ""}" alt="" aria-hidden="true"
+      src="data:image/png;base64,${OW[spr ? a[0] : "ITEM_BALL"]}"
+      style="left:${st[3] * 16}px;top:${(st[4] + 1) * 16 - artH}px;height:${artH}px"${
+      ghost ? ' title="hidden item — no sprite shows in-game"' : ""}>`;
     else if (str(st[0]) === "hidden") owHtml += `<span class="owhidden"
       style="left:${st[3] * 16}px;top:${st[4] * 16}px" title="hidden item — no sprite">?</span>`;
-    const py = spr ? (st[4] + 1) * 16 - a[1] : (st[4] + 0.5) * 16;
-    pins += `<button class="mark${spr ? " onspr" : ""}${DONE.has(key) ? " done" : ""}${cur ? " cur" : ""}"
+    const onArt = spr || ghost;
+    const py = onArt ? (st[4] + 1) * 16 - artH : (st[4] + 0.5) * 16;
+    pins += `<button class="mark${onArt ? " onspr" : ""}${DONE.has(key) ? " done" : ""}${cur ? " cur" : ""}"
       data-jump="${i}" style="left:${(st[3] + 0.5) * 16}px;top:${py}px;
       background:${(RKIND[str(st[0])] || RKIND.event).color}"
       title="${i + 1}. ${esc(str(st[1]) || "")}">${i + 1}</button>`;
