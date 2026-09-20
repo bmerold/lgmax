@@ -4,6 +4,7 @@ single self-contained page. Same information, far fewer bytes: repeated object
 keys become positional arrays, and shared strings become indices into pools.
 """
 import base64, json, os
+import engine, progression
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 
@@ -428,8 +429,25 @@ def main():
         if os.path.exists(_fp):
             tpics[_nm] = base64.b64encode(open(_fp, "rb").read()).decode()
 
+    # ---- Pokédex: every species obtainable in a LeafGreen run, for the Dex tab.
+    # [natNo, name, types, firstStage, source, kind, tradeOnly, evolvesFromName]
+    dex = []
+    _av = progression.full_availability()
+    for _sp, _r in _av.items():
+        _info = engine.SPECIES.get(_sp)
+        if not _info: continue
+        _types = [t for i, t in enumerate(_info["types"]) if i == 0 or t != _info["types"][0]]
+        _frm = _r.get("from")
+        dex.append([
+            progression.NAT_DEX.get(_sp, 0), S(_info["name"]), [S(t) for t in _types],
+            _r.get("stage"), S(_r.get("source") or ""), S(_r.get("kind") or ""),
+            1 if _r.get("requiresTrade") else 0,
+            S(engine.SPECIES[_frm]["name"]) if _frm in engine.SPECIES else -1,
+        ])
+    dex.sort(key=lambda d: (d[0] or 999))
+
     payload = {"pool": pool, "stages": stages, "encounters": out_encs,
-               "mapart": art, "sprites": sprites, "tpics": tpics,
+               "mapart": art, "sprites": sprites, "tpics": tpics, "dex": dex,
                "route": {"total": route["stepTotal"]},
                "sections": out_sections, "choices": choices,
                "commitments": secs.get("tradeCommitments", {}),

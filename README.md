@@ -20,7 +20,7 @@ export LGMAX_POKEFIRERED=~/pokefirered      # optional; this is the default
 ```
 
 Python 3.10+, no third-party packages. `build.sh` runs the whole pipeline and finishes with
-`verify.py`, which must print 45 OKs. The output is `app.html` — one self-contained file, ~10 MB,
+`verify.py`, which must print 48 OKs. The output is `app.html` — one self-contained file, ~10 MB,
 no server needed. The per-starter solves run in parallel (one process each) and the build pins
 `PYTHONHASHSEED=0`, so it's byte-reproducible; `route.json` (map-geometry TSP) is the one slow
 stage, so `LGMAX_REUSE_ROUTE=1 ./build.sh` reuses it and turns an engine-only rebuild into ~2
@@ -41,6 +41,7 @@ single amended commit so the page never piles up in history).
 | **Play mode** | the default screen: one viewport, no scrolling — the current objective on top, the party (game sprites, tap for moves and PP), the current map fitted to fill the view with the walk and numbered stops, and this step's battle plan below; floor changes, doors, ferries and flights are their own steps |
 | **The route** | one continuous ~25,000-step walk through the whole game — every item ball, hidden item, trainer, one-off and first-catch, ordered by a travelling-salesman pass over the real tile graph and drawn onto the maps |
 | **Cross-device sync** | check-off progress and play position follow you between devices via an anonymous **sync key** — no account, no personal data. Backed by a free Cloudflare Worker (see [`sync/`](sync/README.md)); an offline copy-paste **sync code** works with no backend at all |
+| **Dex** | a National Dex of every species a run can obtain, with completion read straight off the route stops you've checked (a caught line registers its evolutions), Kanto and off-route (Game Corner, gift) counts, and filters for what's still to get |
 
 Toggles for **starter** and **trading on/off** re-solve the recommendations rather than filtering
 them.
@@ -73,7 +74,7 @@ them.
 | `render_maps.py` | renders each section's maps to PNG from the decomp's tilesets/layouts, and pins every trainer to the tile its object event stands on |
 | `sections.py` | two-pass per-section party optimizer + choice evaluation |
 | `compact.py` | array-encoded payload (~25 MB → ~5 MB) |
-| `verify.py` | **45 guard rails; all must pass after every rebuild** |
+| `verify.py` | **48 guard rails; all must pass after every rebuild** |
 | `setup_study.py` | standalone: does setting up beat hit-and-switch? (it does not) |
 
 `sections.py` runs before `optimize.py` because it writes `data/commitments.json`, which the

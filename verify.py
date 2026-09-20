@@ -548,6 +548,23 @@ check("every encounter has an analysis",
       all(e["id"] in recs for e in graph),
       str([e["id"] for e in graph if e["id"] not in recs][:4]))
 
+# ------------------------------------------------------------------ dex
+# The Dex tab lists every obtainable species; the payload must carry one entry
+# per obtainable species, each with a National Dex number and a resolvable
+# evolves-from link, so the app's chain-based registration can't dangle.
+_pl = json.load(open(f"{OUT}/payload.json"))
+_dex, _pool = _pl.get("dex", []), _pl["pool"]
+_dex_names = {_pool[d[1]] for d in _dex}
+check("the dex covers every obtainable species",
+      len(_dex) == len(av) and len(_dex_names) == len(_dex),
+      f"dex={len(_dex)} obtainable={len(av)}")
+check("every dex entry has a National Dex number",
+      all(isinstance(d[0], int) and d[0] > 0 for d in _dex),
+      str([_pool[d[1]] for d in _dex if not (isinstance(d[0], int) and d[0] > 0)][:6]))
+check("every dex evolves-from link resolves to another dex species",
+      all(d[7] == -1 or _pool[d[7]] in _dex_names for d in _dex),
+      str([_pool[d[1]] for d in _dex if d[7] != -1 and _pool[d[7]] not in _dex_names][:6]))
+
 print()
 if fails:
     print(f"{len(fails)} check(s) FAILED")

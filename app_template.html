@@ -597,6 +597,31 @@ textarea.sync-code{width:100%;height:60px;resize:vertical;font-family:var(--mono
 #syncStatus.ok{color:var(--accent-ink)} #syncStatus.err{color:var(--bad)} #syncStatus.pend{color:var(--ink-3)}
 .sync-adv{border-top:1px solid var(--line);padding-top:14px}
 
+/* ---------- dex ---------- */
+#dexHead{display:flex;flex-direction:column;gap:12px;margin-bottom:16px}
+#dexCount{font-size:14px;color:var(--ink-2)}
+.dex-big{font-family:var(--display);font-weight:800;font-size:26px;color:var(--ink)}
+.dex-slash{color:var(--ink-3);font-weight:600;font-size:18px}
+.dex-sub{color:var(--ink-3);font-size:12.5px}
+#dexSearch{max-width:320px}
+#dexGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.dex-card{border:1px solid var(--line);background:var(--surface);padding:10px;position:relative;
+  display:flex;flex-direction:column;gap:5px}
+.dex-card.need{opacity:.6}
+.dex-card.off{opacity:.5;border-style:dashed}
+.dex-card.reg{box-shadow:inset 3px 0 0 var(--accent)}
+.dex-no{font-family:var(--mono);font-size:10.5px;color:var(--ink-3);letter-spacing:.04em}
+.dex-spr{position:relative;height:56px;display:flex;align-items:center;justify-content:center}
+.dex-spr img{width:56px;height:56px;image-rendering:pixelated}
+.dex-noimg{color:var(--ink-3);font-size:22px}
+.dex-tick{position:absolute;top:-3px;right:-3px;background:var(--accent);color:var(--on-accent);
+  width:18px;height:18px;border-radius:50%;font-size:11px;display:flex;align-items:center;justify-content:center}
+.dex-nm{font-family:var(--display);font-weight:700;font-size:13.5px}
+.dex-types{display:flex;gap:4px;flex-wrap:wrap}
+.dex-src{font-size:11px;color:var(--ink-3);line-height:1.35}
+.dex-trade{color:var(--accent-ink);font-weight:600}
+.dex-empty{color:var(--ink-3);padding:20px}
+
 /* ---------- choices ---------- */
 .choice-h{padding:16px 18px 14px}
 .choice-h h3{font-size:18px;font-weight:700}
@@ -668,6 +693,7 @@ details.notes[open] summary::after{content:"−"}
       <button class="navb" data-view="sec" aria-current="false">The guide</button>
       <button class="navb" data-view="tm" aria-current="false">TM plan</button>
       <button class="navb" data-view="cho" aria-current="false">Choices</button>
+      <button class="navb" data-view="dex" aria-current="false">Dex</button>
       <button class="navb sync-navb" id="syncBtn" title="carry your progress between devices">⇄ Sync</button>
     </nav>
   </header>
@@ -735,6 +761,16 @@ details.notes[open] summary::after{content:"−"}
     <main class="panel" id="choPanel"></main>
   </div>
 
+  <div id="view-dex" hidden>
+    <div id="dexHead">
+      <div id="dexCount"></div>
+      <div class="chips" id="dexFilters"></div>
+      <input class="search" id="dexSearch" type="search" placeholder="Search the Dex…"
+             autocomplete="off" aria-label="Search Pokédex">
+    </div>
+    <div id="dexGrid"></div>
+  </div>
+
   <p class="foot">Built from the <em>pokefirered</em> decompilation — base stats, movesets, trainer
     rosters, encounter tables, healing spots and the damage formula are read from the game's own
     source, not from a wiki.</p>
@@ -764,6 +800,9 @@ const MAPART = DATA.mapart || {};
 const ROUTE = DATA.route || {total: 0, stages: []};
 /* The game's own front sprites, keyed by display name. */
 const SPRITES = DATA.sprites || {};
+/* The Pokédex: every species obtainable in a run. Field map matches compact.py:
+   [natNo, name, types, firstStage, source, kind, tradeOnly, evolvesFromName]. */
+const DEX = DATA.dex || [];
 const TPICS = DATA.tpics || {};
 /* Choices the run makes once and keeps; the section parties are solved with
    these locked, so a single Eevee can't become a Vaporeon in one town and a
@@ -828,7 +867,7 @@ try {
     trading = !!u.trading;
     if (typeof u.sec === "number") selectedSec = u.sec;
     if (typeof u.leg === "number") selectedLeg = u.leg;
-    if (["enc","sec","tm","cho","play"].includes(u.view)) view = u.view;
+    if (["enc","sec","tm","cho","play","dex"].includes(u.view)) view = u.view;
     if (typeof u.enc === "string") selected = u.enc;
   }
 } catch (e) {}
@@ -889,6 +928,7 @@ document.getElementById("starterBtns").addEventListener("click", ev => {
   renderMast(); renderList(); renderSecList(); renderTM();
   renderPanel(ENC.find(x => x.id === selected));
   renderSecPanel(selectedSec, selectedLeg);
+  if (view === "dex") renderDex();
   saveUi(); syncTouch();
 });
 
@@ -900,6 +940,7 @@ document.getElementById("tradeBtns").addEventListener("click", ev => {
   renderMast(); renderList(); renderSecList(); renderTM();
   renderPanel(ENC.find(x => x.id === selected));
   renderSecPanel(selectedSec, selectedLeg);
+  if (view === "dex") renderDex();
   saveUi(); syncTouch();
 });
 
@@ -908,8 +949,9 @@ document.getElementById("nav").addEventListener("click", ev => {
   view = b.dataset.view;
   document.querySelectorAll("[data-view]").forEach(x =>
     x.setAttribute("aria-current", x.dataset.view === view));
-  ["enc","sec","tm","cho","play"].forEach(v =>
+  ["enc","sec","tm","cho","play","dex"].forEach(v =>
     document.getElementById("view-" + v).hidden = v !== view);
+  if (view === "dex") renderDex();     // reflects whatever you've checked off so far
   updateSticky();
   saveUi();
 });
@@ -1929,7 +1971,7 @@ function openEncounter(id, fromN){
   selected = id; view = "enc";
   document.querySelectorAll("[data-view]").forEach(x =>
     x.setAttribute("aria-current", x.dataset.view === "enc"));
-  ["enc","sec","tm","cho","play"].forEach(v =>
+  ["enc","sec","tm","cho","play","dex"].forEach(v =>
     document.getElementById("view-" + v).hidden = v !== "enc");
   renderList();
   renderPanel(e);
@@ -1950,7 +1992,7 @@ function backToGuide(){
   view = dest;
   document.querySelectorAll("[data-view]").forEach(x =>
     x.setAttribute("aria-current", x.dataset.view === dest));
-  ["enc","sec","tm","cho","play"].forEach(v =>
+  ["enc","sec","tm","cho","play","dex"].forEach(v =>
     document.getElementById("view-" + v).hidden = v !== dest);
   saveUi();
   if (dest === "play"){ guideReturn = null; renderPlay(); return; }
@@ -2737,7 +2779,7 @@ document.querySelector("#playDrawer .drawer-links").addEventListener("click", ev
   view = b.dataset.view;
   document.querySelectorAll("#nav [data-view]").forEach(x =>
     x.setAttribute("aria-current", x.dataset.view === view));
-  ["enc","sec","tm","cho","play"].forEach(v =>
+  ["enc","sec","tm","cho","play","dex"].forEach(v =>
     document.getElementById("view-" + v).hidden = v !== view);
   saveUi();
 });
@@ -2970,12 +3012,117 @@ document.getElementById("syncBody").addEventListener("click", ev => {
   }
 });
 
+/* ---------------- dex ---------------- */
+let dexFilter = "all", dexQuery = "";
+const dexName = d => str(d[1]);
+
+/* Which species you've registered, read straight off the route stops you've
+   already checked — no separate bookkeeping. A catch stop names its species, a
+   one-off event names its own, and an evolution counts once the thing it evolves
+   from does. Also collects which species the guide's route can register at all,
+   so the counter's denominator is honest: Game Corner prizes and other off-route
+   catches are shown but not counted against completion. */
+function dexScan(){
+  const names = new Set(DEX.map(dexName));
+  const caught = new Set(), onRoute = new Set();
+  for (const sg of STAGES){
+    for (const L of legsOf(secData(sg.id))){
+      for (const st of (L && L.rt) || []){
+        const kind = str(st[0]), got = DONE.has(stopKey(st));
+        const hits = [];
+        if (kind === "catch"){
+          for (const s of st[8] || []){
+            const nm = str(s).split(" (")[0].trim();
+            if (names.has(nm)) hits.push(nm);
+          }
+        } else if (kind === "event"){
+          const what = str(st[1]) || "";
+          for (const nm of names) if (what.includes(nm)) hits.push(nm);
+        }
+        for (const nm of hits){ onRoute.add(nm); if (got) caught.add(nm); }
+      }
+    }
+  }
+  // your starter is obtained at Oak's lab, not named by any catch stop
+  onRoute.add(starter); caught.add(starter);
+  return {caught, onRoute};
+}
+
+/* Fold an evolution's status onto the form it evolves from (registered when the
+   base is, collectable when the base is), following the chain safely. */
+function dexChain(base){
+  const byName = {}; DEX.forEach(d => byName[dexName(d)] = d);
+  const memo = {};
+  const reg = nm => {
+    if (nm in memo) return memo[nm];
+    memo[nm] = false;                              // break any cycle
+    const d = byName[nm];
+    let r = base.has(nm);
+    if (!r && d){ const frm = str(d[7]); if (frm) r = reg(frm); }
+    return (memo[nm] = r);
+  };
+  const out = new Set();
+  DEX.forEach(d => { if (reg(dexName(d))) out.add(dexName(d)); });
+  return out;
+}
+
+const DEX_FILTERS = [["all", "All"], ["caught", "Registered"], ["missing", "Still to get"],
+                     ["offroute", "Off-route"], ["trade", "Trade-only"]];
+
+function renderDex(){
+  const {caught, onRoute} = dexScan();
+  const registered = dexChain(caught), collectable = dexChain(onRoute);
+  const shown = DEX.filter(d => !(d[6] === 1 && !trading));   // hide trade-only in a solo run
+  const nm = dexName;
+  const total = shown.filter(d => collectable.has(nm(d))).length;
+  const have = shown.filter(d => collectable.has(nm(d)) && registered.has(nm(d))).length;
+  const kTot = shown.filter(d => d[0] <= 151 && collectable.has(nm(d))).length;
+  const kHave = shown.filter(d => d[0] <= 151 && collectable.has(nm(d)) && registered.has(nm(d))).length;
+  const off = shown.filter(d => !collectable.has(nm(d))).length;
+  document.getElementById("dexCount").innerHTML =
+    `<span class="dex-big">${have}<span class="dex-slash">/${total}</span></span> registered`
+    + ` · <span class="dex-sub">Kanto ${kHave}/${kTot}</span>`
+    + (off ? ` · <span class="dex-sub">${off} off-route (prizes, gifts…)</span>` : "");
+  document.getElementById("dexFilters").innerHTML = DEX_FILTERS.map(([id, lab]) =>
+    `<button class="chip" data-dexf="${id}" aria-pressed="${dexFilter === id}">${lab}</button>`).join("");
+
+  const q = dexQuery.trim().toLowerCase();
+  const rows = shown.filter(d => {
+    const n = nm(d), reg = registered.has(n), coll = collectable.has(n);
+    if (dexFilter === "caught" && !reg) return false;
+    if (dexFilter === "missing" && (reg || !coll)) return false;
+    if (dexFilter === "offroute" && coll) return false;
+    if (dexFilter === "trade" && d[6] !== 1) return false;
+    if (q && !n.toLowerCase().includes(q) && String(d[0]) !== q) return false;
+    return true;
+  });
+  document.getElementById("dexGrid").innerHTML = rows.length ? rows.map(d => {
+    const n = nm(d), reg = registered.has(n), coll = collectable.has(n), spr = SPRITES[n];
+    return `<div class="dex-card ${reg ? "reg" : (coll ? "need" : "off")}">
+      <div class="dex-no">#${String(d[0]).padStart(3, "0")}</div>
+      <div class="dex-spr">${spr ? `<img src="data:image/png;base64,${spr}" alt="">`
+        : `<span class="dex-noimg">?</span>`}${reg ? `<span class="dex-tick">✓</span>` : ""}</div>
+      <div class="dex-nm">${esc(n)}</div>
+      <div class="dex-types">${typeChips(d[2])}</div>
+      <div class="dex-src">${esc(str(d[4]) || "")}${d[6] === 1 ? ` <span class="dex-trade">trade</span>` : ""}</div>
+    </div>`;
+  }).join("") : `<div class="dex-empty">Nothing matches.</div>`;
+}
+document.getElementById("dexFilters").addEventListener("click", ev => {
+  const b = ev.target.closest("[data-dexf]"); if (!b) return;
+  dexFilter = b.dataset.dexf; renderDex();
+});
+document.getElementById("dexSearch").addEventListener("input", ev => {
+  dexQuery = ev.target.value; renderDex();
+});
+
 /* ---------------- boot ---------------- */
 renderMast();
 renderList();
 renderSecList();
 renderChoices();
 renderTM();
+renderDex();
 if (!selected || !ENC.some(e => e.id === selected && forStarter(e)))
   selected = (ENC.find(e => e.id === "trainer:TRAINER_LEADER_BROCK") || ENC[0]).id;
 renderPanel(ENC.find(e => e.id === selected));
@@ -2990,7 +3137,7 @@ document.querySelectorAll("[data-trade]").forEach(x =>
   x.setAttribute("aria-pressed", String((x.dataset.trade === "yes") === trading)));
 document.querySelectorAll("#nav [data-view]").forEach(x =>
   x.setAttribute("aria-current", x.dataset.view === view));
-["enc","sec","tm","cho","play"].forEach(v =>
+["enc","sec","tm","cho","play","dex"].forEach(v =>
   document.getElementById("view-" + v).hidden = v !== view);
 const _selRow = document.querySelector(`.sec-row[data-sec="${selectedSec}"][data-leg="${selectedLeg}"]`);
 if (_selRow) _selRow.scrollIntoView({block: "center"});
