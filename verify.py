@@ -573,18 +573,22 @@ check("prize money matches the ROM for known trainers",
       EC.prize("TRAINER_LEADER_BROCK") == 1400 and EC.prize("TRAINER_LEADER_MISTY") == 2100,
       f"Brock={EC.prize('TRAINER_LEADER_BROCK')} Misty={EC.prize('TRAINER_LEADER_MISTY')}")
 _econ = _pl.get("economy", {})
+_tmbuys = [b for per in _econ.get("tmBuys", {}).values() for buys in per.values() for b in buys]
 check("the money model ships an income curve and a shopping list",
-      _econ.get("totalIncome", 0) > 0 and len(_econ.get("purchases", [])) > 0)
+      _econ.get("totalIncome", 0) > 0 and len(_econ.get("fixed", [])) > 0 and len(_tmbuys) > 0)
 _seq = [_econ["incomeByStage"][k] for k in sorted(_econ.get("incomeByStage", {}), key=int)]
 check("cumulative income never decreases across stages",
       all(b >= a for a, b in zip(_seq, _seq[1:])))
-# affordability is clamped to when a thing can actually be bought — nothing is
-# ever "affordable" at a stage before its shop opens.
-check("no purchase is affordable before it can be bought",
-      all(p.get("affordAt") is None or p["affordAt"] >= p["stage"]
-          for p in _econ.get("purchases", [])),
-      str([p["what"] for p in _econ.get("purchases", [])
-           if p.get("affordAt") is not None and p["affordAt"] < p["stage"]][:5]))
+# every purchase is a Celadon shop (Game Corner / Dept. Store), so nothing is
+# buyable before that city opens.
+_buys = _econ.get("fixed", []) + _tmbuys
+check("nothing is buyable before its shop opens",
+      all(p.get("stage", 0) >= _econ.get("gcStage", 15) for p in _buys),
+      str([p["what"] for p in _buys if p.get("stage", 0) < _econ.get("gcStage", 15)][:5]))
+# the run really does buy the coin-only TMs the model now prices (regression on
+# the Game Corner / Dept. TM gap)
+check("purchasable TMs the run teaches are priced",
+      all(b.get("yen", 0) > 0 and b.get("count", 0) > 0 for b in _tmbuys))
 
 print()
 if fails:

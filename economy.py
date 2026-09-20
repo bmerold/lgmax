@@ -25,10 +25,12 @@ OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 COIN_YEN = 20                       # Game Corner counter: 50 coins per ¥1000
 GC_STAGE = 15                       # Celadon City opens the Game Corner + Dept. Store
 
-# Game Corner Pokémon prizes are coin-only. Abra and Clefairy are also wild, so
-# a run never has to buy them; these three are prize-only (LeafGreen coin costs
-# from data/maps/CeladonCity_GameCorner_PrizeRoom/scripts.inc).
-GC_MON_COINS = {"SPECIES_PINSIR": 2500, "SPECIES_DRATINI": 4600, "SPECIES_PORYGON": 6500}
+# Porygon is the only Game-Corner-exclusive Pokémon a run has to buy. Abra and
+# Clefairy are wild (Route 24 / Mt. Moon), and — the correction — Pinsir and
+# Dratini are wild too (Safari Zone grass / super rod), so a completionist catches
+# them free rather than paying their prize coins. (LeafGreen coin cost from
+# data/maps/CeladonCity_GameCorner_PrizeRoom/scripts.inc.)
+GC_MON_COINS = {"SPECIES_PORYGON": 6500}
 STORE_STONES = {"ITEM_FIRE_STONE", "ITEM_WATER_STONE", "ITEM_THUNDER_STONE", "ITEM_LEAF_STONE"}
 
 
@@ -76,70 +78,108 @@ def _afford_stage(cum, cost, not_before=0):
     return None
 
 
-def build(graph, avail, tm_supply, tm_plans):
-    """The full economy: income curve, the run's shopping list with costs, and a
-    budget summary. `tm_plans` is per-mode/starter so we can price the single-use
-    TMs a run actually buys (Game Corner TMs cost coins; Dept. TMs cost money)."""
-    cum = income_by_stage(graph)
-    total_income = cum[max(cum)]
-
-    purchases = []
-    # --- Game Corner Pokémon prizes (the discretionary completionist sink) ---
-    for sp, coins in GC_MON_COINS.items():
-        rec = avail.get(sp)
-        if not rec:
+def _tm_costs(tm_supply):
+    """Purchase-only TMs (no free item-ball/gift source) -> cost record. Game
+    Corner TMs cost coins; Celadon Dept. Store TMs cost money (the item price)."""
+    out = {}
+    for rec in tm_supply.values():
+        srcs = rec.get("sources", [])
+        if not srcs or any(s.get("kind") not in ("shop", "Game Corner") for s in srcs):
             continue
-        yen = coins * COIN_YEN
-        purchases.append({
-            "what": E.SPECIES[sp]["name"], "kind": "Game Corner Pokémon",
-            "where": "Celadon Game Corner", "stage": GC_STAGE,
-            "coins": coins, "yen": yen, "essential": False,
-            "affordAt": _afford_stage(cum, yen, GC_STAGE),
-        })
+        gc = next((s for s in srcs if s.get("kind") == "Game Corner"), None)
+        coins = gc["cost"] if gc else 0
+        out[rec["name"]] = {
+            "item": rec["item"], "coins": coins,
+            "yen": coins * COIN_YEN if coins else E.ITEMS.get(rec["item"], {}).get("price", 0),
+            "where": "Celadon Game Corner" if gc else "Celadon Dept. Store",
+            "kind": "Game Corner TM" if gc else "Dept. Store TM",
+        }
+    return out
 
-    # --- Celadon Dept. Store evolution stones the run's dex evolutions consume ---
+
+def tm_purchases(sections, tm_supply):
+    """Per (trade mode, starter), the purchasable TMs that run actually teaches —
+    one TM bought per (Pokémon, move), priced. These were previously free in the
+    model because Game Corner / Dept. TMs are repeatable, so their coin/money cost
+    went uncounted."""
+    costs = _tm_costs(tm_supply)
+    out = {}
+    for mode, per in sections.items():
+        out[mode] = {}
+        for starter, secs in per.items():
+            teaches = {}   # move name -> set of species taught it via a TM
+            for sec in (secs or {}).values():
+                if not sec:
+                    continue
+                for t in sec.get("team", []):
+                    for m in t.get("moves", []):
+                        nm = m.get("name")
+                        # only a real TM teach — a level-up copy is free
+                        if nm in costs and str(m.get("src", "")).startswith("TM"):
+                            teaches.setdefault(nm, set()).add(t["species"])
+            buys = []
+            for nm, species in teaches.items():
+                c = costs[nm]
+                n = len(species)
+                buys.append({
+                    "what": nm, "kind": c["kind"], "where": c["where"], "stage": GC_STAGE,
+                    "item": c["item"], "count": n,
+                    "coins": c["coins"] * n, "yen": c["yen"] * n,
+                    "unitCoins": c["coins"], "unitYen": c["yen"],
+                    "teaches": sorted(E.SPECIES[s]["name"] for s in species),
+                })
+            out[mode][starter] = sorted(buys, key=lambda b: -b["yen"])
+    return out
+
+
+def build(graph, avail, sections, tm_supply):
+    """Income curve + the run's shopping list. Run-agnostic purchases (the
+    Game-Corner-exclusive Porygon and the Celadon stones) are `fixed`; the
+    purchasable TMs a run buys are per (mode, starter) in `tmBuys`. Affordability
+    and per-run totals are computed in the app off `incomeByStage`."""
+    cum = income_by_stage(graph)
+
+    fixed = []
+    for sp, coins in GC_MON_COINS.items():        # Porygon — Game-Corner-only
+        if sp in avail:
+            fixed.append({"what": E.SPECIES[sp]["name"], "kind": "Game Corner Pokémon",
+                          "where": "Celadon Game Corner", "stage": GC_STAGE,
+                          "coins": coins, "yen": coins * COIN_YEN})
     stone_price = E.ITEMS.get("ITEM_FIRE_STONE", {}).get("price", 2100)
-    stone_evos = sorted({sp for sp, r in avail.items()
-                         if r.get("evoMethod") == "ITEM" and r.get("evoParam") in STORE_STONES})
-    for sp in stone_evos:
-        param = avail[sp]["evoParam"]
-        purchases.append({
-            "what": E.SPECIES[sp]["name"], "kind": "Stone evolution",
-            "where": "Celadon Dept. Store",
-            "item": E.ITEMS.get(param, {}).get("name", param), "stage": GC_STAGE,
-            "coins": 0, "yen": stone_price, "essential": False,
-            "affordAt": _afford_stage(cum, stone_price, GC_STAGE),
-        })
+    for item in sorted(STORE_STONES):             # buy one per stone evolution you do
+        fixed.append({"what": E.ITEMS.get(item, {}).get("name", item), "kind": "Evolution stone",
+                      "where": "Celadon Dept. Store", "stage": GC_STAGE,
+                      "coins": 0, "yen": stone_price})
 
-    gc_bill = sum(p["yen"] for p in purchases if p["kind"] == "Game Corner Pokémon")
-    dex_bill = sum(p["yen"] for p in purchases)
     return {
         "coinYen": COIN_YEN,
-        "totalIncome": total_income,
+        "totalIncome": cum[max(cum)],
         "incomeByStage": cum,
-        "purchases": sorted(purchases, key=lambda p: -p["yen"]),
-        "gameCornerBill": gc_bill,
-        "gameCornerCoins": sum(GC_MON_COINS.values()),
-        "dexBill": dex_bill,
         "incomeByGameCorner": cum.get(GC_STAGE, 0),
-        # can the whole Game Corner Pokémon set be bought the moment Celadon opens?
-        "gcAffordAtOpen": cum.get(GC_STAGE, 0) >= gc_bill,
-        "gcAffordAt": _afford_stage(cum, gc_bill, GC_STAGE),
+        "gcStage": GC_STAGE,
+        "fixed": sorted(fixed, key=lambda p: -p["yen"]),
+        "tmBuys": tm_purchases(sections, tm_supply),
     }
 
 
 if __name__ == "__main__":
     graph = json.load(open(f"{OUT}/encounters.json"))
     avail = P.full_availability()
-    econ = build(graph, avail, {}, {})
+    secs = json.load(open(f"{OUT}/sections.json"))
+    tm_supply = json.load(open(f"{OUT}/tmSupply.json")) if os.path.exists(f"{OUT}/tmSupply.json") \
+        else secs.get("tmSupply", {})
+    econ = build(graph, avail, secs["sections"], tm_supply)
     with open(f"{OUT}/economy.json", "w") as f:
         json.dump(econ, f, separators=(",", ":"))
     print(f"total prize income: ¥{econ['totalIncome']:,}")
     print(f"income by Celadon (stage {GC_STAGE}): ¥{econ['incomeByGameCorner']:,}")
-    print(f"Game Corner Pokémon bill: {econ['gameCornerCoins']:,} coins = "
-          f"¥{econ['gameCornerBill']:,} (affordable at open: {econ['gcAffordAtOpen']}, "
-          f"else stage {econ['gcAffordAt']})")
-    for p in econ["purchases"]:
-        print(f"  {p['what']:11s} {p['kind']:20s} ¥{p['yen']:>7,}"
-              + (f" ({p['coins']} coins)" if p["coins"] else "")
-              + f"  affordable by stage {p['affordAt']}")
+    # summarize a representative run (best no-trade starter)
+    tot = {k: sum((v[s] or {}).get("turns", 0) or 0 for s in v)
+           for k, v in secs["sections"]["no"].items()}
+    ref = min(tot, key=tot.get)
+    tms = econ["tmBuys"]["no"][ref]
+    tm_yen = sum(b["yen"] for b in tms)
+    tm_coins = sum(b["coins"] for b in tms)
+    print(f"fixed purchases: {[(p['what'], p['yen']) for p in econ['fixed']][:3]} …")
+    print(f"TMs bought ({ref}, solo): ¥{tm_yen:,} ({tm_coins:,} coins) — "
+          + ", ".join(f"{b['what']}×{b['count']}" for b in tms))

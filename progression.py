@@ -144,11 +144,14 @@ STATIC_SOURCES = [
     ("SPECIES_CHARMANDER", 0, "starter",  "Starter choice, Oak's Lab"),
     ("SPECIES_SQUIRTLE",   0, "starter",  "Starter choice, Oak's Lab"),
     ("SPECIES_MAGIKARP",   5, "purchase", "Route 4 salesman, 500"),
+    # Abra and Clefairy are also Game Corner prizes, but they're wild earlier
+    # (Route 24 / Mt. Moon) so the wild source wins. Dratini and Pinsir are wild
+    # too — Safari Zone super-rod / grass — just later than the prize, so they are
+    # deliberately NOT listed here: a completionist catches them free rather than
+    # paying ~9,100 coins. Porygon is the only genuinely Game-Corner-exclusive one.
     ("SPECIES_ABRA",      15, "prize",    "Celadon Game Corner prize"),
     ("SPECIES_CLEFAIRY",  15, "prize",    "Celadon Game Corner prize"),
-    ("SPECIES_DRATINI",   15, "prize",    "Celadon Game Corner prize"),
     ("SPECIES_PORYGON",   15, "prize",    "Celadon Game Corner prize"),
-    ("SPECIES_PINSIR",    15, "prize",    "Celadon Game Corner prize (LeafGreen)"),
     ("SPECIES_EEVEE",     15, "gift",     "Celadon Condominiums roof, L25"),
     ("SPECIES_HYPNO",     18, "static",   "Pokemon Tower, L30"),
     ("SPECIES_MAROWAK",   18, "static",   "Ghost Marowak, Pokemon Tower (uncatchable)"),

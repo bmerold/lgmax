@@ -20,7 +20,7 @@ export LGMAX_POKEFIRERED=~/pokefirered      # optional; this is the default
 ```
 
 Python 3.10+, no third-party packages. `build.sh` runs the whole pipeline and finishes with
-`verify.py`, which must print 52 OKs. The output is `app.html` — one self-contained file, ~10 MB,
+`verify.py`, which must print 53 OKs. The output is `app.html` — one self-contained file, ~10 MB,
 no server needed. The per-starter solves run in parallel (one process each) and the build pins
 `PYTHONHASHSEED=0`, so it's byte-reproducible; `route.json` (map-geometry TSP) is the one slow
 stage, so `LGMAX_REUSE_ROUTE=1 ./build.sh` reuses it and turns an engine-only rebuild into ~2
@@ -76,7 +76,7 @@ them.
 | `render_maps.py` | renders each section's maps to PNG from the decomp's tilesets/layouts, and pins every trainer to the tile its object event stands on |
 | `sections.py` | two-pass per-section party optimizer + choice evaluation |
 | `compact.py` | array-encoded payload (~25 MB → ~5 MB) |
-| `verify.py` | **52 guard rails; all must pass after every rebuild** |
+| `verify.py` | **53 guard rails; all must pass after every rebuild** |
 | `setup_study.py` | standalone: does setting up beat hit-and-switch? (it does not) |
 
 `sections.py` runs before `optimize.py` because it writes `data/commitments.json`, which the

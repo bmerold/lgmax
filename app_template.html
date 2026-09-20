@@ -965,6 +965,7 @@ document.getElementById("starterBtns").addEventListener("click", ev => {
   renderPanel(ENC.find(x => x.id === selected));
   renderSecPanel(selectedSec, selectedLeg);
   if (view === "dex") renderDex();
+  if (view === "money") renderMoney();
   saveUi(); syncTouch();
 });
 
@@ -977,6 +978,7 @@ document.getElementById("tradeBtns").addEventListener("click", ev => {
   renderPanel(ENC.find(x => x.id === selected));
   renderSecPanel(selectedSec, selectedLeg);
   if (view === "dex") renderDex();
+  if (view === "money") renderMoney();
   saveUi(); syncTouch();
 });
 
@@ -3198,36 +3200,54 @@ const stageName = id => (STAGE_BY_ID[id] || {}).name || ("stage " + id);
 function renderMoney(){
   const el = document.getElementById("moneyPanel");
   if (!ECON.totalIncome){ el.innerHTML = `<p class="foot">No economy data.</p>`; return; }
-  const gcOpen = ECON.incomeByGameCorner, bill = ECON.gameCornerBill, coins = ECON.gameCornerCoins;
-  const verdict = ECON.gcAffordAtOpen
-    ? `You have ${yen(gcOpen)} by Celadon — enough to buy the coins for all three at the counter.`
-    : `You have only ${yen(gcOpen)} by Celadon, so on battle money alone you couldn't buy the
-       ${coins.toLocaleString()} coins for all three until <b>${esc(stageName(ECON.gcAffordAt))}</b>.
-       In practice you win coins on the slots — the ¥ figure is the counter's buy price
-       (${yen(ECON.coinYen)}/coin), a ceiling.`;
-  const rows = (ECON.purchases || []).map(p => `<tr>
-    <td><b>${esc(p.what)}</b></td>
-    <td>${esc(p.kind)}${p.item ? ` · ${esc(p.item)}` : ""}</td>
+  const cum = ECON.incomeByStage || {};
+  const affordAt = (cost, notBefore) => {
+    for (const st of Object.keys(cum).map(Number).sort((a, b) => a - b))
+      if (st >= (notBefore || 0) && cum[st] >= cost) return st;
+    return null;
+  };
+  // this run's purchases: the fixed ones (Porygon, stones) plus the purchasable
+  // TMs this starter/trade combination actually teaches
+  const tmBuys = ((ECON.tmBuys || {})[tradeKey()] || {})[starter] || [];
+  const purchases = [...(ECON.fixed || []), ...tmBuys]
+    .map(p => ({...p, at: affordAt(p.yen, p.stage)}))
+    .sort((a, b) => b.yen - a.yen);
+  const gcOpen = ECON.incomeByGameCorner;
+  const runBill = purchases.reduce((a, p) => a + p.yen, 0);
+  const gcCoins = purchases.reduce((a, p) => a + (p.coins || 0), 0);
+  const gcAll = affordAt(gcCoins * ECON.coinYen, ECON.gcStage);   // when all the coin buys are covered
+  const verdict = gcOpen >= gcCoins * ECON.coinYen
+    ? `Its coin buys total ${gcCoins.toLocaleString()} coins, and you have ${yen(gcOpen)} by Celadon — enough to buy them all outright.`
+    : `Its coin buys total <b>${gcCoins.toLocaleString()} coins</b> (${yen(gcCoins * ECON.coinYen)} at the counter),
+       but you have only ${yen(gcOpen)} by Celadon — on battle money alone you couldn't buy that many coins
+       until <b>${esc(stageName(gcAll))}</b>. In practice you win coins on the slots; the ¥ figure is the
+       counter's buy price (${yen(ECON.coinYen)}/coin), a ceiling.`;
+  const rows = purchases.map(p => `<tr>
+    <td><b>${esc(p.what)}</b>${p.count > 1 ? ` <span class="coins">×${p.count}</span>` : ""}</td>
+    <td>${esc(p.kind)}${p.teaches ? ` · ${esc(p.teaches.join(", "))}` : ""}</td>
     <td class="r">${yen(p.yen)}${p.coins ? `<span class="coins">${p.coins.toLocaleString()} coins</span>` : ""}</td>
     <td>${esc(p.where || "")}</td>
-    <td>${p.affordAt != null ? esc(stageName(p.affordAt)) : "—"}</td></tr>`).join("");
+    <td>${p.at != null ? esc(stageName(p.at)) : "—"}</td></tr>`).join("");
   el.innerHTML = `
     <div class="money-h">
       <div><span class="money-big">${yen(ECON.totalIncome)}</span>
         <span class="money-sub">prize money across the whole run — no grinding, no Amulet Coin</span></div>
       <div class="money-stats">
         <div class="mstat"><b>${yen(gcOpen)}</b><span>earned by Celadon</span></div>
-        <div class="mstat"><b>${yen(bill)}</b><span>Game Corner prizes · ${coins.toLocaleString()} coins</span></div>
+        <div class="mstat"><b>${yen(runBill)}</b><span>this run buys${gcCoins ? ` · ${gcCoins.toLocaleString()} coins` : ""}</span></div>
       </div>
     </div>
-    <div class="money-note"><b>The Game Corner is the one real money sink.</b> ${verdict}</div>
+    <div class="money-note"><b>The Game Corner is the one real money sink.</b> ${verdict}
+      Porygon is the only Pokémon you must buy there — Pinsir and Dratini you catch free in the Safari
+      Zone — but the coin-only TMs (Ice Beam, Thunderbolt, Shadow Ball…) add up.</div>
     <div class="ctab-wrap"><table class="ctab">
-      <thead><tr><th>Buy</th><th>What</th><th class="r">Cost</th><th>Where</th><th>Affordable by</th></tr></thead>
+      <thead><tr><th>Buy</th><th>What / for</th><th class="r">Cost</th><th>Where</th><th>Affordable by</th></tr></thead>
       <tbody>${rows}</tbody></table></div>
     <p class="foot">Income is Gen 3 prize money — 4 × the trainer's last Pokémon's level × its class
-      value (<code>gTrainerMoneyTable</code>) — over every trainer the route beats, each once. Stones
-      are the Celadon Dept. Store price; Game Corner costs are the LeafGreen coin prices at
-      ${yen(ECON.coinYen)}/coin.</p>`;
+      value (<code>gTrainerMoneyTable</code>) — over every trainer the route beats, each once. TMs are
+      the ones <b>${esc(starter)}${trading ? ", trading," : ""}</b> actually teaches; a Pokémon that
+      learns a coin/Dept. TM costs one copy. Stones are the Celadon Dept. Store price; Game Corner
+      costs are the LeafGreen coin prices at ${yen(ECON.coinYen)}/coin.</p>`;
 }
 
 /* ---------------- boot ---------------- */
