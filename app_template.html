@@ -447,11 +447,17 @@ button{font:inherit;color:inherit}
 #playDesc .log-steps{margin-top:6px}
 #playDesc .po-desc b{color:var(--ink);font-weight:700}
 #playDesc .po-desc .fightlink{color:var(--accent);font-weight:700;text-decoration:underline dotted}
+/* One family, matching the app's utility buttons (zoom / hide-done / drawer
+   links): square, hairline border, quiet by default, accent on hover. `next` is
+   the primary action, so it carries the restrained soft-accent emphasis used by
+   .pick rather than a solid fill (solid accent means "active" everywhere else). */
 #playPrev,#playNext,#playOutlineBtn{border:1px solid var(--line);border-radius:0;
-  background:var(--surface-2);color:var(--ink);font:600 13px/1 inherit;font-family:inherit;
-  padding:10px 14px;cursor:pointer;flex-shrink:0}
-#playNext{background:var(--good);border-color:var(--good);color:#fff}
+  background:var(--surface);color:var(--ink-2);font:600 12px/1 inherit;font-family:inherit;
+  padding:9px 13px;cursor:pointer;flex-shrink:0}
+#playPrev{padding:9px 12px;color:var(--ink-3)}
+#playNext{background:var(--accent-soft);border-color:var(--accent);color:var(--accent-ink)}
 #playPrev:hover,#playOutlineBtn:hover{border-color:var(--accent);color:var(--accent)}
+#playNext:hover{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
 #playTeam{display:flex;gap:6px;align-items:flex-end;justify-content:center;
   padding:6px 10px 4px;background:var(--surface);border-bottom:1px solid var(--line);
   flex-shrink:0;overflow-x:auto}
@@ -704,8 +710,8 @@ details.notes[open] summary::after{content:"−"}
     <div id="playTop">
       <button id="playPrev" title="previous step (←)">‹</button>
       <div id="playObj"></div>
-      <button id="playNext" title="next step (→) — tick the checkbox to mark it done">next ›</button>
-      <button id="playOutlineBtn" title="the whole journey">▤ journey</button>
+      <button id="playNext" title="next step (→) — tick the checkbox to mark it done">Next ›</button>
+      <button id="playOutlineBtn" title="the whole journey">Journey</button>
     </div>
     <div id="playDesc" hidden></div>
     <div id="playTeam"></div>
