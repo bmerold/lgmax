@@ -282,10 +282,11 @@ def main():
 
     def pack_stop(s):
         # [kind, what, map, x, y, walk, flyLanding, pathRuns, species, buried,
-        #  renewable, hunt, note, huntHi, teleportLanding]
-        # flyLanding (Fly, stage 20+) and teleportLanding (Teleport, stage 7+) are
-        # both "you return to this Center", kept in separate slots so the app can
-        # label the hop as a flight or a teleport.
+        #  renewable, hunt, note, huntHi, teleportLanding, digLanding]
+        # flyLanding (Fly, 20+), teleportLanding (Teleport, 7+) and digLanding
+        # (Dig/Escape Rope out of a single-entrance cave, 9+) each mean "this leg
+        # is a jump, landing at this map", kept in separate slots so the app can
+        # label the hop correctly. A stop carries at most one of the three.
         return [S(s["kind"]), S(s["what"]), s["map"], s["at"][0], s["at"][1],
                 s["walk"], s["fly"] if isinstance(s.get("fly"), str) else 0,
                 path_runs(s["path"]),
@@ -293,7 +294,8 @@ def main():
                 1 if s.get("underfoot") else 0,
                 S(s.get("renewable")), s.get("hunt", 0), S(s.get("note")),
                 s.get("huntHi", 0),
-                s["teleport"] if isinstance(s.get("teleport"), str) else 0]
+                s["teleport"] if isinstance(s.get("teleport"), str) else 0,
+                s["dig"] if isinstance(s.get("dig"), str) else 0]
 
     def leg_rows(sec, stage):
         """A section split at its full heals. Each leg carries its own roster

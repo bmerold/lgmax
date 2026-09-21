@@ -1574,7 +1574,7 @@ function renderSecPanel(id, leg){
     if (!MAPART[mp]) return;
     (pinsByMap[mp] = pinsByMap[mp] || []).push(
       {n: i + 1, x: s[3], y: s[4], kind: str(s[0]), what: str(s[1]),
-       walk: s[5], fly: s[6], teleport: s[14], species: (s[8] || []).length,
+       walk: s[5], fly: s[6], teleport: s[14], dig: s[15], species: (s[8] || []).length,
        underfoot: s[9], renew: str(s[10]), hunt: s[11] || 0, huntHi: s[13] || 0,
        key: keys[i], done: DONE.has(keys[i]),
        next: i === nextIdx, plan: planByStop[i + 1]});
@@ -1584,6 +1584,7 @@ function renderSecPanel(id, leg){
     const bits = [k.label, p.walk + " steps"];
     if (p.fly) bits.push("✈ fly to " + prettyMap(p.fly));
     if (p.teleport) bits.push("⤢ teleport to " + prettyMap(p.teleport));
+    if (p.dig) bits.push("⛏ dig out to " + prettyMap(p.dig));
     if (p.underfoot) bits.push("needs Itemfinder");
     else if (p.renew) bits.push(`renewable — there ${RENEW_ODDS[p.renew] || "?"} of the time`);
     else if (p.kind === "hidden") bits.push("invisible — press A");
@@ -1852,7 +1853,7 @@ function partyCard(t){
 
 function rtRow(s, n, st){
   const kind = str(s[0]), what = str(s[1]), mp = s[2], walk = s[5],
-        flyFrom = s[6], teleFrom = s[14], species = s[8] || [], underfoot = s[9],
+        flyFrom = s[6], teleFrom = s[14], digFrom = s[15], species = s[8] || [], underfoot = s[9],
         renew = str(s[10]), hunt = s[11] || 0, huntHi = s[13] || 0;
   st = st || {};
   return `<div class="rt-row${st.done ? " done" : ""}${st.next ? " next" : ""}" id="fight-${n}">
@@ -1867,6 +1868,7 @@ function rtRow(s, n, st){
       ${str(s[12] || "") ? `<div class="stop-note">⚠ ${esc(str(s[12]))}</div>` : ""}
       ${flyFrom ? `<div class="rt-fly">✈ Fly to ${esc(prettyMap(flyFrom))}, then walk</div>` : ""}
       ${teleFrom ? `<div class="rt-fly">⤢ Teleport back to ${esc(prettyMap(teleFrom))}, then walk</div>` : ""}
+      ${digFrom ? `<div class="rt-fly">⛏ Dig (or Escape Rope) out to ${esc(prettyMap(digFrom))}, then walk</div>` : ""}
       ${species.length ? `<div class="rt-species">${species.map(x => esc(str(x))).join(" · ")}${
         hunt > 3 ? ` <span class="note">— ~${hunt} encounters on average for the rarest${huntHi > hunt ? `, up to ~${huntHi} on an unlucky run` : ""}</span>` : ""}</div>` : ""}
     </span>
@@ -2337,6 +2339,8 @@ function playNodes(L){
       label: "✈ Fly to " + prettyMap(st[6]), seg: null, stop: null});
     if (st[14]) nodes.push({t: "fly", tele: true, map: (runs[0] || [st[2]])[0],
       label: "⤢ Teleport back to " + prettyMap(st[14]), seg: null, stop: null});
+    if (st[15]) nodes.push({t: "fly", dig: true, map: (runs[0] || [st[2]])[0],
+      label: "⛏ Dig out to " + prettyMap(st[15]), seg: null, stop: null});
     for (let ri = 0; ri < runs.length - 1; ri++)
       nodes.push({t: "move", map: runs[ri][0], seg: runs[ri][1], to: runs[ri + 1][0],
         label: moveVerb(runs[ri][0], runs[ri + 1][0]), stop: null});
@@ -2400,7 +2404,11 @@ function playDesc(ctx, row){
     (RKIND[str(nxt.node.stop[0])] || {}).label ? ` (${esc((RKIND[str(nxt.node.stop[0])] || {}).label)})` : ""}.` : "";
 
   if (node.t === "fly")
-    return node.tele
+    return node.dig
+      ? `Use Dig from the party menu (or an Escape Rope) — it pops you straight
+         out of the cave to the entrance you came in by, then walk on from
+         there.${nextBit}`
+      : node.tele
       ? `Use Teleport from the party menu — it returns you to the last Pokémon
          Center you healed at, which counts as a full heal, then walk on from
          there.${nextBit}`

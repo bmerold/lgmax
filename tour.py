@@ -81,6 +81,12 @@ EVENTS = [
     ("Coin Case from the gambler", "CeladonCity_Restaurant", 15),
     ("Game Corner prize (one pick)", "CeladonCity_GameCorner_PrizeRoom", 15),
     ("Eevee on the Condominiums roof", "CeladonCity_Condominiums_RoofRoom", 15),
+    # the Ghost Marowak on Pokémon Tower 6F blocks the climb to Mr. Fuji: a
+    # scripted setwildbattle (SPECIES_MAROWAK, 30) you must defeat, and only the
+    # Silph Scope (from Giovanni in the Rocket Hideout, stage 17) lets you fight
+    # it. It's a coord_event, so it carries no TRAINER_ const and neither the
+    # trainer nor the wild-encounter harvest sees it -- pin it here by hand.
+    ("Ghost Marowak battle — needs the Silph Scope", "PokemonTower_6F", 19, "MarowakGhost"),
     ("Poké Flute from Mr. Fuji", "LavenderTown_VolunteerPokemonHouse", 19, "MrFuji"),
     ("Super Rod", "Route12_FishingHouse", 19),
     ("TM27 Return from the gate girl", "Route12_NorthEntrance_2F", 19),
@@ -260,6 +266,12 @@ def harvest():
             for o in R.maps()[name].get("object_events", []):
                 if hint in (o.get("script") or ""):
                     xy = (o.get("x", 0), o.get("y", 0)); break
+            # some one-offs fire from a step-on trigger, not an NPC -- the Ghost
+            # Marowak on Pokémon Tower 6F is a coord_event, not an object
+            if xy is None:
+                for c in R.maps()[name].get("coord_events", []):
+                    if hint in (c.get("script") or ""):
+                        xy = (c.get("x", 0), c.get("y", 0)); break
         if xy is None:
             g = WD.grid(name)
             xy = ((g.warps[0][0], g.warps[0][1]) if g.warps
@@ -625,11 +637,12 @@ def walked_tiles(path):
     return out
 
 # ------------------------------------------------------------------ dig out
-# Field Dig is a reusable Escape Rope: in any map flagged allow_escaping it
-# warps to the mouth the walk came IN by. TM28 goes unused in combat, so a
-# rider can carry it for free from stage 9 (the Cerulean grunt hands it over
-# at the end of stage 8). A hop that walks a long way back out of a dungeon
-# through its own entrance becomes a 12-step menu action instead.
+# Field Dig is a reusable Escape Rope: from inside any single-entrance cave
+# (world.dungeon_mouth) it warps to the one mouth you came in by. It's priced
+# straight into the stage distance matrix as a hop from a cave tile to that
+# mouth, so there's no post-pass here. TM28 goes unused in combat, so a rider
+# carries it for free from stage 9 (the Cerulean grunt hands it over at the
+# end of stage 8).
 for _got, _give, _st, _map, _note in INGAME_TRADE_STOPS:
     STOP_NOTES[(f"Trade for {_got} (give {_give})", _map)] = _note
 
@@ -638,57 +651,6 @@ DIG_STAGE = 9
 def _escaping(m):
     mj = R.maps().get(m)
     return bool(mj and mj.get("allow_escaping"))
-
-def apply_dig(steps, stage, start_pos):
-    """Rewrite retrace-exits through a dungeon's own mouth as Dig. Returns
-    the steps saved. Tracks the entrance used per dungeon visit, exactly the
-    tile Escape Rope would target."""
-    if stage < DIG_STAGE: return 0
-    saved = 0
-    escape_at = None          # the outdoor (map,x,y) tile we entered the cave by
-    prev = (start_pos[0], start_pos[1], start_pos[2])
-    for s in steps:
-        if s.get("fly") or s.get("teleport"):   # a Center-return, not a cave retrace
-            prev = tuple(s["path"][-1]) if s["path"] else prev
-            escape_at = None
-            continue
-        path = [tuple(p) for p in s["path"]]
-        # find where this hop's walk leaves cave ground, and how much cave
-        # walking it does before that
-        walk_in, exit_i = 0, None
-        for i, (a, b) in enumerate(zip(path, path[1:])):
-            if a[0] == b[0] and _escaping(a[0]):
-                walk_in += abs(a[1] - b[1]) + abs(a[2] - b[2])
-            if _escaping(a[0]) and not _escaping(b[0]):
-                exit_i = i + 1
-                break
-            if not _escaping(a[0]) and _escaping(b[0]):
-                escape_at = a     # stepping in: remember the mouth
-        if exit_i is not None and escape_at is not None and _escaping(path[0][0]):
-            out = path[exit_i]
-            same_mouth = (out[0] == escape_at[0]
-                          and abs(out[1] - escape_at[1]) + abs(out[2] - escape_at[2]) <= 2)
-            gain = walk_in - DIG_COST
-            if same_mouth and gain > 15:
-                dest = path[-1]
-                p2 = WD.draw_path(escape_at, dest, stage)
-                if p2:
-                    new_walk = DIG_COST + len(p2) - 1
-                    if new_walk < s["walk"]:
-                        saved += s["walk"] - new_walk
-                        s["walk"] = new_walk
-                        s["path"] = ([[path[0][0], path[0][1], path[0][2]]]
-                                     + [[m, x, y] for m, x, y in corners(p2)])
-                        note = (f"Use Dig here — you pop straight out to "
-                                f"{G.pretty_location(escape_at[0])} — then walk on. "
-                                f"(Teach TM28 to anyone along for the ride; no fight wants it.)")
-                        s["note"] = (s.get("note") + " " + note) if s.get("note") else note
-        # keep tracking entries across the rest of this hop
-        for a, b in zip(path[exit_i or 0:], path[(exit_i or 0) + 1:]):
-            if not _escaping(a[0]) and _escaping(b[0]):
-                escape_at = a
-        if path: prev = path[-1]
-    return saved
 
 # ------------------------------------------------------------------ deliberate heals
 # The walk only records a heal when it happens to pass a Pokémon Center; it
@@ -855,7 +817,11 @@ def insert_heal(steps, stage, start_pos, fought_in):
     best = None       # (detour, k, door)
     for k in range(ft + 1):
         s = steps[k]
-        if s.get("fly"): continue          # flying already lands at a Center
+        # Fly/Teleport already land you at (or return you to) a Center, and a Dig
+        # leg is a jump out of a cave -- none is a normal walk from the previous
+        # stop that a heal detour can be spliced into (doing so would leave the
+        # hop's landing field pointing at a path it no longer starts on).
+        if s.get("fly") or s.get("teleport") or s.get("dig"): continue
         a = start_pos if k == 0 else (steps[k-1]["map"],
                                       steps[k-1]["at"][0], steps[k-1]["at"][1])
         a = WD.reach_tile(a, stage)
@@ -928,13 +894,16 @@ def solve(max_stage=34, verbose=True):
         # user is around (stage 7+), or Fly once HM02 is (stage 20+). Fly is the
         # more capable move, so from its stage the hop is a Fly; before then it's a
         # Teleport (a bit cheaper, no flight animation).
+        # Fly (HM02, stage 20+) drops you at ANY visited town, so it lands at the
+        # Center nearest your DESTINATION. Teleport (a party move, stage 7+) only
+        # returns you to the Center you last healed at -- in a no-grind run that's
+        # the town you're working out of, i.e. the one nearest where you're
+        # STANDING, never one near the target. Both depart from the open air only.
         fly = stage >= P.HM_STAGE["FLY"]
-        center_hop = stage >= TELEPORT_STAGE
-        hop_cost = FLY_COST if fly else TELEPORT_COST
-        cdist, cparent = ({}, {})
-        if center_hop:
-            centers = [c for c in WD.center_nodes()
-                       if WD._open_map(c[0], stage)]
+        teleport = (stage >= TELEPORT_STAGE) and not fly
+        cdist, cparent, centers = {}, {}, []
+        if fly or teleport:
+            centers = [c for c in WD.center_nodes() if WD._open_map(c[0], stage)]
             cdist, cparent = WD.bfs_multi(centers, stage)
         pts = [pos] + tiles
         wmat = [[INF] * len(pts) for _ in pts]
@@ -943,12 +912,54 @@ def solve(max_stage=34, verbose=True):
             for j, q in enumerate(pts):
                 if q in d: wmat[i][j] = d[q]
         mat = [row[:] for row in wmat]
-        if center_hop:
+        def _nearest_center(t):        # the town you'd Teleport back to from tile t
+            while cparent.get(t) is not None: t = cparent[t]
+            return t if t in centers else None
+        # which shortcut, if any, wins each leg -- so build_steps can redraw and
+        # label it (a body-blind cost BFS would otherwise cut through trainers)
+        hop_kind = [[None] * len(pts) for _ in pts]
+        tele_land, dig_land = {}, {}    # departure index -> Center / cave mouth it lands at
+        tset = set(pts)
+        if fly:
             for j, q in enumerate(pts):
                 if j == 0: continue
-                f = hop_cost + cdist.get(q, INF)
+                f = FLY_COST + cdist.get(q, INF)
                 for i in range(len(pts)):
-                    if i != j and f < mat[i][j]: mat[i][j] = f
+                    if i != j and WD.is_outdoors(pts[i][0]) and f < mat[i][j]:
+                        mat[i][j] = f; hop_kind[i][j] = "fly"
+        elif teleport:
+            land_from = {}                 # nearest Center -> departures that use it
+            for i, p in enumerate(pts):
+                if not WD.is_outdoors(p[0]): continue
+                c = _nearest_center(p)
+                if c is None: continue
+                tele_land[i] = c
+                land_from.setdefault(c, []).append(i)
+            for c, idxs in land_from.items():          # one BFS each, not per-Center
+                df = WD.bfs(c, stage, targets=tset)
+                for i in idxs:
+                    for j in range(1, len(pts)):
+                        if i != j:
+                            f = TELEPORT_COST + df.get(pts[j], INF)
+                            if f < mat[i][j]: mat[i][j] = f; hop_kind[i][j] = "tele"
+        # Dig / Escape Rope pops you from inside a single-entrance cave to its one
+        # mouth (world.dungeon_mouth). It departs from IN the cave, so it never
+        # competes with Fly/Teleport (open-air only) for the same leg. Available
+        # from stage 9, when the Cerulean grunt hands over TM28.
+        if stage >= DIG_STAGE:
+            mouth_from = {}                # shared mouth -> departures inside that cave
+            for i, p in enumerate(pts):
+                M = WD.dungeon_mouth(p)
+                if M is None: continue
+                dig_land[i] = M
+                mouth_from.setdefault(M, []).append(i)
+            for M, idxs in mouth_from.items():
+                df = WD.bfs(M, stage, targets=tset)
+                for i in idxs:
+                    for j in range(1, len(pts)):
+                        if i != j:
+                            f = DIG_COST + df.get(pts[j], INF)
+                            if f < mat[i][j]: mat[i][j] = f; hop_kind[i][j] = "dig"
         groups = scc_groups(mat, len(pts) - 1)
         order, cur_idx = [], 0
         for gi, grp in enumerate(groups):
@@ -1041,14 +1052,22 @@ def solve(max_stage=34, verbose=True):
                     n = picked[oi - 1]
                     tgt = tiles[oi - 1]
                     WD._OPEN_GATES = frozenset(fought)
-                    flew = mat[prev_idx][oi] < wmat[prev_idx][oi]
-                    if flew:
-                        # land at the Center the Fly/Teleport BFS chose, then draw
-                        # the walk from there body-aware (that BFS is body-blind for
-                        # cost, so its raw parent-chain would cut through trainers)
-                        raw = WD.walk_back(cparent, tgt)
-                        landing = raw[0] if raw else cur2
-                        path = WD.draw_path(landing, tgt, stage) or WD.expand_spins(raw, stage)
+                    kind = hop_kind[prev_idx][oi]
+                    if kind:
+                        # This leg is a shortcut, not a walk: land where the hop
+                        # drops you, then draw the walk on from there body-aware
+                        # (the cost BFS is body-blind and would cut through
+                        # trainers). Teleport -> the Center nearest your DEPARTURE
+                        # (last healed); Dig -> the cave's one mouth; Fly -> the
+                        # Center nearest the target.
+                        landing = (dig_land.get(prev_idx) if kind == "dig"
+                                   else tele_land.get(prev_idx) if kind == "tele"
+                                   else None)
+                        path = WD.draw_path(landing, tgt, stage) if landing else None
+                        if not path:
+                            raw = WD.walk_back(cparent, tgt)
+                            landing = raw[0] if raw else cur2
+                            path = WD.draw_path(landing, tgt, stage) or WD.expand_spins(raw, stage)
                     else:
                         path = WD.draw_path(cur2, tgt, stage) or [cur2, tgt]
                     path = stop_short(path, n["map"], n["x"], n["y"])
@@ -1057,11 +1076,18 @@ def solve(max_stage=34, verbose=True):
                             "map": n["map"], "at": [n["x"], n["y"]],
                             "walk": int(mat[prev_idx][oi]),
                             "path": [[m, x, y] for m, x, y in corners(path)]}
-                    if flew:
+                    if kind:
                         where = path[0][0] if path else True
-                        step["fly" if fly else "teleport"] = where
+                        step[{"fly": "fly", "tele": "teleport", "dig": "dig"}[kind]] = where
                     if n.get("enc"): step["enc"] = n["enc"]
                     nt = STOP_NOTES.get((n["what"], n["map"]))
+                    if kind == "dig":
+                        # keep the word "Dig" in the note: straighten() reads it to
+                        # leave the popped-out leg (and its neighbour) untouched
+                        dn = (f"Use Dig (or an Escape Rope) — you pop straight out to "
+                              f"{G.pretty_location(where)}, then walk on. Teach TM28 to "
+                              f"anyone along for the ride; no fight wants it.")
+                        nt = (nt + " " + dn) if nt else dn
                     if nt: step["note"] = nt
                     if n.get("underfoot"): step["underfoot"] = True
                     if n.get("renewable"): step["renewable"] = n["renewable"]
@@ -1108,7 +1134,8 @@ def solve(max_stage=34, verbose=True):
             order.remove(tj); order.insert(si, tj)
         steps, cost, cur = build_steps(order)
         cost += insert_heal(steps, stage, pos, fought_since_heal)
-        cost -= apply_dig(steps, stage, pos)
+        # Dig / Escape Rope is priced into the distance matrix above (a hop from
+        # inside a single-entrance cave to its mouth), so it needs no post-pass.
         # order is now final and aggro-clean; straighten stand tiles where it's
         # shorter and still clears every unfought sight line
         cost -= straighten(steps, stage, pos, ROUTED_FOUGHT)

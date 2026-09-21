@@ -362,6 +362,27 @@ for st in routej["stages"]:
     prev_end = st["endsAt"]
 check("the route is one continuous walk", not disc, str(disc[:5]))
 
+# Fly and Teleport only work in the open air -- you can't use either to leave a
+# cave or a building (there the route Digs or Escape-Ropes out). A hop departs
+# from where you were standing, i.e. the previous stop's tile.
+import world as WORLD
+_indoor_hop, _bad_dig = [], []
+for st in routej["stages"]:
+    _pe = st["startsAt"]
+    for s in st["steps"]:
+        if (s.get("fly") or s.get("teleport")) and _pe and not WORLD.is_outdoors(_pe[0]):
+            _indoor_hop.append((st["stage"], _pe[0], s["what"]))
+        # Dig / Escape Rope is the inverse: it only works INSIDE an escapable
+        # cave (allow_escaping), and only from one with a single mouth (else you
+        # can't know which end it drops you at) -- world.dungeon_mouth vets both.
+        if s.get("dig") and _pe and WORLD.dungeon_mouth(_pe) is None:
+            _bad_dig.append((st["stage"], _pe[0], s["what"]))
+        if s["path"]: _pe = s["path"][-1]
+check("the walk never Flies or Teleports out of a cave or building",
+      not _indoor_hop, str(_indoor_hop[:4]))
+check("the walk only Digs out from inside a single-entrance cave",
+      not _bad_dig, str(_bad_dig[:4]))
+
 bad_tot = [st["stage"] for st in routej["stages"]
            if not (0 <= st["stepTotal"] < 10 ** 7)]
 check("every stage's step total is finite", not bad_tot, str(bad_tot))

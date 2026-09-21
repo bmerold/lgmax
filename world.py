@@ -594,6 +594,58 @@ def _open_map(name, stage):
     st = _map_stage(name)
     return st is not None and st <= stage
 
+# Fly and Teleport only work in the open air (IsMapTypeOutdoors, src/overworld.c:
+# ROUTE/TOWN/CITY/OCEAN_ROUTE/UNDERWATER). You can't fly or teleport out of a
+# building or a cave -- there you Dig or Escape Rope (allow_escaping) instead.
+_OUTDOOR_TYPES = {"MAP_TYPE_ROUTE", "MAP_TYPE_TOWN", "MAP_TYPE_CITY",
+                  "MAP_TYPE_OCEAN_ROUTE", "MAP_TYPE_UNDERWATER"}
+@functools.lru_cache(maxsize=None)
+def is_outdoors(name):
+    mj = R.maps().get(name)
+    return bool(mj) and mj.get("map_type") in _OUTDOOR_TYPES
+
+# Dig / Escape Rope (CanUseEscapeRopeOnCurrMap: gMapHeader.allowEscaping) warp
+# you to the mouth you entered by. That mouth is only unambiguous when the
+# escapable region has exactly ONE way out -- Power Plant, the Mansion, Cerulean
+# Cave, the Rocket Hideout. In a through-cave (Rock Tunnel, Mt. Moon, Diglett's,
+# Victory Road) Escape Rope drops you back at whichever end you came in, so it
+# never shortens a crossing; those regions get no mouth here.
+@functools.lru_cache(maxsize=1)
+def _dungeon_mouths():
+    maps = R.maps()
+    esc = [n for n in maps if maps[n].get("allow_escaping")]
+    escset = set(esc)
+    folder = _const_to_folder()
+    parent = {n: n for n in esc}                 # union-find over linked caves
+    def find(a):
+        while parent[a] != a: parent[a] = parent[parent[a]]; a = parent[a]
+        return a
+    for n in esc:
+        for w in maps[n].get("warp_events", []):
+            d = folder.get(w.get("dest_map", ""))
+            if d in escset: parent[find(n)] = find(d)
+    mouths = collections.defaultdict(set)        # region -> outdoor drop tiles
+    for n in esc:
+        r = find(n)
+        for w in maps[n].get("warp_events", []):
+            dm = w.get("dest_map", "")
+            d = folder.get(dm)
+            if dm == "MAP_DYNAMIC" or d in escset or d is None: continue
+            # an elevator car (its own return warp is MAP_DYNAMIC) is internal
+            # transport between the complex's floors, not a way out of it
+            if d.startswith(_CLOSED_PREFIXES) or d.endswith("_Elevator"): continue
+            try: wt = grid(d).warps[int(w.get("dest_warp_id", "0"))]
+            except (ValueError, IndexError): continue
+            mouths[r].add((d, wt[0], wt[1]))       # where that warp lands you
+    return {n: (next(iter(mouths[find(n)])) if len(mouths[find(n)]) == 1 else None)
+            for n in esc}
+
+def dungeon_mouth(tile):
+    """The single tile Dig/Escape Rope drops you at from inside `tile`'s cave,
+    or None when `tile` isn't in a cave or the cave is a multi-mouth through-cave
+    (where Dig only sends you back the way you came)."""
+    return _dungeon_mouths().get(tile[0])
+
 def encounter_anchor(name, mode="land"):
     """A tile that stands for this map's encounter ground: the land-encounter
     (or surfable, or shoreline for fishing) tile nearest the way in — the
