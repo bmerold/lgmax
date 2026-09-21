@@ -239,11 +239,13 @@ def gated_barriers():
             out[os.path.basename(os.path.dirname(f))] = [(frozenset(tiles), gates)]
     return out
 
-# Trainer consts whose defeat has opened a gated barrier so far. None means
-# "every gate open" -- the default, so reachability, the distance matrix and
-# every non-tour caller behave exactly as before. tour.py sets it to the set of
-# gate trainers fought so far while it draws a leg, so a pre-fight segment routes
-# around a still-closed door and a post-fight one walks through it.
+# Tokens for the gates opened so far -- trainer consts for the barrier doors,
+# plus LIFT_GATE once the Rocket Hideout Lift Key is in hand. None means "every
+# gate open" -- the default, so reachability, the distance matrix and every
+# non-tour caller behave exactly as before. tour.py sets it to the tokens earned
+# so far while it draws a leg, so a pre-gate segment routes around a still-closed
+# door (or takes the stairs) and a post-gate one walks through (or rides the lift).
+LIFT_GATE = "ROCKET_LIFT"
 _OPEN_GATES = None
 
 @functools.lru_cache(maxsize=None)
@@ -389,9 +391,10 @@ def draw_path(a, b, stage):
     global _DRAW_PENALTY
     _DRAW_PENALTY = BODY_COST
     try:
-        return path_between(a, b, stage)
+        p = path_between(a, b, stage)
     finally:
         _DRAW_PENALTY = 0
+    return expand_spins(p, stage) if p else p
 
 def _tile_open(g, x, y, stage, surf_ok):
     """Can the player occupy (x, y) at this stage?"""
@@ -443,8 +446,15 @@ def neighbours(node, stage):
             out.append((dest, FERRY_COST))
 
     for dest in _elevator_edges().get(node, ()):
-        if _open_map(dest[0], stage):
-            out.append((dest, ELEVATOR_COST))
+        if not _open_map(dest[0], stage): continue
+        # the Rocket Hideout lift only runs once you hold the Lift Key, so the
+        # walk can't ride it to B4F's stair-less right wing before grabbing it
+        # (tour.py opens the LIFT_GATE when the key node is reached). Untracked
+        # gates (_OPEN_GATES None) mean "open", as for reachability and the matrix.
+        if node[0].startswith("RocketHideout") and _OPEN_GATES is not None \
+                and LIFT_GATE not in _OPEN_GATES:
+            continue
+        out.append((dest, ELEVATOR_COST))
 
     # standing on thin ice: it cracks, you land on the floor below
     below = HOLE_DROP.get(name)
@@ -494,20 +504,53 @@ def neighbours(node, stage):
                 out.append(((name, nx, ny), cost))
     return out
 
-def _spin_slide(g, x, y, stage, surf):
-    """Ride the arrow floor until something stops you."""
-    seen = 0
+def _spin_slide(g, x, y, stage, surf, want_path=False):
+    """Ride the arrow floor until something stops you. With want_path, also
+    returns the tiles slid across (the arrow squares), so the drawn line can
+    follow the real orthogonal slide instead of cutting the corner."""
+    seen, ridden = 0, []
     while g.inb(x, y):
         beh = g.b(x, y)
         d = MB_SPIN.get(beh)
         if d is None:
             if _tile_open(g, x, y, stage, surf):
-                return ((g.name, x, y), seen)
+                stop = (g.name, x, y)
+                return (stop, seen, ridden) if want_path else (stop, seen)
             return None
+        ridden.append((g.name, x, y))
         x, y = x + d[0], y + d[1]
         seen += 1
         if seen > 80: return None
     return None
+
+def _spin_route(a, b, stage):
+    """The orthogonal tile-by-tile route of a spin-slide edge a -> b (step onto an
+    arrow beside `a`, ride to `b`), or None if `a`->`b` isn't one. Used to draw the
+    slide honestly rather than as a diagonal jump between its endpoints."""
+    if a[0] != b[0]: return None
+    g = grid(a[0]); surf = _surf_ok(g, stage)
+    for dx, dy in DIRS:
+        nx, ny = a[1] + dx, a[2] + dy
+        if not g.inb(nx, ny) or g.b(nx, ny) not in MB_SPIN: continue
+        r = _spin_slide(g, nx, ny, stage, surf, want_path=True)
+        if r and r[0] == b:
+            return [a] + r[2] + [b]
+    return None
+
+def expand_spins(path, stage):
+    """Rewrite a drawn path so every spin-slide edge (a diagonal/gap jump between
+    an arrow's entry and its stop) becomes the orthogonal squares actually ridden.
+    Purely cosmetic -- costs and reachability are untouched."""
+    if not path: return path
+    out = [path[0]]
+    for a, b in zip(path, path[1:]):
+        step = (abs(a[1] - b[1]) + abs(a[2] - b[2])) if a[0] == b[0] else 1
+        if a[0] == b[0] and step != 1:          # same map, not a single orthogonal step
+            r = _spin_route(a, b, stage)
+            if r:
+                out.extend(r[1:]); continue
+        out.append(b)
+    return out
 
 @functools.lru_cache(maxsize=None)
 def _connection_list(name):

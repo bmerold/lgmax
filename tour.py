@@ -104,6 +104,12 @@ EVENTS = [
     ("Take the Ruby", "MtEmber_RubyPath_B3F", 33),
     ("The Sapphire from Gideon", "FiveIsland_RocketWarehouse", 33),
     ("Ruby and Sapphire to Celio — trading unlocked", "OneIsland_PokemonCenter_1F", 33, "Celio"),
+    # The Lift Key operates the Rocket Hideout elevator. It's a giveitem ball
+    # (skipped by the finditem harvest), and it's the gate: B4F's right wing --
+    # Giovanni, the Silph Scope -- has no stairs, so it's reachable only by the
+    # elevator, which needs this key. The key sits in the stair-reachable left
+    # wing, so the route must grab it before riding to Giovanni.
+    ("Lift Key from the ball", "RocketHideout_B4F", 17, "LiftKey"),
 ]
 
 # In-game trades (src/data/ingame_trades.h), each at the building it lives in.
@@ -706,6 +712,18 @@ def center_doors():
                     _CENTER_DOORS.setdefault(nm, []).append((w.get("x", 0), w.get("y", 0)))
     return _CENTER_DOORS
 
+# B4F's Lift Key ball: reaching it opens the elevator (world.LIFT_GATE).
+LIFT_KEY_TILE = ("RocketHideout_B4F", 3, 2)
+
+def gate_token(node):
+    """The gate a stop opens when the walk reaches it: a trainer opens its own
+    barrier (its const), the Lift Key ball opens the Rocket Hideout elevator."""
+    if node["kind"] == "trainer":
+        return (node.get("enc") or "").split(":")[-1] or None
+    if (node["map"], node["x"], node["y"]) == LIFT_KEY_TILE:
+        return WD.LIFT_GATE
+    return None
+
 def stop_short(path, mp, x, y):
     """Trim a trailing trainer/NPC body tile so the walk stops on the tile beside
     it -- you talk from there or trip its sight line, never standing on the body.
@@ -714,6 +732,89 @@ def stop_short(path, mp, x, y):
     if len(path) >= 2 and tuple(path[-1]) == (mp, x, y) and (x, y) in WD.grid(mp).bodies:
         return path[:-1]
     return path
+
+def corridor_stand(cur, node, stage):
+    """The tile beside a trainer/NPC to stand on that keeps the walk in line with
+    the approach: nearest the tile you came from, ties broken toward the tile on
+    the same row or column (the through-corridor). A body's own far side is a
+    detour; this is the near, aligned side."""
+    m, x, y = node
+    g = WD.grid(m)
+    if (x, y) not in g.bodies: return node
+    surf = WD._surf_ok(g, stage)
+    nbrs = [(m, x + dx, y + dy) for dx, dy in WD.DIRS
+            if g.inb(x + dx, y + dy) and WD._tile_open(g, x + dx, y + dy, stage, surf)
+            and (x + dx, y + dy) not in g.bodies]
+    if not nbrs: return node
+    if not (cur and cur[0] == m): return nbrs[0]
+    return min(nbrs, key=lambda t: (abs(t[1] - cur[1]) + abs(t[2] - cur[2]),
+                                    0 if t[1] == cur[1] or t[2] == cur[2] else 1))
+
+def straighten(steps, stage, start_pos, fought0):
+    """Post-pass over a stage's finished, aggro-clean steps: stand each trainer on
+    its near, corridor-aligned side when re-routing there is strictly shorter and
+    the re-drawn legs still clear every unfought sight line. The stop ORDER is left
+    untouched, so the fought-state at each step is fixed -- this can't unbalance the
+    aggro reorder the way choosing stands inside it did (the Nugget Bridge snake).
+    Returns the steps saved. Each change is local: it rewrites only the leg into a
+    trainer and the leg back out to the next stop, whose own tile is unchanged, so
+    continuity past it holds."""
+    t2c = {v: k for k, v in R.trainer_tiles().items()}
+    cones = aggro_cones()
+    def cst(step):
+        return (step.get("enc") or "").split(":")[-1] if step.get("kind") == "trainer" else None
+    def clears(path, fought, target):
+        """No walked tile enters an unfought trainer's sight (or body), bar the
+        target being fought on this leg."""
+        w = walked_tiles(path)
+        for name, atiles, pos0 in cones:
+            if name not in w or not (atiles & w[name]): continue
+            c = t2c.get((name, pos0[0], pos0[1]))
+            if c and c not in fought and c != target:
+                return False
+        return True
+    def plen(p): return len(p) - 1 if p else 0
+
+    fought = set(fought0)
+    prev = tuple(start_pos)
+    saved = 0
+    for i, s in enumerate(steps):
+        c = cst(s)
+        nxt = steps[i + 1] if i + 1 < len(steps) else None
+        cur_end = tuple(s["path"][-1]) if s["path"] else prev
+        body = (s["at"][0], s["at"][1])
+        # only a trainer body, with a normal following leg we can redraw and a
+        # normal current leg; skip fly/teleport/heal legs and the stage's last stop
+        # a Dig leg pops out of a dungeon mouth -- redrawing it would throw the
+        # shortcut away, so leave any leg apply_dig rewrote (and its neighbour) be
+        dig = lambda st: st and "Dig" in (st.get("note") or "")
+        redrawable = (s["kind"] == "trainer" and not (s.get("fly") or s.get("teleport"))
+                      and not dig(s) and nxt and not (nxt.get("fly") or nxt.get("teleport"))
+                      and not dig(nxt) and body in _grid_bodies(s["map"]))
+        if redrawable:
+            new_stand = corridor_stand(prev, (s["map"], body[0], body[1]), stage)
+            nxt_end = tuple(nxt["path"][-1]) if nxt["path"] else None
+            if new_stand != cur_end and nxt_end:
+                old_in = WD.draw_path(prev, cur_end, stage)
+                old_out = WD.draw_path(cur_end, nxt_end, stage)
+                new_in = WD.draw_path(prev, new_stand, stage)
+                new_out = WD.draw_path(new_stand, nxt_end, stage)
+                if new_in and new_out and old_in and old_out and \
+                   plen(new_in) + plen(new_out) < plen(old_in) + plen(old_out) and \
+                   clears(new_in, fought, c) and clears(new_out, fought | {c}, cst(nxt)):
+                    s["path"] = [[a, b, d] for a, b, d in corners(new_in)]
+                    nxt["path"] = [[a, b, d] for a, b, d in corners(new_out)]
+                    saved += (plen(old_in) + plen(old_out)) - (plen(new_in) + plen(new_out))
+                    s["walk"] = plen(new_in)
+                    nxt["walk"] = plen(new_out)
+                    cur_end = new_stand
+        prev = cur_end
+        if c: fought.add(c)
+    return saved
+
+def _grid_bodies(mp):
+    try: return WD.grid(mp).bodies
+    except Exception: return set()
 
 def _passes_heal(step):
     """Mirror of sections._step_heal, on this route step: a flight or teleport
@@ -880,12 +981,16 @@ def solve(max_stage=34, verbose=True):
         # Each barrier's "behind" set is the tiles reachable only once it opens
         # (bfs with just that door shut). Repaired to a fixpoint like the story
         # precedence above -- the far stop is pushed to just after the last gate.
-        stage_barriers = []            # (gate consts, set of tiles behind the door)
+        stage_barriers = []            # (gate tokens, set of tiles behind the gate)
         gate_consts = set()
         for m in {picked[oi - 1]["map"] for oi in order}:
             for _tiles, _gates in WD.gated_barriers().get(m, ()):
                 if _gates <= ROUTED_FOUGHT: continue   # opened in an earlier stage
                 gate_consts |= set(_gates)
+        # the Lift Key ball, when this stage collects it, gates the elevator too
+        lift_here = any(gate_token(picked[oi - 1]) == WD.LIFT_GATE for oi in order)
+        if lift_here:
+            gate_consts.add(WD.LIFT_GATE)
         if gate_consts:
             reach_open = set(dist0)
             for m in {picked[oi - 1]["map"] for oi in order}:
@@ -895,20 +1000,28 @@ def solve(max_stage=34, verbose=True):
                     behind = reach_open - set(WD.bfs(pos, stage))
                     if behind:
                         stage_barriers.append((set(_gates), behind))
+            if lift_here:
+                # every hideout gate shut, not just the lift: the barrier grunts
+                # themselves sit in the stair-less wings and are reached only by
+                # riding the lift, so opening the doors here (which the grunts do)
+                # would wrongly make them look stair-reachable. All gated tiles are
+                # lift-dependent, so this correctly orders them after the key.
+                WD._OPEN_GATES = frozenset()
+                behind = reach_open - set(WD.bfs(pos, stage))
+                if behind:
+                    stage_barriers.append(({WD.LIFT_GATE}, behind))
             WD._OPEN_GATES = None
-        def _tconst(nn):
-            return (nn.get("enc") or "").split(":")[-1] if nn["kind"] == "trainer" else None
         for _ in range(len(order) + 4):
             changed = False
             for gates, behind in stage_barriers:
-                gpos = [k for k, oi in enumerate(order) if _tconst(picked[oi - 1]) in gates]
+                gpos = [k for k, oi in enumerate(order) if gate_token(picked[oi - 1]) in gates]
                 if not gpos: continue
                 last_gate = max(gpos)
                 for k, oi in enumerate(order):
                     if k < last_gate and tiles[oi - 1] in behind:
                         order.pop(k)
                         gpos2 = [j for j, o in enumerate(order)
-                                 if _tconst(picked[o - 1]) in gates]
+                                 if gate_token(picked[o - 1]) in gates]
                         order.insert(max(gpos2) + 1, oi)
                         changed = True
                         break
@@ -935,7 +1048,7 @@ def solve(max_stage=34, verbose=True):
                         # cost, so its raw parent-chain would cut through trainers)
                         raw = WD.walk_back(cparent, tgt)
                         landing = raw[0] if raw else cur2
-                        path = WD.draw_path(landing, tgt, stage) or raw
+                        path = WD.draw_path(landing, tgt, stage) or WD.expand_spins(raw, stage)
                     else:
                         path = WD.draw_path(cur2, tgt, stage) or [cur2, tgt]
                     path = stop_short(path, n["map"], n["x"], n["y"])
@@ -958,10 +1071,10 @@ def solve(max_stage=34, verbose=True):
                     stps.append(step)
                     cst += mat[prev_idx][oi]
                     cur2, prev_idx = end, oi
-                    # win the fight on arrival -> this trainer's door opens for the
-                    # next leg
-                    if n["kind"] == "trainer" and n.get("enc"):
-                        fought.add(n["enc"].split(":")[-1])
+                    # reaching a stop opens its gate for the next leg: a trainer's
+                    # barrier door on defeat, the Rocket Hideout elevator on the key
+                    tok = gate_token(n)
+                    if tok: fought.add(tok)
             finally:
                 WD._OPEN_GATES = None
             return stps, cst, cur2
@@ -996,6 +1109,9 @@ def solve(max_stage=34, verbose=True):
         steps, cost, cur = build_steps(order)
         cost += insert_heal(steps, stage, pos, fought_since_heal)
         cost -= apply_dig(steps, stage, pos)
+        # order is now final and aggro-clean; straighten stand tiles where it's
+        # shorter and still clears every unfought sight line
+        cost -= straighten(steps, stage, pos, ROUTED_FOUGHT)
         for s in steps:
             if _passes_heal(s): fought_since_heal = False
             if s["kind"] in ("trainer", "catch"): fought_since_heal = True
@@ -1011,8 +1127,8 @@ def solve(max_stage=34, verbose=True):
         total += cost
         pos = cur
         for n in picked:
-            if n["kind"] == "trainer" and n.get("enc"):
-                ROUTED_FOUGHT.add(n["enc"].split(":")[-1])
+            tok = gate_token(n)      # keep gates open in later stages (the lift too)
+            if tok: ROUTED_FOUGHT.add(tok)
         done = {id(n) for n in picked}
         pending = [n for n in pending if id(n) not in done]
         if verbose:

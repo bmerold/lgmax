@@ -496,6 +496,30 @@ for _st in _routej["stages"]:
 check("the walk never crosses a trainer-gated door before winning its fight",
       not _door_bad, str(_door_bad[:4]))
 
+# The Rocket Hideout elevator needs the Lift Key, and B4F's stair-less right wing
+# (Giovanni, the Silph Scope) is reachable only by riding it -- so the walk must
+# grab the key first. An elevator ride is a path edge between two of the lift's
+# floor tiles; the key is the "Lift Key" event stop. Replayed in route order.
+_lift_tiles = set()
+for _f in ("RocketHideout_B1F", "RocketHideout_B2F", "RocketHideout_B4F"):
+    _mj = RO.maps().get(_f) or {}
+    for _w in _mj.get("warp_events", []):
+        if "ELEVATOR" in _w.get("dest_map", ""):
+            _lift_tiles.add((_f, _w.get("x", 0), _w.get("y", 0)))
+_lift_bad, _have_key, _key_seen = [], False, False
+for _st in _routej["stages"]:
+    for _s in _st["steps"]:
+        _p = _s["path"]
+        for _a, _b in zip(_p, _p[1:]):
+            if tuple(_a) in _lift_tiles and tuple(_b) in _lift_tiles and _a[0] != _b[0] \
+                    and not _have_key:
+                _lift_bad.append((_st["stage"], _s["what"]))
+        if "Lift Key" in _s["what"]:
+            _have_key = True; _key_seen = True
+check("the Rocket Hideout Lift Key is collected on the route", _key_seen, "not found")
+check("the walk never rides the hideout elevator before the Lift Key",
+      not _lift_bad, str(_lift_bad[:4]))
+
 # Overworld sprites: every item ball on the route has the game's on-map graphic
 # anchored to its tile, and every anchor resolves to an embedded sprite. (Trainer
 # stops without a static object event -- scripted rivals, Elite Four rematches --
