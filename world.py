@@ -505,23 +505,29 @@ def neighbours(node, stage):
     return out
 
 def _spin_slide(g, x, y, stage, surf, want_path=False):
-    """Ride the arrow floor until something stops you. With want_path, also
-    returns the tiles slid across (the arrow squares), so the drawn line can
-    follow the real orthogonal slide instead of cutting the corner."""
-    seen, ridden = 0, []
-    while g.inb(x, y):
+    """Ride from the arrow at (x, y). Per the ROM's TryUpdatePlayerSpinDirection,
+    once spinning you keep moving in the current arrow's direction -- redirected by
+    each new arrow you pass and CARRIED ACROSS PLAIN FLOOR -- and you only stop on
+    a landing pad (MB_STOP_SPINNING) or where a wall blocks the way. (The old model
+    stopped at the first floor tile, cutting the belt short.) With want_path, also
+    returns every square ridden, so the drawn line follows the whole slide."""
+    d = MB_SPIN.get(g.b(x, y))
+    if d is None: return None
+    ridden = []
+    while True:
         beh = g.b(x, y)
-        d = MB_SPIN.get(beh)
-        if d is None:
-            if _tile_open(g, x, y, stage, surf):
-                stop = (g.name, x, y)
-                return (stop, seen, ridden) if want_path else (stop, seen)
-            return None
+        if beh == MB_STOP_SPINNING:                 # a landing pad ends the slide
+            stop = (g.name, x, y)
+            return (stop, len(ridden), ridden) if want_path else (stop, len(ridden))
+        nd = MB_SPIN.get(beh)
+        if nd is not None: d = nd                   # a new arrow redirects; floor keeps d
+        nx, ny = x + d[0], y + d[1]
+        if not (g.inb(nx, ny) and _tile_open(g, nx, ny, stage, surf)):
+            stop = (g.name, x, y)                   # blocked ahead: stop here
+            return (stop, len(ridden), ridden) if want_path else (stop, len(ridden))
         ridden.append((g.name, x, y))
-        x, y = x + d[0], y + d[1]
-        seen += 1
-        if seen > 80: return None
-    return None
+        x, y = nx, ny
+        if len(ridden) > 300: return None
 
 def _spin_route(a, b, stage):
     """The orthogonal tile-by-tile route of a spin-slide edge a -> b (step onto an
