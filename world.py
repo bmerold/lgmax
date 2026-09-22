@@ -250,6 +250,10 @@ LIFT_GATE = "ROCKET_LIFT"
 # forces you up only on defeat): 7F is sealed off until it's beaten.
 MAROWAK_GATE = "TOWER_MAROWAK"
 _MAROWAK_STAIRS = ("PokemonTower_6F", 11, 16)   # 6F -> 7F warp tile
+# Your rival intercepts you on Pokémon Tower 2F (coord battle by the stairs) and
+# won't let you climb until beaten -- so 3F and up are sealed behind that fight.
+RIVAL_TOWER_GATE = "TOWER_RIVAL"
+_RIVAL_STAIRS = ("PokemonTower_2F", 4, 10)      # 2F -> 3F warp tile
 _OPEN_GATES = None
 
 @functools.lru_cache(maxsize=None)
@@ -477,6 +481,10 @@ def neighbours(node, stage):
         # _OPEN_GATES None, are open -- reachability and the matrix see 7F.)
         if node == _MAROWAK_STAIRS and dname.startswith("PokemonTower_7F") \
                 and _OPEN_GATES is not None and MAROWAK_GATE not in _OPEN_GATES:
+            continue
+        # the rival seals the climb above 2F until you beat him
+        if node == _RIVAL_STAIRS and dname.startswith("PokemonTower_3F") \
+                and _OPEN_GATES is not None and RIVAL_TOWER_GATE not in _OPEN_GATES:
             continue
         dg = grid(dname)
         try: dw = dg.warps[int(dwid)]

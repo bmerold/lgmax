@@ -697,6 +697,9 @@ def gate_token(node):
     barrier (its const), the Lift Key ball opens the Rocket Hideout elevator,
     the Ghost Marowak fight unseals Pokémon Tower's 6F -> 7F stairs."""
     if node["kind"] == "trainer":
+        # the tower rival (2F's only trainer) unseals the climb above 2F
+        if node["map"] == "PokemonTower_2F":
+            return WD.RIVAL_TOWER_GATE
         return (node.get("enc") or "").split(":")[-1] or None
     if (node["map"], node["x"], node["y"]) == LIFT_KEY_TILE:
         return WD.LIFT_GATE
@@ -1025,6 +1028,10 @@ def solve(max_stage=34, verbose=True):
         marowak_here = any(gate_token(picked[oi - 1]) == WD.MAROWAK_GATE for oi in order)
         if marowak_here:
             gate_consts.add(WD.MAROWAK_GATE)
+        # the rival seals the tower above 2F until beaten
+        rival_here = any(gate_token(picked[oi - 1]) == WD.RIVAL_TOWER_GATE for oi in order)
+        if rival_here:
+            gate_consts.add(WD.RIVAL_TOWER_GATE)
         if gate_consts:
             reach_open = set(dist0)
             for m in {picked[oi - 1]["map"] for oi in order}:
@@ -1051,6 +1058,12 @@ def solve(max_stage=34, verbose=True):
                 behind = reach_open - set(WD.bfs(pos, stage))
                 if behind:
                     stage_barriers.append(({WD.MAROWAK_GATE}, behind))
+            if rival_here:
+                # the whole tower above 2F sits behind the rival fight
+                WD._OPEN_GATES = frozenset(gate_consts - {WD.RIVAL_TOWER_GATE})
+                behind = reach_open - set(WD.bfs(pos, stage))
+                if behind:
+                    stage_barriers.append(({WD.RIVAL_TOWER_GATE}, behind))
             WD._OPEN_GATES = None
         for _ in range(len(order) + 4):
             changed = False
@@ -1068,6 +1081,26 @@ def solve(max_stage=34, verbose=True):
                         break
                 if changed: break
             if not changed: break
+
+        # Pokémon Tower is a strict vertical shaft -- each floor reached only
+        # through the one below -- so the walk should climb it once, not zig-zag
+        # up and back down for scattered pickups (the TSP, free to wander, does).
+        # When a stage is entirely tower floors, force its stops into floor order:
+        # the rival on 2F leads, Fuji on 7F ends, and the Marowak sinks to the
+        # foot of 6F since it seals that floor's stairs. Stable within a floor, so
+        # the aggro-safe intra-floor order the solver found is kept.
+        def _tower_floor(oi):
+            m = picked[oi - 1]["map"]
+            if not m.startswith("PokemonTower_"): return None
+            try: return int(m.split("_")[1].rstrip("F"))
+            except (IndexError, ValueError): return None
+        if order and all(_tower_floor(oi) is not None for oi in order):
+            def _floor_key(oi):
+                n = picked[oi - 1]
+                last = 1 if (n["kind"] == "scripted"
+                             or n.get("what") == "Poké Flute from Mr. Fuji") else 0
+                return (_tower_floor(oi), last)
+            order.sort(key=_floor_key)
 
         def build_steps(ordr):
             stps, cur2, prev_idx, cst = [], pos, 0, 0
