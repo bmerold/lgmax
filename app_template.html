@@ -437,7 +437,12 @@ button{font:inherit;color:inherit}
 .rt-what{font-weight:600}
 .rt-where{color:var(--ink-3);font-size:11px;margin-left:auto;text-align:right;flex-shrink:0}
 .rt-fly{color:var(--accent);font-weight:600;font-size:11px}
-.rt-species{color:var(--ink-2);font-size:11.5px}
+.rt-species{color:var(--ink-2);font-size:11.5px;display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center;margin-top:2px}
+.rt-sp{display:inline-flex;align-items:center;white-space:nowrap}
+.chk.sp{width:15px;height:15px;font-size:9px;line-height:12px;margin:0 5px 0 0;vertical-align:0}
+.chk-sp{display:inline-block;width:18px;margin-right:8px;flex-shrink:0}
+.foe.wild.caught{opacity:.5}
+.foe-h .chk.sp{margin-left:0;align-self:center}
 .rt-row.flash{animation:rowflash 1.6s ease-out}
 
 
@@ -892,7 +897,8 @@ const KIND = {
   gym:{label:"Gym Leader",color:"#C4491C"}, elite4:{label:"Elite Four",color:"#5B45B8"},
   champion:{label:"Champion",color:"#9A7A00"}, boss:{label:"Boss",color:"#A2331F"},
   rival:{label:"Rival",color:"#3A6DC4"}, trainer:{label:"Trainer",color:"#6E7080"},
-  rematch:{label:"Rematch",color:"#8A8A6E"}, wild:{label:"Wild",color:"#3F8536"}
+  rematch:{label:"Rematch",color:"#8A8A6E"}, wild:{label:"Wild",color:"#3F8536"},
+  scripted:{label:"Scripted battle",color:"#A2331F"}
 };
 const STAGE_BY_ID = Object.fromEntries(STAGES.map(s => [s.id, s]));
 const STARTERS = ["Bulbasaur", "Charmander", "Squirtle"];
@@ -925,6 +931,34 @@ try { HIDEDONE = localStorage.getItem("lgmax-hidedone") === "1"; } catch (e) {}
 const saveDone = () => { try { localStorage.setItem("lgmax-done", JSON.stringify([...DONE])); } catch (e) {} syncTouch(); };
 /* a stop's identity survives re-solves: what it is + where it stands */
 const stopKey = s => [str(s[0]), str(s[1]), s[2], s[3], s[4]].join("|");
+/* A catch stop bundles several wild species; each gets its OWN checkbox, keyed
+   stopKey|SpeciesName (reusing the DONE set, so sync/persistence come free). The
+   name is the species string with its "(NN%)" odds suffix stripped. */
+const catchNames = s => (s[8] || []).map(x => str(x).split(" (")[0].trim());
+const speciesKey = (s, name) => stopKey(s) + "|" + name;
+/* Stop completion: a catch stop is done when EVERY species in it is ticked;
+   any other stop when its own key is ticked. Used by every progress counter. */
+const stopDone = s => str(s[0]) === "catch"
+  ? (catchNames(s).length > 0 && catchNames(s).every(n => DONE.has(speciesKey(s, n))))
+  : DONE.has(stopKey(s));
+/* Toggle a checkbox: a plain one flips its own data-key; a "toggle-all" one
+   (data-allkeys, "||"-joined) flips every key together -- on if any is off,
+   else all off -- so a catch stop's summary box drives all its species at once.
+   Returns after persisting; the caller re-renders. */
+function toggleChk(c){
+  const all = c.dataset.allkeys;
+  if (all){
+    const ks = all.split("||").filter(Boolean);
+    const every = ks.length > 0 && ks.every(k => DONE.has(k));
+    ks.forEach(k => every ? DONE.delete(k) : DONE.add(k));
+  } else {
+    const key = c.dataset.key;
+    if (DONE.has(key)) DONE.delete(key); else DONE.add(key);
+  }
+  saveDone();
+}
+/* the "||"-joined species keys for a catch stop, for a toggle-all checkbox */
+const allSpeciesKeys = s => catchNames(s).map(n => speciesKey(s, n)).join("||");
 const saveUi = () => { try { localStorage.setItem("lgmax-ui",
   JSON.stringify({view, starter, trading, sec: selectedSec, leg: selectedLeg, enc: selected})); } catch (e) {} };
 try {
@@ -1278,7 +1312,7 @@ function renderSecList(){
       const party = team.length ? team.map(t => str(t[0])).join(", ") : "no trainer battles";
       const label = multi && str(L.ti) ? `${s.id}${legLetter(k)}. ${str(L.ti)}` : `${s.id}. ${s.name}`;
       const rt = (L && L.rt) || [];
-      const dn = rt.filter(x => DONE.has(stopKey(x))).length;
+      const dn = rt.filter(stopDone).length;
       const progress = !rt.length ? "" :
         dn >= rt.length ? ` · <span class="railok">✓ done</span>` :
         dn ? ` · <span class="railok">${dn}/${rt.length}</span>` : "";
@@ -1330,9 +1364,7 @@ document.getElementById("secPanel").addEventListener("click", ev => {
   const c = ev.target.closest(".chk");
   if (c){
     ev.stopPropagation();
-    const key = c.dataset.key;
-    if (DONE.has(key)) DONE.delete(key); else DONE.add(key);
-    saveDone();
+    toggleChk(c);
     const y = window.scrollY;
     renderSecList();
     renderSecPanel(selectedSec, selectedLeg);
@@ -1430,12 +1462,13 @@ function renderSecPanel(id, leg){
   /* ---- progress state first: everything on the page reflects it ---- */
   const stops = L.rt || [];
   const keys = stops.map(stopKey);
-  const doneCount = keys.filter(kk => DONE.has(kk)).length;
+  const doneCount = stops.filter(stopDone).length;
   /* "next" means the stop after the FURTHEST one you've ticked -- a skipped
      stop earlier (an absent renewable, a fight saved for later) must not
-     drag the green stretch backwards */
+     drag the green stretch backwards. A catch stop counts as done only once
+     all its species are ticked (stopDone). */
   let hiDone = -1;
-  keys.forEach((kk, i) => { if (DONE.has(kk)) hiDone = i; });
+  stops.forEach((s, i) => { if (stopDone(s)) hiDone = i; });
   const nextIdx = hiDone + 1 < stops.length ? hiDone + 1 : -1;
 
   /* the compressed fight plan for the i-th trainer stop: who leads, what
@@ -1576,7 +1609,8 @@ function renderSecPanel(id, leg){
       {n: i + 1, x: s[3], y: s[4], kind: str(s[0]), what: str(s[1]),
        walk: s[5], fly: s[6], teleport: s[14], dig: s[15], species: (s[8] || []).length,
        underfoot: s[9], renew: str(s[10]), hunt: s[11] || 0, huntHi: s[13] || 0,
-       key: keys[i], done: DONE.has(keys[i]),
+       key: keys[i], done: stopDone(s),
+       allkeys: str(s[0]) === "catch" ? allSpeciesKeys(s) : "",
        next: i === nextIdx, plan: planByStop[i + 1]});
   });
   const sideRow = p => {
@@ -1595,8 +1629,8 @@ function renderSecPanel(id, leg){
       <span><span class="side-t">${esc(p.what || "")}</span>
         ${p.plan ? `<div class="side-p">${esc(p.plan)}</div>` : ""}
         <div class="side-d">${esc(bits.join(" · "))}</div></span>
-      <span class="chk${p.done ? " on" : ""}" data-key="${esc(p.key)}"
-        title="${p.done ? "done — click to untick" : "mark done"}">✓</span>
+      <span class="chk${p.done ? " on" : ""}" ${p.allkeys ? `data-allkeys="${esc(p.allkeys)}"` : `data-key="${esc(p.key)}"`}
+        title="${p.allkeys ? (p.done ? "all caught — click to untick all" : "mark all caught") : (p.done ? "done — click to untick" : "mark done")}">✓</span>
       <span class="side-go" data-n="${p.n}" title="jump to the full entry in the checklist">↓</span>
     </button>`;
   };
@@ -1725,21 +1759,39 @@ function renderSecPanel(id, leg){
   /* ---- one checklist: fights (with the full ledger), pickups, catches
      and events, interleaved in the exact order you walk them ---- */
   let li = 0, listHtml = "";
+  // Scripted one-off fights (the Ghost Marowak) are paired to their OWN route
+  // stop by map, not by position in the log stream, so they can never shift the
+  // sequential trainer fight numbers. Pull them out of the trainer/wild stream
+  // and index them by their location first.
+  // Index scripted logs by map across EVERY leg of the section (a full heal can
+  // split the battle's log into a different leg than its route stop). The log's
+  // location runs through the string pool, which accents "Pokemon"->"Pokémon",
+  // while a stop's map is packed raw -- normalize both so the lookup matches.
+  const normMap = m => (m == null ? "" : String(m)).replace(/Pokémon/g, "Pokemon");
+  const scriptedByMap = {};
+  const scanScripted = arr => (arr || []).forEach(l => {
+    if (str(l[2]) === "scripted") scriptedByMap[normMap(str(l[3]))] = l; });
+  legsOf(d).forEach(lg => scanScripted(lg && lg.log));
+  scanScripted(L.log);
+  const seqLog = L.log.filter(l => str(l[2]) !== "scripted");
   const flushWilds = () => {
-    while (li < L.log.length && str(L.log[li][2]) === "wild")
-      listHtml += logRow(L.log[li++], 0);
+    while (li < seqLog.length && str(seqLog[li][2]) === "wild")
+      listHtml += logRow(seqLog[li++], 0);
   };
   stops.forEach((s, i) => {
-    const st = {key: keys[i], done: DONE.has(keys[i]), next: i === nextIdx};
+    const st = {key: keys[i], done: stopDone(s), next: i === nextIdx};
     if (str(s[0]) === "trainer"){
       flushWilds();
-      if (li < L.log.length) listHtml += logRow(L.log[li++], i + 1, st);
+      if (li < seqLog.length) listHtml += logRow(seqLog[li++], i + 1, st);
+    } else if (str(s[0]) === "scripted" && scriptedByMap[normMap(s[2])]){
+      flushWilds();
+      listHtml += logRow(scriptedByMap[normMap(s[2])], i + 1, st);
     } else {
       listHtml += rtRow(s, i + 1, st);
     }
   });
   flushWilds();
-  while (li < L.log.length) listHtml += logRow(L.log[li++], 0);
+  while (li < seqLog.length) listHtml += logRow(seqLog[li++], 0);
   html += `<section class="card"><div class="card-h"><h2>Step by step</h2>
       <span class="note">fights, pickups and catches in walk order — tick things off as you play; click a fight for its matchup analysis</span>
       ${doneCount ? `<button class="hdone" aria-pressed="${HIDEDONE}">hide done (${doneCount})</button>` : ""}</div>
@@ -1856,8 +1908,9 @@ function rtRow(s, n, st){
         flyFrom = s[6], teleFrom = s[14], digFrom = s[15], species = s[8] || [], underfoot = s[9],
         renew = str(s[10]), hunt = s[11] || 0, huntHi = s[13] || 0;
   st = st || {};
+  // a catch stop has no single checkbox -- each species carries its own, below
   return `<div class="rt-row${st.done ? " done" : ""}${st.next ? " next" : ""}" id="fight-${n}">
-    ${st.key ? `<span class="chk${st.done ? " on" : ""}" data-key="${esc(st.key)}" title="mark done">✓</span>` : ""}
+    ${st.key && kind !== "catch" ? `<span class="chk${st.done ? " on" : ""}" data-key="${esc(st.key)}" title="mark done">✓</span>` : `<span class="chk-sp"></span>`}
     <span class="rt-no" style="background:${(RKIND[kind] || RKIND.event).color}">${n}</span>
     <span>
       <span class="rt-what">${esc(what || "")}</span>
@@ -1869,8 +1922,11 @@ function rtRow(s, n, st){
       ${flyFrom ? `<div class="rt-fly">✈ Fly to ${esc(prettyMap(flyFrom))}, then walk</div>` : ""}
       ${teleFrom ? `<div class="rt-fly">⤢ Teleport back to ${esc(prettyMap(teleFrom))}, then walk</div>` : ""}
       ${digFrom ? `<div class="rt-fly">⛏ Dig (or Escape Rope) out to ${esc(prettyMap(digFrom))}, then walk</div>` : ""}
-      ${species.length ? `<div class="rt-species">${species.map(x => esc(str(x))).join(" · ")}${
-        hunt > 3 ? ` <span class="note">— ~${hunt} encounters on average for the rarest${huntHi > hunt ? `, up to ~${huntHi} on an unlucky run` : ""}</span>` : ""}</div>` : ""}
+      ${species.length ? `<div class="rt-species">${species.map(x => {
+        const nm = str(x).split(" (")[0].trim(), sk = speciesKey(s, nm), on = DONE.has(sk);
+        return `<span class="rt-sp"><span class="chk sp${on ? " on" : ""}" data-key="${esc(sk)}" title="mark ${esc(nm)} caught">✓</span>${esc(str(x))}</span>`;
+      }).join("")}${
+        hunt > 3 ? `<span class="note">~${hunt} encounters on average for the rarest${huntHi > hunt ? `, up to ~${huntHi} on an unlucky run` : ""}</span>` : ""}</div>` : ""}
     </span>
     <span class="rt-where">${esc(prettyMap(mp))}<br><span class="num">${walk} steps</span></span>
   </div>`;
@@ -1881,6 +1937,9 @@ function logRow(l, fightNo, st){
   const name = l[0], kind = l[2], location = l[3], steps = l[4], healed = l[5],
         count = l[6] || 0;
   const k = KIND[str(kind)] || KIND.trainer;
+  // a scripted one-off (Ghost Marowak) renders as a fight card but has no
+  // matchup-analysis dataset entry, so its name stays plain text, not a link
+  const linkable = fightNo && str(kind) !== "scripted";
   if (str(kind) === "wild"){
     return `<div class="logrow walk">
       <div class="log-h"><span class="log-n">
@@ -1897,8 +1956,8 @@ function logRow(l, fightNo, st){
   return `<div class="logrow${healed ? " heal" : ""}${st.done ? " done" : ""}${st.next ? " next" : ""}"${fightNo ? ` id="fight-${fightNo}"` : ""}>
     <div class="log-h"><span class="log-n">
       ${st.key ? `<span class="chk${st.done ? " on" : ""}" data-key="${esc(st.key)}" title="mark done">✓</span>` : ""}${
-        fightNo ? `<span class="logno" style="background:${RKIND.trainer.color};color:#fff">${fightNo}</span>` : ""}<span class="kdot" style="background:${k.color}"></span>${
-        fightNo ? `<button class="fightlink" data-enc="${esc(l[1])}" data-n="${fightNo}"
+        fightNo ? `<span class="logno" style="background:${k.color};color:#fff">${fightNo}</span>` : ""}<span class="kdot" style="background:${k.color}"></span>${
+        linkable ? `<button class="fightlink" data-enc="${esc(l[1])}" data-n="${fightNo}"
           title="open this fight's matchup analysis">${esc(str(name))}</button>` : esc(str(name))}</span>
       <span class="log-l">${esc(str(location))}</span></div>
     <div class="log-steps">${steps.map(st => {
@@ -2026,7 +2085,8 @@ const RKIND = {
   hidden: {color:"#3E8E96", label:"hidden item"},
   trainer:{color:"#8A4A3A", label:"fight"},
   catch:  {color:"#3F8536", label:"catch"},
-  event:  {color:"#5B45B8", label:"event"}
+  event:  {color:"#5B45B8", label:"event"},
+  scripted:{color:"#A2331F", label:"scripted fight"}
 };
 
 function svgPath(coords){
@@ -2454,6 +2514,10 @@ function playDesc(ctx, row){
   if (kind === "event")
     return `Walk ${walk} steps to the pin and trigger it — ${esc(what)}. Talk to
       the NPC or interact with the spot to collect it before moving on.${nextBit}`;
+  if (kind === "scripted")
+    return `Walk ${walk} steps to the pin and take the fight — <b>${esc(what)}</b>.
+      It's a one-off scripted battle; the Step-by-step list shows the matchup and
+      the party plan already budgets its damage.${nextBit}`;
   return "";
 }
 
@@ -2464,7 +2528,7 @@ function renderPlay(){
   const {L, nodes, node, label} = ctx;
   PLAY.node = Math.min(PLAY.node, nodes.length - 1);
   const keys2 = (L.rt || []).map(stopKey);
-  const doneCount = keys2.filter(kk => DONE.has(kk)).length;
+  const doneCount = (L.rt || []).filter(stopDone).length;
 
   // objective
   const row = playFightRow(L, node);
@@ -2488,7 +2552,11 @@ function renderPlay(){
   let descHtml = "";
   if (desc){
     const key = node && node.stop ? stopKey(node.stop) : null;
-    const done = key && DONE.has(key);
+    const done = node && node.stop ? stopDone(node.stop) : false;
+    // a catch stop's big box ticks every species at once (each also has its own
+    // box in the wild band below); other stops tick their single key
+    const allkeys = node && node.stop && str(node.stop[0]) === "catch"
+      ? allSpeciesKeys(node.stop) : "";
     let extra = "";
     if (row) extra = vsBand(row);
     else if (node && node.stop && str(node.stop[0]) === "event")
@@ -2507,7 +2575,7 @@ function renderPlay(){
     }
     const stopNote = node && node.stop ? str(node.stop[12] || "") : "";
     descHtml = `<div class="po-desc">
-      ${key ? `<span class="chk big${done ? " on" : ""}" data-key="${esc(key)}" title="mark this step done">✓</span>` : ""}
+      ${key ? `<span class="chk big${done ? " on" : ""}" ${allkeys ? `data-allkeys="${esc(allkeys)}"` : `data-key="${esc(key)}"`} title="${allkeys ? "mark every species here caught" : "mark this step done"}">✓</span>` : ""}
       <div class="po-body">${desc}${stopNote ? `<div class="stop-note">⚠ ${esc(stopNote)}</div>` : ""}${extra}</div></div>`;
   }
   dEl.hidden = !descHtml;
@@ -2729,8 +2797,11 @@ function wildBand(st){
     const nm = raw.split(" (")[0];
     const odds = (raw.match(/\(([^)]+)\)/) || [])[1] || "";
     const spr = SPRITES[nm];
-    return `<div class="foe wild">
+    // each species tracks its own catch -- its own checkbox, its own DONE key
+    const sk = speciesKey(st, nm.trim()), on = DONE.has(sk);
+    return `<div class="foe wild${on ? " caught" : ""}">
       <div class="foe-h">
+        <span class="chk sp${on ? " on" : ""}" data-key="${esc(sk)}" title="mark ${esc(nm.trim())} caught">✓</span>
         ${spr ? `<img src="data:image/png;base64,${spr}" alt="">` : ""}
         <span class="foe-n">${esc(nm)}</span>
         ${odds ? `<span class="wild-odds">${esc(odds)}</span>` : ""}</div>
@@ -2825,9 +2896,8 @@ for (const holder of ["playTop", "playDesc"])
   document.getElementById(holder).addEventListener("click", ev => {
     const c = ev.target.closest(".chk");
     if (c){
-      const key = c.dataset.key;
-      if (DONE.has(key)) DONE.delete(key); else DONE.add(key);
-      saveDone(); renderSecList(); renderPlay(); renderDex();
+      toggleChk(c);
+      renderSecList(); renderPlay(); renderDex();
       return;
     }
     const j = ev.target.closest("[data-jumpnode]");
@@ -2860,7 +2930,7 @@ function renderDrawer(){
     const legs = legsOf(secData(sg.id));
     legs.forEach((L, k) => {
       const rt = (L && L.rt) || [];
-      const dn = rt.filter(x => DONE.has(stopKey(x))).length;
+      const dn = rt.filter(stopDone).length;
       const cur = sg.id === PLAY.sec && k === PLAY.leg;
       const label = legs.length > 1 && L && str(L.ti)
         ? `${sg.id}${legLetter(k)}. ${str(L.ti)}` : `${sg.id}. ${sg.name}`;
@@ -2870,7 +2940,7 @@ function renderDrawer(){
       if (cur){
         const ctx = playCtx();
         (ctx ? ctx.nodes : []).forEach((nd, ni) => {
-          const done = nd.stop && DONE.has(stopKey(nd.stop));
+          const done = nd.stop && stopDone(nd.stop);
           html += `<button class="dr-node${done ? " done" : ""}${ni === PLAY.node ? " cur" : ""}"
             data-dnode="${ni}">${nd.stop ? (nd.stopIdx + 1) + ". " : "· "}${esc(nd.label)}</button>`;
         });
@@ -3169,7 +3239,8 @@ function dexScan(){
       for (const st of (L && L.rt) || []){
         const kind = str(st[0]), got = DONE.has(stopKey(st));
         if (kind === "catch"){
-          for (const s of st[8] || []) mark(str(s).split(" (")[0].trim(), got);
+          // each species is registered by its OWN per-species checkbox now
+          for (const nm of catchNames(st)) mark(nm, DONE.has(speciesKey(st, nm)));
         } else if (kind === "event"){
           const what = str(st[1]) || "";
           for (const nm of names) if (what.includes(nm)) mark(nm, got);

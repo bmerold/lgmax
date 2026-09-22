@@ -1650,7 +1650,19 @@ def solve_section(stage, encs, starter, avail, tm_value=None, carry=None, moon_u
     # Zone and Cerulean Cave have no trainer in them and still want Cut, Strength,
     # Surf and Rock Smash, so they go through the same solve on their wild load
     # rather than returning an empty recommendation.
-    battles = interleave_wild(stage, battles, wild_battles_for(stage))
+    wild = wild_battles_for(stage)
+    # The Ghost Marowak (setwildbattle SPECIES_MAROWAK, 30) blocks Pokémon Tower
+    # 6F but is neither a trainer nor a wild-table slot, so nothing above it sees
+    # it. Inject it here as a one-off "scripted" fight so the damage cards plan
+    # for it; grouping it on 6F lets interleave_wild seat it among that floor's
+    # Channelers, and it simulates like any other battle via its _mons.
+    if any((b.get("locationRaw") or "").startswith("PokemonTower") for b in battles):
+        mk = E.make_mon("SPECIES_MAROWAK", 30)
+        wild.append({"id": "scripted:MAROWAK", "kind": "scripted",
+                     "name": "Ghost Marowak (Silph Scope)", "location": "PokemonTower_6F",
+                     "locationRaw": "PokemonTower_6F", "group": "PokemonTower_6F",
+                     "items": [], "_mons": [mk], "_dist": [(mk, 1.0)]})
+    battles = interleave_wild(stage, battles, wild)
     if not battles:
         return {"stage": stage, "starter": starter, "level": level,
                 "badges": badges["count"], "battles": 0, "opposingMons": 0,

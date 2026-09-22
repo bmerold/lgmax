@@ -246,6 +246,10 @@ def gated_barriers():
 # so far while it draws a leg, so a pre-gate segment routes around a still-closed
 # door (or takes the stairs) and a post-gate one walks through (or rides the lift).
 LIFT_GATE = "ROCKET_LIFT"
+# The Ghost Marowak stands on Pokémon Tower 6F's up-stairs (its coord battle
+# forces you up only on defeat): 7F is sealed off until it's beaten.
+MAROWAK_GATE = "TOWER_MAROWAK"
+_MAROWAK_STAIRS = ("PokemonTower_6F", 11, 16)   # 6F -> 7F warp tile
 _OPEN_GATES = None
 
 @functools.lru_cache(maxsize=None)
@@ -468,6 +472,12 @@ def neighbours(node, stage):
         if (wx, wy) != (x, y) or dmap == "MAP_DYNAMIC": continue
         dname = _const_to_folder().get(dmap)
         if not dname or not _open_map(dname, stage): continue
+        # 6F's up-stairs stay sealed until the Ghost Marowak is beaten; tour.py
+        # opens MAROWAK_GATE when the walk reaches that fight. (Untracked gates,
+        # _OPEN_GATES None, are open -- reachability and the matrix see 7F.)
+        if node == _MAROWAK_STAIRS and dname.startswith("PokemonTower_7F") \
+                and _OPEN_GATES is not None and MAROWAK_GATE not in _OPEN_GATES:
+            continue
         dg = grid(dname)
         try: dw = dg.warps[int(dwid)]
         except (ValueError, IndexError): continue

@@ -81,13 +81,21 @@ EVENTS = [
     ("Coin Case from the gambler", "CeladonCity_Restaurant", 15),
     ("Game Corner prize (one pick)", "CeladonCity_GameCorner_PrizeRoom", 15),
     ("Eevee on the Condominiums roof", "CeladonCity_Condominiums_RoofRoom", 15),
-    # the Ghost Marowak on Pokémon Tower 6F blocks the climb to Mr. Fuji: a
-    # scripted setwildbattle (SPECIES_MAROWAK, 30) you must defeat, and only the
-    # Silph Scope (from Giovanni in the Rocket Hideout, stage 17) lets you fight
-    # it. It's a coord_event, so it carries no TRAINER_ const and neither the
-    # trainer nor the wild-encounter harvest sees it -- pin it here by hand.
-    ("Ghost Marowak battle — needs the Silph Scope", "PokemonTower_6F", 19, "MarowakGhost"),
-    ("Poké Flute from Mr. Fuji", "LavenderTown_VolunteerPokemonHouse", 19, "MrFuji"),
+    # the Ghost Marowak on Pokémon Tower 6F blocks the climb: a scripted
+    # setwildbattle (SPECIES_MAROWAK, 30) you must defeat, and only the Silph
+    # Scope (from Giovanni in the Rocket Hideout, stage 17) lets you fight it.
+    # It's a coord_event with no TRAINER_ const, so neither the trainer nor the
+    # wild harvest sees it -- pin it here, at stage 18 among the tower's own
+    # Channelers (the same climb), as a one-off "scripted" fight. sections.py
+    # injects the matching battle into the stage-18 damage cards.
+    ("Ghost Marowak (Lv. 30) — needs the Silph Scope", "PokemonTower_6F", 18, "MarowakGhost", "scripted"),
+    # You meet Mr. Fuji at the TOP of Pokémon Tower (7F, behind the Rocket
+    # grunts): talking to him (PokemonTower_7F_EventScript_MrFuji) runs
+    # `warp MAP_LAVENDER_TOWN_VOLUNTEER_POKEMON_HOUSE, 4, 7` -- he teleports you
+    # to his house, where he hands over the Poké Flute. So the stop is the tower
+    # top (stage 18, the climb's climax), and the walk resumes from his house.
+    ("Poké Flute from Mr. Fuji", "PokemonTower_7F", 18, "MrFuji", "event",
+     ("LavenderTown_VolunteerPokemonHouse", 4, 7)),
     ("Super Rod", "Route12_FishingHouse", 19),
     ("TM27 Return from the gate girl", "Route12_NorthEntrance_2F", 19),
     ("Exp. Share from Oak's aide (50 owned)", "Route15_WestEntrance_2F", 19),
@@ -175,7 +183,10 @@ EVENT_BEFORE = [
 
 # Stages with no boss battle can still have a story finish line: stage 1 is
 # over when the Parcel is delivered and the Pokédex is in hand.
-EVENT_ANCHORS = {"Deliver the Parcel — Pokédex from Oak"}
+EVENT_ANCHORS = {"Deliver the Parcel — Pokédex from Oak",
+                 # Fuji warps you off the tower the moment you reach him, so
+                 # nothing on Pokémon Tower can be walked after this stop
+                 "Poké Flute from Mr. Fuji"}
 
 # ------------------------------------------------------------------ nodes
 def _item_ball_scripts():
@@ -260,6 +271,8 @@ def harvest():
     for ev in EVENTS:
         label, name, stage = ev[0], ev[1], ev[2]
         hint = ev[3] if len(ev) > 3 else None
+        kind = ev[4] if len(ev) > 4 else "event"   # "scripted" for one-off fights
+        warp_to = ev[5] if len(ev) > 5 else None   # a scripted warp off this tile
         if name not in R.maps(): continue
         xy = None
         if hint:
@@ -276,8 +289,10 @@ def harvest():
             g = WD.grid(name)
             xy = ((g.warps[0][0], g.warps[0][1]) if g.warps
                   else WD.encounter_anchor(name, "land") or (g.w // 2, g.h // 2))
-        nodes.append({"kind": "event", "what": label, "map": name,
-                      "x": xy[0], "y": xy[1], "stage": stage})
+        node = {"kind": kind, "what": label, "map": name,
+                "x": xy[0], "y": xy[1], "stage": stage}
+        if warp_to: node["warpTo"] = list(warp_to)
+        nodes.append(node)
 
     # catch stops: a species is caught the first stage it exists. Among the
     # grounds that offer it then, the site is the one where the HUNT is
@@ -679,11 +694,14 @@ LIFT_KEY_TILE = ("RocketHideout_B4F", 3, 2)
 
 def gate_token(node):
     """The gate a stop opens when the walk reaches it: a trainer opens its own
-    barrier (its const), the Lift Key ball opens the Rocket Hideout elevator."""
+    barrier (its const), the Lift Key ball opens the Rocket Hideout elevator,
+    the Ghost Marowak fight unseals Pokémon Tower's 6F -> 7F stairs."""
     if node["kind"] == "trainer":
         return (node.get("enc") or "").split(":")[-1] or None
     if (node["map"], node["x"], node["y"]) == LIFT_KEY_TILE:
         return WD.LIFT_GATE
+    if node["kind"] == "scripted" and node["map"].startswith("PokemonTower"):
+        return WD.MAROWAK_GATE
     return None
 
 def stop_short(path, mp, x, y):
@@ -883,10 +901,11 @@ def solve(max_stage=34, verbose=True):
             continue
         picked = [due[i] for i in todo]
         tiles = [reach[todo_i] for todo_i in todo]
-        anchor = stage_anchor(stage, picked)
+        # a hard story finish line (Parcel delivery, Mr. Fuji warping you off the
+        # tower) ends the stage where it happens -- it outranks the last trainer
+        anchor = next((n for n in picked if n.get("what") in EVENT_ANCHORS), None)
         if anchor is None:
-            anchor = next((n for n in picked
-                           if n.get("what") in EVENT_ANCHORS), None)
+            anchor = stage_anchor(stage, picked)
         end_i = picked.index(anchor) if anchor in picked else None
 
         # distance matrix: start + every node tile. A hop can instead return to a
@@ -1002,6 +1021,10 @@ def solve(max_stage=34, verbose=True):
         lift_here = any(gate_token(picked[oi - 1]) == WD.LIFT_GATE for oi in order)
         if lift_here:
             gate_consts.add(WD.LIFT_GATE)
+        # the Ghost Marowak seals Pokémon Tower's 6F -> 7F stairs until beaten
+        marowak_here = any(gate_token(picked[oi - 1]) == WD.MAROWAK_GATE for oi in order)
+        if marowak_here:
+            gate_consts.add(WD.MAROWAK_GATE)
         if gate_consts:
             reach_open = set(dist0)
             for m in {picked[oi - 1]["map"] for oi in order}:
@@ -1021,6 +1044,13 @@ def solve(max_stage=34, verbose=True):
                 behind = reach_open - set(WD.bfs(pos, stage))
                 if behind:
                     stage_barriers.append(({WD.LIFT_GATE}, behind))
+            if marowak_here:
+                # everything above 6F's stairs (all of 7F) is reached only once
+                # the Marowak falls -- shut just its gate and see what drops out
+                WD._OPEN_GATES = frozenset(gate_consts - {WD.MAROWAK_GATE})
+                behind = reach_open - set(WD.bfs(pos, stage))
+                if behind:
+                    stage_barriers.append(({WD.MAROWAK_GATE}, behind))
             WD._OPEN_GATES = None
         for _ in range(len(order) + 4):
             changed = False
@@ -1094,9 +1124,23 @@ def solve(max_stage=34, verbose=True):
                     if n.get("hunt"): step["hunt"] = n["hunt"]
                     if n.get("huntHi"): step["huntHi"] = n["huntHi"]
                     if n.get("species"): step["species"] = n["species"]
+                    # a scripted warp (Mr. Fuji) fires the instant you reach the
+                    # stop: the walk drawn to it is real, but you continue from the
+                    # warp's destination, not the tile you talked on. This stop is
+                    # its stage's anchor, so it's always last -- the override only
+                    # moves where the NEXT stage starts.
+                    warp = n.get("warpTo")
+                    if warp:
+                        wt = WD.reach_tile((warp[0], warp[1], warp[2]), stage)
+                        step["warpTo"] = [wt[0], wt[1], wt[2]]
+                        nt2 = (f"Mr. Fuji warps you to his house in "
+                               f"{G.pretty_location(warp[0])} and hands over the "
+                               f"Poké Flute; the walk resumes there.")
+                        step["note"] = (step.get("note") + " " + nt2) if step.get("note") else nt2
                     stps.append(step)
                     cst += mat[prev_idx][oi]
-                    cur2, prev_idx = end, oi
+                    cur2, prev_idx = (WD.reach_tile((warp[0], warp[1], warp[2]), stage)
+                                      if warp else end), oi
                     # reaching a stop opens its gate for the next leg: a trainer's
                     # barrier door on defeat, the Rocket Hideout elevator on the key
                     tok = gate_token(n)

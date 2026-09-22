@@ -326,8 +326,11 @@ out_of_line = []
 for starter, per_stage in raw["sections"].items():
     for st, sec in per_stage.items():
         if not sec: continue
+        # wild rows are ambient; scripted one-offs (the Ghost Marowak) are paired
+        # to their own route stop by map, not by trainer-order position -- both
+        # sit outside the trainer sequence this guard checks
         seq = [RO.battle_key(_const_by_id.get(l["id"], ""))
-               for l in sec["log"] if l["kind"] != "wild"]
+               for l in sec["log"] if l["kind"] not in ("wild", "scripted")]
         if seq != _rt_keys.get(int(st), seq):
             out_of_line.append((starter, int(st)))
 check("every section fights in the route's exact order",
