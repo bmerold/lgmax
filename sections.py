@@ -30,6 +30,7 @@ import hms as HM
 import route_order as R
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+_MAX_STAGE = max(s["id"] for s in P.STAGES)
 
 STARTERS = {
     "Bulbasaur": "SPECIES_BULBASAUR",
@@ -1052,7 +1053,17 @@ def dex_evolutions(avail):
             how = "raise its friendship"; note = "needs the National Dex (post-Elite Four)"
         else:
             continue                              # trades / trade-items: handled as their own stops
-        out[rec["stage"]].append({"from": fname, "to": tname, "how": how, "note": note})
+        # Show the evolution one stage AFTER its pre-evo first becomes obtainable
+        # when they'd otherwise coincide: the panel means "evolve it next time you
+        # pass a Center", and you can't do that until you actually HAVE the base.
+        # Otherwise the section that first offers a rod fish (Horsea, Staryu... on
+        # the Super Rod you only pick up mid-section) would already list its
+        # evolution, before you've caught -- or could catch -- the thing.
+        disp = rec["stage"]
+        bs = avail.get(frm, {}).get("stage") if frm else None
+        if bs is not None and bs >= disp and bs + 1 <= _MAX_STAGE:
+            disp = bs + 1
+        out[disp].append({"from": fname, "to": tname, "how": how, "note": note})
     for st in out: out[st].sort(key=lambda r: r["to"])
     _DEX_EVOS = dict(out)
     return _DEX_EVOS
