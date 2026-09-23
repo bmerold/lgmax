@@ -882,6 +882,35 @@ def insert_heal(steps, stage, start_pos, fought_in):
 # ------------------------------------------------------------------ the run
 INF = 1 << 30
 
+# ------------------------------------------------------------------ distance matrix
+# Row i of the stage matrix is a BFS from pts[i] to every pts[j] -- the single
+# biggest BFS cost left after draw_path is memoized. The rows are independent, so
+# big stages fan them across forked workers; the workers inherit the parent's warm
+# grid cache (the reachability BFS ran just before) and its _OPEN_GATES snapshot
+# (None here -- the matrix is gate-free), so no map is re-parsed and the result is
+# byte-identical to the serial build. Small stages stay serial: the fork/pool
+# overhead would cost more than the few BFS it saves. LGMAX_WORKERS caps the pool
+# (1 forces serial, for debugging / byte-diffing).
+_MAT_PTS = _MAT_STAGE = _MAT_TARGETS = None
+MATRIX_PARALLEL_MIN = 40
+
+def _matrix_row(i):
+    d = WD.bfs(_MAT_PTS[i], _MAT_STAGE, targets=_MAT_TARGETS)
+    return [d.get(q, INF) for q in _MAT_PTS]
+
+def distance_matrix(pts, stage):
+    global _MAT_PTS, _MAT_STAGE, _MAT_TARGETS
+    _MAT_PTS, _MAT_STAGE, _MAT_TARGETS = pts, stage, set(pts)
+    n = len(pts)
+    workers = int(os.environ.get("LGMAX_WORKERS", os.cpu_count() or 1)) or 1
+    if n < MATRIX_PARALLEL_MIN or workers <= 1:
+        return [_matrix_row(i) for i in range(n)]
+    import concurrent.futures as cf, multiprocessing as mp
+    chunk = max(1, n // (workers * 4))
+    with cf.ProcessPoolExecutor(max_workers=min(workers, n),
+                                mp_context=mp.get_context("fork")) as ex:
+        return list(ex.map(_matrix_row, range(n), chunksize=chunk))
+
 def solve(max_stage=34, verbose=True):
     nodes = harvest()
     for n in nodes:
@@ -928,11 +957,7 @@ def solve(max_stage=34, verbose=True):
             centers = [c for c in WD.center_nodes() if WD._open_map(c[0], stage)]
             cdist, cparent = WD.bfs_multi(centers, stage)
         pts = [pos] + tiles
-        wmat = [[INF] * len(pts) for _ in pts]
-        for i, p in enumerate(pts):
-            d = WD.bfs(p, stage, targets=set(pts))
-            for j, q in enumerate(pts):
-                if q in d: wmat[i][j] = d[q]
+        wmat = distance_matrix(pts, stage)   # BFS rows, fanned out on big stages
         mat = [row[:] for row in wmat]
         def _nearest_center(t):        # the town you'd Teleport back to from tile t
             while cparent.get(t) is not None: t = cparent[t]
