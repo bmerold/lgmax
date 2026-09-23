@@ -256,6 +256,19 @@ RIVAL_TOWER_GATE = "TOWER_RIVAL"
 _RIVAL_STAIRS = ("PokemonTower_2F", 4, 10)      # 2F -> 3F warp tile
 _OPEN_GATES = None
 
+@functools.lru_cache(maxsize=1)
+def _gate_tokens():
+    """The only tokens that actually change a drawn path: barrier-door trainer
+    consts, the Rocket lift, and the two tower gates. tour's _OPEN_GATES is the
+    whole set of trainers fought so far, but pathing checks only these -- so the
+    draw cache keys on _OPEN_GATES ∩ this, not the full set. That turns the
+    aggro-reorder loop (which only churns non-gate consts) from misses to hits."""
+    toks = {LIFT_GATE, MAROWAK_GATE, RIVAL_TOWER_GATE}
+    for entries in gated_barriers().values():
+        for _tiles, gates in entries:
+            toks |= set(gates)
+    return frozenset(toks)
+
 @functools.lru_cache(maxsize=None)
 def grid(name):
     return Grid(name)
@@ -406,7 +419,10 @@ _DRAW_MISS = object()
 def reset_draw_cache():
     _DRAW_CACHE.clear()
 def draw_path(a, b, stage):
-    key = (a, b, stage, _OPEN_GATES)
+    # key on only the gates that can change a path, not every trainer fought so
+    # far -- so a reorder that changes non-gate fought consts still hits the cache
+    gsig = None if _OPEN_GATES is None else (_OPEN_GATES & _gate_tokens())
+    key = (a, b, stage, gsig)
     hit = _DRAW_CACHE.get(key, _DRAW_MISS)
     if hit is not _DRAW_MISS:
         return list(hit) if hit is not None else None
