@@ -1235,6 +1235,7 @@ def solve(max_stage=34, verbose=True):
             if tok: ROUTED_FOUGHT.add(tok)
         done = {id(n) for n in picked}
         pending = [n for n in pending if id(n) not in done]
+        WD.reset_draw_cache()   # this stage's drawn legs won't recur (stage in key)
         if verbose:
             st = P.STAGE_BY_ID.get(stage, {})
             kinds = collections.Counter(n["kind"] for n in picked)

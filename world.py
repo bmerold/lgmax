@@ -395,14 +395,30 @@ def _ferry_edges():
 # EVERY trainer on it; the soft cost confines any crossing to the choke itself.
 _DRAW_PENALTY = 0
 BODY_COST = 1 << 16      # dwarfs any real detour, so bodies are a last resort
+# A drawn leg is a pure function of its endpoints, the stage, and which gates are
+# open (barrier doors, the Rocket lift, the tower stairs) -- body avoidance is
+# always on inside draw_path, so it isn't part of the key. tour's aggro-reorder
+# loop redraws the same legs up to a dozen times per stage; memoizing collapses
+# that to one BFS. Keyed geometry only, so it's starter-independent and
+# reproducible. tour.reset_draw_cache()s between stages to bound memory.
+_DRAW_CACHE = {}
+_DRAW_MISS = object()
+def reset_draw_cache():
+    _DRAW_CACHE.clear()
 def draw_path(a, b, stage):
+    key = (a, b, stage, _OPEN_GATES)
+    hit = _DRAW_CACHE.get(key, _DRAW_MISS)
+    if hit is not _DRAW_MISS:
+        return list(hit) if hit is not None else None
     global _DRAW_PENALTY
     _DRAW_PENALTY = BODY_COST
     try:
         p = path_between(a, b, stage)
     finally:
         _DRAW_PENALTY = 0
-    return expand_spins(p, stage) if p else p
+    result = expand_spins(p, stage) if p else p
+    _DRAW_CACHE[key] = result
+    return list(result) if result is not None else None
 
 def _tile_open(g, x, y, stage, surf_ok):
     """Can the player occupy (x, y) at this stage?"""
