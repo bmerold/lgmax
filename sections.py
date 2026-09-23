@@ -2226,19 +2226,28 @@ def reset_solve_caches():
     _threat_cache.clear()
     O.reset_caches()
 
-def _worker_pass1(starter):
-    """Pass 1 for one starter, options on even footing (empty commitments, no TM
-    plan — inherited from the fork). Returns the accumulated per-move TM value."""
+def _worker_pass1(args):
+    """Pass 1 for one (starter, trade-mode), options on even footing (empty
+    commitments, no TM plan). The trade flag is set HERE rather than in the parent
+    so both modes' pass-1 solves can share one wide fork pool; each worker's own
+    copy of the trade flag / caches stays isolated. Returns the per-move TM value."""
+    starter, trading = args
+    O.set_allow_trade(trading)
+    C.set_commitments({})
+    O.set_tm_plan(SCARCE, None)
     reset_solve_caches()
     reset_hm_held()
     tm_value = defaultdict(float)
     result = _solve_all_stages(starter, tm_value)
-    return starter, result, dict(tm_value)
+    return trading, starter, result, dict(tm_value)
 
 def _worker_pass2(args):
-    """Pass 2 for one starter, with commitments locked (inherited) and this
-    starter's own usage + TM plan applied, in the same order as the serial code."""
-    starter, counts, tm_value = args
+    """Pass 2 for one (starter, trade-mode), with that mode's commitments locked
+    and this starter's own usage + TM plan applied. All mode state is set inside
+    the worker so both modes run in one wide pool, matching the serial order."""
+    starter, trading, picks, counts, tm_value = args
+    O.set_allow_trade(trading)
+    C.set_commitments(picks)
     reset_solve_caches()
     set_usage(counts)
     owners, plan = assign_tms(tm_value, SCARCE)
@@ -2246,13 +2255,15 @@ def _worker_pass2(args):
     reset_hm_held()
     result = _solve_all_stages(starter, None)
     build_party_plans(result, _AVAIL_TABLE)
-    return starter, result, plan
+    return trading, starter, result, plan
 
 def _run_starters(fn, arglist):
     """Fan the per-starter solves across forked workers, results in input order.
     LGMAX_WORKERS caps the pool (1 forces a single worker, e.g. for debugging)."""
     import concurrent.futures as cf, multiprocessing as mp
-    workers = int(os.environ.get("LGMAX_WORKERS", len(STARTERS))) or 1
+    # default to the whole box: both trade modes' solves now share one pool, so
+    # there are up to 2*len(STARTERS) independent tasks to place at once.
+    workers = int(os.environ.get("LGMAX_WORKERS", os.cpu_count() or 1)) or 1
     with cf.ProcessPoolExecutor(max_workers=max(1, min(workers, len(arglist))),
                                 mp_context=mp.get_context("fork")) as ex:
         return list(ex.map(fn, arglist))
@@ -2289,56 +2300,66 @@ if __name__ == "__main__":
     # will. Trading is not a small tweak -- it adds Alakazam, Machamp, Golem and
     # Gengar, four of the strongest things in the game -- so the commitments,
     # the TM plan and every party get re-derived from scratch for each.
-    for mode, trading in (("no", False), ("yes", True)):
-        O.set_allow_trade(trading)
-        print(f"\n=== solving with trades {'ENABLED' if trading else 'off'}", flush=True)
-        C.set_commitments({})      # pass 1 compares the options on even footing
-        O.set_tm_plan(SCARCE, None)
-        _set_solve_inputs(sections, avail)
-        # the three starters are independent here -> fork one worker each
-        res1 = _run_starters(_worker_pass1, list(STARTERS))
-        result = {s: r for (s, r, _tv) in res1}
-        tm_value = {s: tv for (s, _r, tv) in res1}
-        print(f"  pass 1 done ({time.time()-t0:.0f}s)", flush=True)
+    # Solved twice over (no-trade / trade), each in two passes; the trade modes
+    # share the same sections graph and availability, so all 2*len(STARTERS) pass-1
+    # solves go through one wide fork pool, and likewise pass 2. Results come back
+    # in input order, so the output is byte-identical to the old serial-mode loop.
+    MODES = (("no", False), ("yes", True))
+    mode_of = {tr: m for m, tr in MODES}
+    _set_solve_inputs(sections, avail)   # shared across modes -> set once, pre-fork
+    O.set_tm_plan(SCARCE, None)
 
-    # the reference starter for the non-starter choices is whichever clears the
-    # game in the fewest turns
+    # ---- pass 1 (both modes at once): options on even footing ----
+    print("\n=== pass 1: both trade modes, all starters", flush=True)
+    args1 = [(st, tr) for _m, tr in MODES for st in STARTERS]
+    res1 = _run_starters(_worker_pass1, args1)
+    p1 = {m: {} for m, _ in MODES}
+    tm_value = {m: {} for m, _ in MODES}
+    for tr, st, result, tv in res1:
+        p1[mode_of[tr]][st] = result
+        tm_value[mode_of[tr]][st] = tv
+    print(f"  pass 1 done ({time.time()-t0:.0f}s)", flush=True)
+
+    # ---- per-mode choices + commitments (cheap, serial in the parent) ----
+    picks_by_mode, args2 = {}, []
+    for mode, trading in MODES:
+        O.set_allow_trade(trading)     # choice evaluation reads the candidate pool
+        result = p1[mode]
         totals = {k: sum((v[st] or {}).get("turns", 0) or 0 for st in v)
                   for k, v in result.items()}
         ref_starter = min(totals, key=totals.get)
-        print("  total section turns by starter:",
+        print(f"  [{mode}] section turns by starter:",
               {k: round(v, 1) for k, v in sorted(totals.items(), key=lambda kv: kv[1])})
         choices = evaluate_choices(result, avail, sections, ref_starter)
-
-    # ---- pass 2: lock the one-time choices and re-solve every section, so a run
-    # that spends its single Eevee on Vaporeon is still holding Vaporeon in the
-    # next town rather than a Jolteon it could never have.
         picks = {}
         for grp in choices:
-            if grp["id"] not in C.COMMIT_GROUPS: continue
-            picks[grp["id"]] = grp["rows"][0]["species"]
-        C.set_commitments(picks)
-        print("  commitments:",
-              {g: E.SPECIES[sp]["name"] for g, sp in picks.items()}, flush=True)
-
-        pass1 = result
-        # each starter's run-wide usage (from pass 1) drives its own TM plan; the
-        # plan + usage are applied inside the worker, in the serial order.
-        args2 = []
+            if grp["id"] in C.COMMIT_GROUPS:
+                picks[grp["id"]] = grp["rows"][0]["species"]
+        picks_by_mode[mode] = picks
+        all_choices[mode] = choices
+        all_commits[mode] = {g: E.SPECIES[sp]["name"] for g, sp in picks.items()}
+        print(f"  [{mode}] commitments:", all_commits[mode], flush=True)
         for starter in STARTERS:
             counts = collections.Counter()
-            for sec in (pass1[starter] or {}).values():
+            for sec in (result[starter] or {}).values():
                 if not sec: continue
                 for t in sec["team"]:
                     counts[t["species"]] += 1
-            args2.append((starter, counts, tm_value[starter]))
-        res2 = _run_starters(_worker_pass2, args2)
-        result = {s: r for (s, r, _p) in res2}
-        tm_plans = {s: p for (s, _r, p) in res2}
-        print(f"  re-solved — "
+            args2.append((starter, trading, picks, counts, tm_value[mode][starter]))
+
+    # ---- pass 2 (both modes at once): re-solve with commitments + TM plans ----
+    res2 = _run_starters(_worker_pass2, args2)
+    p2 = {m: {} for m, _ in MODES}
+    tm_plans_by_mode = {m: {} for m, _ in MODES}
+    for tr, st, result, plan in res2:
+        p2[mode_of[tr]][st] = result
+        tm_plans_by_mode[mode_of[tr]][st] = plan
+    O.set_tm_plan(SCARCE, None)
+    for mode, trading in MODES:
+        result, tm_plans = p2[mode], tm_plans_by_mode[mode]
+        print(f"  [{mode}] re-solved — "
               f"{ {s: sum(len(p['teach']) for p in tm_plans[s]) for s in STARTERS} } "
               f"single-use TMs spent ({time.time()-t0:.0f}s)", flush=True)
-        O.set_tm_plan(SCARCE, None)
         for per_stage in result.values():
             keep_lists(per_stage, avail)
             for sec in per_stage.values():
@@ -2347,12 +2368,10 @@ if __name__ == "__main__":
                     for step in log["steps"]:
                         for k in ("_moveConst", "_by", "_oppIdx"): step.pop(k, None)
         all_sections[mode] = result
-        all_choices[mode] = choices
         all_plans[mode] = tm_plans
-        all_commits[mode] = {g: E.SPECIES[sp]["name"] for g, sp in picks.items()}
         if mode == "no":
             with open(f"{OUT}/commitments.json", "w") as f:
-                json.dump({"picks": picks, "labels": all_commits[mode]}, f)
+                json.dump({"picks": picks_by_mode["no"], "labels": all_commits["no"]}, f)
     O.set_allow_trade(False)
     C.load_commitments(f"{OUT}/commitments.json")
     with open(f"{OUT}/sections.json", "w") as f:
