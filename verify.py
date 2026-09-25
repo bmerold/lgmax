@@ -882,6 +882,28 @@ for _mode in _pl.get("sections", {}).values():
                             _g_missing.add(_key)
 check("every party mon has a grind lookup for every TM policy",
       not _g_missing, str(sorted(_g_missing)[:5]))
+# picker (scope B) coverage: every obtainable species at every grid level has a
+# lookup (resolved or explicitly null) for each TM policy, so the picker never
+# offers a selection that comes back undefined.
+_levels = _pl.get("grindLevels", [])
+def _stage_for_level(lv):
+    b = 0
+    for s in P.STAGES:
+        if s["level"] <= lv:
+            b = s["id"]
+    return b
+_pick_missing = set()
+for _sp in av:
+    if _sp not in E.SPECIES:
+        continue
+    _nm = E.SPECIES[_sp]["name"]
+    for _lv in _levels:
+        _st = _stage_for_level(_lv)
+        for _tg in ("none", "renew", "any"):
+            if f"{_nm}|{_lv}|{_st}|{_tg}" not in _grind:
+                _pick_missing.add(f"{_nm}|{_lv}")
+check("the grind picker covers every obtainable species and grid level",
+      bool(_levels) and not _pick_missing, str(sorted(_pick_missing)[:5]))
 
 print()
 if fails:

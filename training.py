@@ -206,28 +206,81 @@ def _faster(a, b):
     return a if a["turnsPerLevel"] <= b["turnsPerLevel"] else b
 
 
+# The mon-picker (scope B) grid: any obtainable species at these levels. A mon's
+# level pins its stage (the run never grinds, so stage levels are strictly
+# increasing), so the picker derives the stage from the level -- the SAME key
+# scheme the section table uses, one map for both.
+PICK_LEVELS = list(range(5, 66, 5))
+
+
+def stage_for_level(level):
+    """The point in the run a mon of this level fits: the last stage whose party
+    baseline is at or below it. Used to gate which wild areas the picker offers."""
+    best = 0
+    for s in P.STAGES:
+        if s["level"] <= level:
+            best = s["id"]
+    return best
+
+
+def _grid_keys():
+    """(species, level, stage) for every obtainable species across the picker
+    grid -- the scope-B universe."""
+    keys = set()
+    for sp in P.full_availability():
+        if sp not in E.SPECIES:
+            continue
+        for lv in PICK_LEVELS:
+            keys.add((sp, lv, stage_for_level(lv)))
+    return keys
+
+
+# Set before forking so every worker inherits it (fork start method); the grind
+# math is pure and keyed by (attacker, defender), so workers never contend.
+_ENCOUNTERS = None
+
+
+def _grind_one(species, level, stage):
+    """All three TM policies for one mon-state, clamped so more move freedom
+    never yields a slower spot."""
+    badges = O.badges_for(stage)
+    r = {tg: best_grind(species, level, stage, tg, _ENCOUNTERS, badges) for tg in TOGGLES}
+    r["renew"] = _faster(r["none"], r["renew"])
+    r["any"] = _faster(r["renew"], r["any"])
+    return r
+
+
+def _worker(chunk):
+    return [(k, _grind_one(*k)) for k in chunk]
+
+
 def main():
-    encounters = _json.load(open(f"{_OUT}/encounters.json"))
+    global _ENCOUNTERS
+    import multiprocessing as _mp
+    import concurrent.futures as _cf
+    _ENCOUNTERS = _json.load(open(f"{_OUT}/encounters.json"))
     secs = _json.load(open(f"{_OUT}/sections.json"))
-    grind, badges_cache = {}, {}
-    # keyed by DISPLAY NAME (the app's party rows carry the name, not the const)
-    for species, level, stage in sorted(_section_keys(secs)):
-        badges = badges_cache.get(stage) or badges_cache.setdefault(stage, O.badges_for(stage))
-        name = E.SPECIES[species]["name"]
-        r = {tg: best_grind(species, level, stage, tg, encounters, badges) for tg in TOGGLES}
-        # The pools nest (none subset of renew subset of any), so a broader TM
-        # policy can always fall back to a narrower moveset -- never recommend a
-        # slower spot for allowing more moves. (The engine ranks moves by damage
-        # per turn, which can over-pick a recharge move like Hyper Beam that the
-        # turn accounting then penalizes; the fallback corrects that.)
-        r["renew"] = _faster(r["none"], r["renew"])
-        r["any"] = _faster(r["renew"], r["any"])
-        for tg in TOGGLES:
-            grind[f"{name}|{level}|{stage}|{tg}"] = r[tg]
+    keys = sorted(_section_keys(secs) | _grid_keys())
+    workers = int(_os.environ.get("LGMAX_WORKERS") or (_os.cpu_count() or 4))
+    workers = max(1, min(workers, len(keys)))
+    # even-ish chunks; fork so the loaded engine/encounter tables are shared
+    n_chunks = workers * 4
+    chunks = [keys[i::n_chunks] for i in range(n_chunks)]
+    chunks = [c for c in chunks if c]
+    ctx = _mp.get_context("fork")
+    with _cf.ProcessPoolExecutor(max_workers=workers, mp_context=ctx) as ex:
+        parts = list(ex.map(_worker, chunks))
+    grind = {}
+    for part in parts:
+        for (species, level, stage), r in part:
+            name = E.SPECIES[species]["name"]
+            for tg in TOGGLES:
+                grind[f"{name}|{level}|{stage}|{tg}"] = r[tg]
+    out = {"grind": grind, "levels": PICK_LEVELS}
     with open(f"{_OUT}/training.json", "w") as f:
-        _json.dump({"grind": grind}, f, separators=(",", ":"))
+        _json.dump(out, f, separators=(",", ":"))
     resolved = sum(1 for v in grind.values() if v)
-    print(f"training: {len(grind)} grind keys, {resolved} resolved")
+    print(f"training: {len(grind)} grind keys ({len(keys)} states), {resolved} resolved")
 
 
 if __name__ == "__main__":

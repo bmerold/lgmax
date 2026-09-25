@@ -395,6 +395,17 @@ button{font:inherit;color:inherit}
 .grind-tbl td b{font-variant-numeric:tabular-nums}
 .grind-none{color:var(--ink-3);font-style:italic}
 .grind-note{font-size:11px;color:var(--ink-3);padding:0 16px 12px;line-height:1.45}
+/* Train tab (grind picker, scope B) */
+.train-pick{display:flex;gap:16px;flex-wrap:wrap;align-items:center;padding:4px 16px 12px}
+.train-pick label{font-size:11px;color:var(--ink-3);display:flex;gap:6px;align-items:center}
+.train-pick select{font-size:13px;font-family:var(--body);padding:4px 6px;border:1px solid var(--line);background:var(--surface);color:var(--ink)}
+.train-pick .grind-toggle{margin:0}
+.train-result{display:flex;gap:14px;align-items:center;padding:6px 16px 12px;border-top:1px solid var(--line);margin-top:2px}
+.train-result img{width:56px;height:56px;image-rendering:pixelated}
+.tr-head{font-size:15px;font-weight:600}
+.tr-spot{font-size:14px;margin:2px 0}
+.tr-nums{font-size:12px;color:var(--ink-2)}
+.tr-none{font-size:13px;color:var(--ink-3);font-style:italic}
 .mapwrap{overflow-x:auto;margin:0 16px 14px;border:1px solid var(--line);position:relative;
   border-radius:0;background:var(--surface-2)}
 .mapbox{position:relative;width:max-content}
@@ -828,6 +839,7 @@ details.notes[open] summary::after{content:"−"}
       <button class="navb" data-view="sec" aria-current="false">The guide</button>
       <button class="navb" data-view="tm" aria-current="false">TM plan</button>
       <button class="navb" data-view="cat" aria-current="false">Catching</button>
+      <button class="navb" data-view="train" aria-current="false">Train</button>
       <button class="navb" data-view="cho" aria-current="false">Choices</button>
       <button class="navb" data-view="dex" aria-current="false">Dex</button>
       <button class="navb" data-view="money" aria-current="false">Money</button>
@@ -884,6 +896,7 @@ details.notes[open] summary::after{content:"−"}
           <button data-view="sec">full guide</button>
           <button data-view="tm">TM plan</button>
           <button data-view="cat">catching</button>
+          <button data-view="train">train</button>
           <button data-view="cho">choices</button>
           <button data-view="dex">dex</button>
           <button data-view="money">money</button>
@@ -932,6 +945,10 @@ details.notes[open] summary::after{content:"−"}
 
   <div id="view-cat" hidden>
     <main class="panel" id="catPanel"></main>
+  </div>
+
+  <div id="view-train" hidden>
+    <main class="panel" id="trainPanel"></main>
   </div>
 
   <div id="view-cho" hidden>
@@ -994,6 +1011,15 @@ const PLAYBOOKS = DATA.playbooks || [];
    "name|level|stage|toggle"; value [area, method, turnsPerLevel, battles, move,
    encRate]. The run never grinds -- this is a catch-up tool for falling behind. */
 const GRIND = DATA.grind || {};
+const GRIND_LEVELS = DATA.grindLevels || [];
+/* A mon's level pins the point in the run (the run never grinds, so stage levels
+   climb): the last stage whose baseline level is at or below it. The picker uses
+   this to gate which wild areas are reachable, matching training.py. */
+function stageForLevel(level){
+  let best = 0;
+  for (const s of STAGES){ if (s.level <= level) best = s.id; }
+  return best;
+}
 const CR_BY_NAME = {};
 // index the pool directly (a Dex name is always a real pool entry): `str` is a
 // const defined further down, so calling it here would hit its dead zone.
@@ -1079,6 +1105,8 @@ let starter = "Bulbasaur", view = "play";
 let selected = null, selectedSec = 18, selectedLeg = 0, tab = "team";
 /* grind-calculator TM policy: none / renewable-only / any single-use */
 let grindTM = "renew";
+/* the Train tab's mon picker (scope B) */
+let pickSpecies = null, pickLevel = 25;
 
 /* ---- play-through progress + where-you-were, kept in this browser ---- */
 let DONE = new Set();
@@ -1137,7 +1165,7 @@ try {
     trading = !!u.trading;
     if (typeof u.sec === "number") selectedSec = u.sec;
     if (typeof u.leg === "number") selectedLeg = u.leg;
-    if (["enc","sec","tm","cat","cho","play","dex","money"].includes(u.view)) view = u.view;
+    if (["enc","sec","tm","cat","train","cho","play","dex","money"].includes(u.view)) view = u.view;
     if (typeof u.enc === "string") selected = u.enc;
     if (["none","renew","any"].includes(u.grindTM)) grindTM = u.grindTM;
   }
@@ -1306,11 +1334,12 @@ document.getElementById("nav").addEventListener("click", ev => {
   view = b.dataset.view;
   document.querySelectorAll("[data-view]").forEach(x =>
     x.setAttribute("aria-current", x.dataset.view === view));
-  ["enc","sec","tm","cat","cho","play","dex","money"].forEach(v =>
+  ["enc","sec","tm","cat","train","cho","play","dex","money"].forEach(v =>
     document.getElementById("view-" + v).hidden = v !== view);
   if (view === "dex") renderDex();     // reflects whatever you've checked off so far
   if (view === "money") renderMoney();
   if (view === "cat") renderCatch();
+  if (view === "train") renderTrain();
   updateSticky();
   saveUi();
 });
@@ -2506,7 +2535,7 @@ function openEncounter(id, fromN){
   selected = id; view = "enc";
   document.querySelectorAll("[data-view]").forEach(x =>
     x.setAttribute("aria-current", x.dataset.view === "enc"));
-  ["enc","sec","tm","cat","cho","play","dex","money"].forEach(v =>
+  ["enc","sec","tm","cat","train","cho","play","dex","money"].forEach(v =>
     document.getElementById("view-" + v).hidden = v !== "enc");
   renderList();
   renderPanel(e);
@@ -3756,6 +3785,55 @@ function renderCatch(){
     </section>`;
 }
 
+/* ---------------- train (grind picker, scope B) ---------------- */
+const GRIND_TM_LABEL = {none: "No TMs", renew: "Renewable TMs", any: "Any TM"};
+function grindPickNames(){
+  // obtainable species that resolve at least one grind spot somewhere on the grid
+  return [...new Set(DEX.map(d => str(d[1])))].filter(n =>
+    GRIND_LEVELS.some(lv => GRIND[`${n}|${lv}|${stageForLevel(lv)}|any`])).sort();
+}
+function renderTrain(){
+  const el = document.getElementById("trainPanel");
+  if (!el) return;
+  const names = grindPickNames();
+  if (!names.length){ el.innerHTML = `<p class="foot">No training data.</p>`; return; }
+  if (!pickSpecies || !names.includes(pickSpecies)) pickSpecies = names[0];
+  if (!GRIND_LEVELS.includes(pickLevel)) pickLevel = GRIND_LEVELS[Math.floor(GRIND_LEVELS.length / 2)];
+  const st = stageForLevel(pickLevel);
+  const g = GRIND[`${pickSpecies}|${pickLevel}|${st}|${grindTM}`];
+  const spr = SPRITES[pickSpecies];
+  const opt = (v, cur, lbl) => `<option value="${esc(String(v))}"${v === cur ? " selected" : ""}>${esc(lbl)}</option>`;
+  el.innerHTML = `<section class="card">
+    <div class="card-h"><h2>Where to grind</h2>
+      <span class="note">the fewest battle turns to level any Pokémon — a catch-up tool; the run itself never grinds</span></div>
+    <div class="train-pick">
+      <label>Pokémon <select id="pickSp">${names.map(n => opt(n, pickSpecies, n)).join("")}</select></label>
+      <label>Level <select id="pickLv">${GRIND_LEVELS.map(lv => opt(lv, pickLevel, "Lv " + lv)).join("")}</select></label>
+      <div class="grind-toggle" role="group" aria-label="TM policy">${["none", "renew", "any"].map(v =>
+        `<button class="gtm${grindTM === v ? " on" : ""}" data-grindtm="${v}">${GRIND_TM_LABEL[v]}</button>`).join("")}</div>
+    </div>
+    <div class="train-result">
+      ${spr ? `<img src="data:image/png;base64,${spr}" alt="">` : `<span class="pb-ball">◓</span>`}
+      ${g ? `<div class="tr-body">
+        <div class="tr-head">${esc(pickSpecies)} <span class="num">Lv ${pickLevel}</span></div>
+        <div class="tr-spot"><b>${esc(str(g[0]))}</b> <span class="num">${esc(str(g[1]))}</span></div>
+        <div class="tr-nums"><b>${g[2]}</b> battle turns / level · ~${g[3]} battle${g[3] === 1 ? "" : "s"} · best move <b>${g[4] !== -1 ? esc(str(g[4])) : "—"}</b></div></div>`
+       : `<div class="tr-none">No reachable grind spot for ${esc(pickSpecies)} around Lv ${pickLevel} — nothing beatable is available yet at this point in the run.</div>`}
+    </div>
+    <p class="grind-note">Assumes you're about where a mon of this level fits in the run (which wild areas are open). It stays with this mon — no switching. Turns are battle turns to gain one full level, from the ROM's experience math; “Any TM” may spend a single-use TM the plan wants elsewhere.</p>
+  </section>`;
+}
+document.getElementById("trainPanel").addEventListener("click", ev => {
+  const gt = ev.target.closest("[data-grindtm]");
+  if (gt){ grindTM = gt.dataset.grindtm; renderTrain(); saveUi(); }
+});
+document.getElementById("trainPanel").addEventListener("change", ev => {
+  if (ev.target.id === "pickSp") pickSpecies = ev.target.value;
+  else if (ev.target.id === "pickLv") pickLevel = parseInt(ev.target.value, 10);
+  else return;
+  renderTrain();
+});
+
 /* ---------------- money ---------------- */
 const yen = n => "¥" + (n || 0).toLocaleString();
 const stageName = id => (STAGE_BY_ID[id] || {}).name || ("stage " + id);
@@ -3820,6 +3898,7 @@ renderSecList();
 renderChoices();
 renderTM();
 renderCatch();
+renderTrain();
 renderDex();
 renderMoney();
 if (!selected || !ENC.some(e => e.id === selected && forStarter(e)))
@@ -3836,7 +3915,7 @@ document.querySelectorAll("[data-trade]").forEach(x =>
   x.setAttribute("aria-pressed", String((x.dataset.trade === "yes") === trading)));
 document.querySelectorAll("#nav [data-view]").forEach(x =>
   x.setAttribute("aria-current", x.dataset.view === view));
-["enc","sec","tm","cat","cho","play","dex","money"].forEach(v =>
+["enc","sec","tm","cat","train","cho","play","dex","money"].forEach(v =>
   document.getElementById("view-" + v).hidden = v !== view);
 const _selRow = document.querySelector(`.sec-row[data-sec="${selectedSec}"][data-leg="${selectedLeg}"]`);
 if (_selRow) _selRow.scrollIntoView({block: "center"});
