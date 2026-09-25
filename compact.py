@@ -8,6 +8,13 @@ import engine, progression
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 
+# Danger radar: a fight that ends below a third of the mon's HP is "close". The
+# leg's OHKO/close counts are derived here, from the SAME packed steps the app
+# renders (wild battles are collapsed into one row per map by merge_walks), so
+# the leg badge and the per-step markers can never disagree. See sections.py for
+# the per-step worstTaken/ohkoRisk/faint the run simulator records.
+CLOSE_HP_PCT = 34
+
 def main():
     graph = json.load(open(f"{OUT}/encounters.json"))
     recs = json.load(open(f"{OUT}/recommendations.json"))
@@ -114,12 +121,15 @@ def main():
                 1 if t["newHere"] else 0, [move_row(m) for m in t["moves"]]]
 
     def step_row(x):
-        # [opp, lvl, by, move, moveType, eff, turns, switched, hpLeft, min, max, selfKO]
+        # [opp, lvl, by, move, moveType, eff, turns, switched, hpLeft, min, max,
+        #  selfKO, n, handover, worstTaken, ohkoRisk, faint]
         return [S(x["opp"]), x["lvl"], S(x.get("by")), S(x.get("move")),
                 S(x.get("moveType")), x.get("eff", 1), x.get("turns", 0),
                 1 if x.get("switched") else 0, x.get("hpLeft", 0),
                 x.get("dmgMin", 0), x.get("dmgMax", 0), 1 if x.get("selfKO") else 0,
-                x.get("n", 0), 1 if x.get("handover") else 0]
+                x.get("n", 0), 1 if x.get("handover") else 0,
+                x.get("worstTaken", 0), 1 if x.get("ohkoRisk") else 0,
+                1 if x.get("faint") else 0]
 
     def log_row(l):
         # [encName, id, kind, location, steps, healedAfter, wildCount]
@@ -340,16 +350,27 @@ def main():
             ambient = route.get("renewables", {})
             amb = [[mp, a[0], a[1], S(a[2]), S(a[3])]
                    for mp in seq for a in ambient.get(mp, [])]
+            packed_log = [log_row(l) for l in merged]
+            # Danger radar, derived from the packed steps the app renders (step_row
+            # slots: hpLeft=8, ohkoRisk=15, faint=16): count opponents that can
+            # one-shot a mon and fights that finish on fumes, then a leg tier of
+            # 3 (lose a mon / no answer) > 2 (OHKO risk) > 1 (close) > 0 (safe).
+            ohko = sum(1 for lg in packed_log for s in lg[4] if s[15])
+            close = sum(1 for lg in packed_log for s in lg[4]
+                        if not s[16] and not s[15] and 0 < s[8] < CLOSE_HP_PCT)
+            u, f = leg["unanswered"], leg["faints"]
+            dg = 3 if (u or f) else 2 if ohko else 1 if close else 0
             out.append({
                 "ti": S(leg["title"]), "hz": S(leg.get("endsAt")),
                 "cold": 1 if leg.get("cold") else 0,
                 "b": leg["battles"], "om": leg["opposingMons"],
                 "wb": leg["wildBattles"], "t": leg["turns"],
-                "wt": leg["wildTurns"], "f": leg["faints"],
-                "u": leg["unanswered"],
+                "wt": leg["wildTurns"], "f": f, "u": u,
+                # Danger radar: tier 0-3 + the OHKO-risk / close-fight counts.
+                "dg": dg, "ok": ohko, "cf": close,
                 "st": sum(s["walk"] for s in stops),
                 "team": [member_row(t) for t in leg["team"]],
-                "log": [log_row(l) for l in merged],
+                "log": packed_log,
                 "rt": [pack_stop(s) for s in stops],
                 "amb": amb,
                 "mp": [[mp, segs.get(mp, [])] for mp in seq],
@@ -473,10 +494,19 @@ def main():
     # as-is rather than through the string pool.
     economy = json.load(open(f"{OUT}/economy.json")) if os.path.exists(f"{OUT}/economy.json") else {}
 
+    # Level targets: the assumed party level on arrival at each gym (and the
+    # League), straight from progression.STAGES. The run never grinds, so a
+    # stage's level IS the "be at least this by here" number. [leaderIdx, level,
+    # stage]; the League (stage 32) has no gym key, so it's named explicitly.
+    level_targets = [[S("Elite Four" if s["id"] == 32 else s["gym"]),
+                      s["level"], s["id"]]
+                     for s in progression.STAGES
+                     if s.get("gym") or s["id"] == 32]
+
     payload = {"pool": pool, "stages": stages, "encounters": out_encs,
                "mapart": art, "sprites": sprites, "tpics": tpics,
                "ow": ow, "owByMap": ow_by_map, "dex": dex,
-               "economy": economy,
+               "economy": economy, "levelTargets": level_targets,
                "route": {"total": route["stepTotal"]},
                "sections": out_sections, "choices": choices,
                "commitments": secs.get("tradeCommitments", {}),

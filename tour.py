@@ -129,13 +129,14 @@ EVENTS = [
 # In-game trades (src/data/ingame_trades.h), each at the building it lives in.
 # (received, given, stage, map, give-instruction). The stage is the first at
 # which the building is open AND you can hold the requested Pokémon.
-# each trade's NPC script label, so the stop pins on the trader, not the door
+# each trade's NPC (a substring of the trader's object script label), so the stop
+# pins on the trader, not the door. Keyed by the species you RECEIVE, because the
+# Cinnabar Pokémon Lab holds three traders across two rooms (Clifton and Norma
+# share the Lounge) and a map key alone can't tell them apart.
 INGAME_TRADE_NPC = {
-    "Route2_House": "Reyley", "CeruleanCity_House3": "Dontae",
-    "VermilionCity_House2": "Elyssa", "Route11_EastEntrance_2F": "Turner",
-    "Route18_EastEntrance_2F": "Haden", "UndergroundPath_NorthEntrance": "Saige",
-    "CinnabarIsland_PokemonLab_Lounge": "Clifton",
-    "CinnabarIsland_PokemonLab_ExperimentRoom": "Garett",
+    "Mr. Mime": "Reyley", "Jynx": "Dontae", "Farfetch'd": "Elyssa",
+    "Nidorino": "Turner", "Lickitung": "Haden", "Nidoran♂": "Saige",
+    "Electrode": "Clifton", "Tangela": "Norma", "Seel": "Garett",
 }
 INGAME_TRADE_STOPS = [
     ("Mr. Mime", "Abra",       13, "Route2_House",
@@ -144,11 +145,14 @@ INGAME_TRADE_STOPS = [
     ("Farfetch'd", "Spearow",  10, "VermilionCity_House2",
      "Trade a Spearow for Farfetch'd — the only one in the game. Catch a "
      "spare Spearow back on Route 22."),
-    ("Nidoran♀", "Nidoran♂", 9, "UndergroundPath_NorthEntrance",
-     "Trade a Nidoran♂ for a Nidoran♀ (fills the other gender's dex "
-     "slot). Both are on Route 3 — catch a spare to give; no leveling needed."),
-    ("Nidorina", "Nidorino",   12, "Route11_EastEntrance_2F",
-     "Trade a Nidorino for a Nidorina. LEVEL a Nidoran♂ to 16 to evolve "
+    # LeafGreen reverses these two vs FireRed: you GIVE the female line and
+    # RECEIVE the male (ingame_trades.h, INGAME_TRADE_NIDORAN / _NIDORINOA
+    # `#elif defined(LEAFGREEN)` blocks). progression.INGAME_TRADES has the same.
+    ("Nidoran♂", "Nidoran♀", 9, "UndergroundPath_NorthEntrance",
+     "Trade a Nidoran♀ for a Nidoran♂ (fills the other gender's dex "
+     "slot). Both are on Route 3 — catch a spare Nidoran♀ to give; no leveling needed."),
+    ("Nidorino", "Nidorina",   12, "Route11_EastEntrance_2F",
+     "Trade a Nidorina for a Nidorino. LEVEL a Nidoran♀ to 16 to evolve "
      "it first — catch a spare on Route 3 to raise, don't give your team's."),
     ("Jynx", "Poliwhirl",      19, "CeruleanCity_House3",
      "Trade a Poliwhirl for Jynx. Super-Rod a Poliwag on Route 6 and LEVEL it "
@@ -160,13 +164,19 @@ INGAME_TRADE_STOPS = [
     ("Electrode", "Raichu",    26, "CinnabarIsland_PokemonLab_Lounge",
      "Trade a Raichu for Electrode. No wild Raichu exists — catch a Pikachu "
      "(Power Plant or Viridian Forest) and use a Thunder Stone on it."),
+    ("Tangela", "Venonat",     26, "CinnabarIsland_PokemonLab_Lounge",
+     "Trade a Venonat for Tangela (Norma, same room as the Raichu trade). Catch "
+     "a spare Venonat in Viridian Forest or on Routes 24-25 to hand over."),
     ("Seel", "Ponyta",         28, "CinnabarIsland_PokemonLab_ExperimentRoom",
      "Trade a Ponyta for Seel. Catch a spare Ponyta on Mt. Ember (Sevii "
      "Islands) to give — Seel is also catchable in the Seafoam Islands."),
 ]
 for _got, _give, _st, _map, _note in INGAME_TRADE_STOPS:
+    # The give-away species rides along as the stop's catch sub-task: you must
+    # obtain a spare to hand over (you keep your own team). It becomes a per-
+    # species checkbox on the trade stop, alongside the trade action itself.
     EVENTS.append((f"Trade for {_got} (give {_give})", _map, _st,
-                   INGAME_TRADE_NPC.get(_map)))
+                   INGAME_TRADE_NPC.get(_got), "event", None, [_give]))
 
 # Story precedence inside a stage: the fetch has to happen before the stop
 # that spends it, even when the TSP would rather swing by the other way.
@@ -292,6 +302,8 @@ def harvest():
         node = {"kind": kind, "what": label, "map": name,
                 "x": xy[0], "y": xy[1], "stage": stage}
         if warp_to: node["warpTo"] = list(warp_to)
+        # an event may carry a catch sub-task (the in-game-trade give-away species)
+        if len(ev) > 6 and ev[6]: node["species"] = list(ev[6])
         nodes.append(node)
 
     # catch stops: a species is caught the first stage it exists. Among the

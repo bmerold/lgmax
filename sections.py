@@ -1338,6 +1338,13 @@ def run_section(team, battles, badges, heal_after_idx, tm_value=None,
                     "handover": len(plan) > 1 and si > 0,
                     "hpLeft": round(max(0.0, m.hp) / m.maxhp * 100),
                     "dmgMin": p["min"], "dmgMax": p["max"],
+                    # Danger radar: the opponent's worst single hit as a share of
+                    # this mon's max HP, and whether that hit alone can KO it (one
+                    # unlucky roll or a crit could end the mon). thr["max"] is the
+                    # top roll of the opponent's best move (sections.threat).
+                    "worstTaken": round(thr["max"] / m.maxhp * 100),
+                    "ohkoRisk": 1 if thr["max"] >= m.maxhp else 0,
+                    "faint": 1 if m.hp <= 0 else 0,
                 })
         log.append({"enc": enc["name"], "id": enc["id"], "kind": enc["kind"],
                     "location": enc["location"], "steps": entries,

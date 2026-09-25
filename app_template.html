@@ -71,6 +71,11 @@ button{font:inherit;color:inherit}
 .mast-right{display:flex;flex-direction:column;gap:12px;align-items:flex-start}
 .mast-stats{display:flex;gap:20px;flex-wrap:wrap;align-items:center}
 .mast-prog{display:flex;align-items:center;gap:9px}
+.mast-targets{display:flex;gap:7px;flex-wrap:wrap;align-items:center;max-width:640px}
+.mast-targets .mt-l{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3)}
+.mast-targets .mt-g{font-size:11px;font-family:var(--mono);color:var(--ink-2);
+  border:1px solid var(--line);padding:1px 7px;background:var(--surface-2);font-variant-numeric:tabular-nums}
+.mast-targets .mt-g b{color:var(--ink);font-weight:600}
 .ring-bg{fill:none;stroke:var(--line);stroke-width:5}
 .ring-fg{fill:none;stroke:var(--good);stroke-width:5;stroke-linecap:round;
   transform:rotate(-90deg);transform-origin:26px 26px;transition:stroke-dashoffset .45s ease}
@@ -350,6 +355,16 @@ button{font:inherit;color:inherit}
 .hchip.good{color:var(--good);border-color:var(--good)}
 .hchip.bad{color:var(--bad);border-color:var(--bad)}
 .hchip.hm2{color:var(--ink-2)}
+/* Danger radar: a per-fight badge (rchip), a per-step marker (rmark), and a
+   section/leg summary chip (dchip). Tier maps to the shared severity tokens. */
+.rchip,.dchip{font-size:10px;font-weight:700;letter-spacing:.04em;padding:2px 7px;
+  white-space:nowrap;margin-left:6px;vertical-align:1px;display:inline-block}
+.rmark{font-size:8.5px;font-weight:700;letter-spacing:.05em;padding:1px 4px;
+  margin-left:5px;vertical-align:1px;display:inline-block}
+.risk-lo{background:var(--warn-soft);color:var(--warn)}
+.risk-mid{background:var(--warn);color:#fff}
+.risk-hi{background:var(--bad);color:#fff}
+.nextgym{color:var(--ink-2)}
 .mapwrap{overflow-x:auto;margin:0 16px 14px;border:1px solid var(--line);position:relative;
   border-radius:0;background:var(--surface-2)}
 .mapbox{position:relative;width:max-content}
@@ -774,6 +789,7 @@ details.notes[open] summary::after{content:"−"}
         </div>
         <div class="mast-stats" id="mastStats"></div>
         <div class="mast-prog" id="mastProg"></div>
+        <div class="mast-targets" id="mastTargets"></div>
       </div>
     </div>
     <nav class="nav" id="nav">
@@ -934,6 +950,14 @@ const SPRITES = DATA.sprites || {};
 const DEX = DATA.dex || [];
 /* The money model: prize-money income by stage vs the run's real purchases. */
 const ECON = DATA.economy || {};
+/* Level targets: [leaderName idx, assumed level, stage] per gym + the League,
+   in stage order. The run never grinds, so each is "be at least this by here". */
+const LVLTGT = DATA.levelTargets || [];
+/* The next gym at or after a section's stage: what level you should be by then. */
+function nextGym(stage){
+  for (const t of LVLTGT){ if (t[2] >= stage) return {leader: str(t[0]), level: t[1], stage: t[2]}; }
+  return null;
+}
 const TPICS = DATA.tpics || {};
 /* The game's own overworld sprites (keyed by graphics id) plus, per map, the
    tile each trainer/NPC/item-ball stop is anchored to: {map: {"x,y": [key,h]}}. */
@@ -1005,11 +1029,16 @@ const stopKey = s => [str(s[0]), str(s[1]), s[2], s[3], s[4]].join("|");
    name is the species string with its "(NN%)" odds suffix stripped. */
 const catchNames = s => (s[8] || []).map(x => str(x).split(" (")[0].trim());
 const speciesKey = (s, name) => stopKey(s) + "|" + name;
-/* Stop completion: a catch stop is done when EVERY species in it is ticked;
-   any other stop when its own key is ticked. Used by every progress counter. */
-const stopDone = s => str(s[0]) === "catch"
-  ? (catchNames(s).length > 0 && catchNames(s).every(n => DONE.has(speciesKey(s, n))))
-  : DONE.has(stopKey(s));
+/* Stop completion: a catch stop is done when EVERY species in it is ticked; any
+   other stop when its own key is ticked AND any catch sub-tasks it carries are
+   done too. An in-game-trade stop is the latter: its trade action plus a box for
+   the give-away species you must obtain to hand over. Used by every counter. */
+const stopDone = s => {
+  const names = catchNames(s), speciesOK = names.every(n => DONE.has(speciesKey(s, n)));
+  return str(s[0]) === "catch"
+    ? (names.length > 0 && speciesOK)
+    : (DONE.has(stopKey(s)) && speciesOK);
+};
 /* Toggle a checkbox: a plain one flips its own data-key; a "toggle-all" one
    (data-allkeys, "||"-joined) flips every key together -- on if any is off,
    else all off -- so a catch stop's summary box drives all its species at once.
@@ -1122,6 +1151,12 @@ function renderMast(){
   document.getElementById("mastStats").innerHTML = rows
     .map(([v, l, t]) => `<div class="mstat"${t ? ` title="${esc(t)}"` : ""}><b>${v}</b><span>${l}</span></div>`).join("");
   renderRunProgress();
+  // Level targets: the no-grind level you arrive at each gym with, as a strip.
+  const tEl = document.getElementById("mastTargets");
+  if (tEl) tEl.innerHTML = LVLTGT.length
+    ? `<span class="mt-l">Level targets (no grinding)</span>` + LVLTGT.map(t =>
+        `<span class="mt-g" title="The run reaches ${esc(str(t[0]))} at about Lv ${t[1]}"><b>${esc(str(t[0]))}</b> Lv ${t[1]}</span>`).join("")
+    : "";
   const sc = CHOICES().find(c => c.id === "starter");
   document.getElementById("starterRec").textContent =
     sc ? "Most effective overall: " + sc.best : "";
@@ -1462,11 +1497,16 @@ const isLastLeg = (d, k) => k === legsOf(d).length - 1;
 function legProgress(d, k, L){
   let done = 0, total = 0;
   for (const s of (L && L.rt) || []){
+    const names = catchNames(s);
     if (str(s[0]) === "catch"){
-      const names = catchNames(s);
       total += names.length;
       done += names.filter(n => DONE.has(speciesKey(s, n))).length;
-    } else { total += 1; if (stopDone(s)) done += 1; }
+    } else {
+      // the stop's own action, plus any give-away species (in-game trades)
+      total += 1 + names.length;
+      if (DONE.has(stopKey(s))) done += 1;
+      done += names.filter(n => DONE.has(speciesKey(s, n))).length;
+    }
   }
   for (const key of isLastLeg(d, k) ? secEvoKeys(d) : []){
     total += 1; if (DONE.has(key)) done += 1;
@@ -1675,9 +1715,12 @@ function renderSecPanel(id, leg){
     <span class="enc-kind">Section ${id}${multi ? legLetter(k) : ""} · ${esc(s.chapter)}${
       multi ? ` · ${esc(s.name)}, part ${k + 1} of ${legs.length}` : ""}</span>
     <h2 class="enc-title">${esc(title)}</h2>
-    <div class="enc-meta"><span>Lv <b>${d.lv}</b> · <b>${d.bg}</b> badge${d.bg === 1 ? "" : "s"}</span>
+    <div class="enc-meta"><span>Lv <b>${d.lv}</b> · <b>${d.bg}</b> badge${d.bg === 1 ? "" : "s"}${
+      (() => { const g = nextGym(id); return (g && g.stage > id)
+        ? ` · <span class="nextgym" title="No grinding: the run reaches ${esc(g.leader)} at Lv ${g.level}. If you're below that here, you're behind pace.">next gym: ${esc(g.leader)} @ Lv ${g.level}</span>` : ""; })()}</span>
       <span><b>${L.b}</b> fight${L.b === 1 ? "" : "s"} · <b>${(L.st || 0).toLocaleString()}</b> steps
         · <b>${L.t}</b> turns · <b title="rough playtime estimate for this leg">${fmtDur(legSeconds(L))}</b>${L.f ? ` · <b class="bad">${L.f} faint${L.f === 1 ? "" : "s"}</b>` : ""}</span>
+      ${dangerBadge(L)}
       ${secTotal ? `<span class="prog"><b>${secDone}</b> of <b>${secTotal}</b> done</span>` : ""}</div>
     ${arrive || ends || L.cold || size || (d.hm || []).length || d.tp ? `<div class="hchips">${
         L.cold ? `<span class="hchip bad" title="No Pokémon Center since the previous section">HP·PP carry over</span>` : ""}${
@@ -2108,6 +2151,35 @@ function rtRow(s, n, st){
   </div>`;
 }
 
+/* Danger radar. Step indices match step_row in compact.py: by=2, hpLeft=8,
+   worstTaken=14, ohkoRisk=15, faint=16. Tiers: 3 lose a mon / no answer,
+   2 an opponent can one-shot you, 1 a fight ends on fumes, 0 safe. */
+const RISK_HP = 34;
+function stepRisk(st){
+  if (st[2] === -1) return {tier: 3, kind: "fail", label: "nothing on your team can damage this"};
+  if (st[16])       return {tier: 3, kind: "faint", label: "you lose this Pokémon here"};
+  if (st[15])       return {tier: 2, kind: "ohko", label: `foe's best hit is ${st[14]}% of your HP — a crit or bad roll KOs you`};
+  if (st[8] > 0 && st[8] < RISK_HP) return {tier: 1, kind: "close", label: `you finish at ~${st[8]}% HP`};
+  return {tier: 0, kind: "", label: ""};
+}
+function fightRisk(steps){
+  let worst = {tier: 0, kind: "", label: ""};
+  for (const s of steps){ const r = stepRisk(s); if (r.tier > worst.tier) worst = r; }
+  return worst;
+}
+const RISK_LABEL = ["", "close", "OHKO risk", "danger"];
+/* A section/leg danger badge from the packed leg counts (dg, ok, cf). */
+function dangerBadge(L){
+  const tier = L.dg || 0; if (!tier) return "";
+  const bits = [];
+  if (L.u) bits.push(`${L.u} unwinnable`);
+  if (L.f) bits.push(`${L.f} faint${L.f === 1 ? "" : "s"}`);
+  if (L.ok) bits.push(`${L.ok} OHKO risk`);
+  if (L.cf) bits.push(`${L.cf} close`);
+  const cls = tier === 3 ? "risk-hi" : tier === 2 ? "risk-mid" : "risk-lo";
+  return `<span class="dchip ${cls}" title="Danger radar — ${esc(bits.join(", "))}">⚠ ${
+    esc(tier === 3 ? "danger" : tier === 2 ? "OHKO risk" : "close fights")}</span>`;
+}
 function logRow(l, fightNo, st){
   st = st || {};
   const name = l[0], kind = l[2], location = l[3], steps = l[4], healed = l[5],
@@ -2135,22 +2207,29 @@ function logRow(l, fightNo, st){
         fightNo ? `<span class="logno" style="background:${k.color};color:#fff">${fightNo}</span>` : ""}<span class="kdot" style="background:${k.color}"></span>${
         linkable ? `<button class="fightlink" data-enc="${esc(l[1])}" data-n="${fightNo}"
           title="open this fight's matchup analysis">${esc(str(name))}</button>` : esc(str(name))}</span>
-      <span class="log-l">${esc(str(location))}</span></div>
+      <span class="log-l">${esc(str(location))}</span>${(() => {
+        const r = fightRisk(steps); return r.tier
+          ? `<span class="rchip ${r.tier === 3 ? "risk-hi" : r.tier === 2 ? "risk-mid" : "risk-lo"}" title="Danger radar — ${esc(r.label)}">⚠ ${esc(RISK_LABEL[r.tier])}</span>`
+          : ""; })()}</div>
     <div class="log-steps">${steps.map(st => {
       const opp = st[0], lvl = st[1], by = st[2], move = st[3], turns = st[6],
             selfKO = st[11], handover = st[13];
       if (by === -1) return `<span class="step" style="color:var(--bad)">
         <b>${esc(str(opp))}</b> <span class="num">no answer</span></span>`;
+      // per-step radar marker, shown only for the two hard tiers (a mon you lose
+      // here, or an opponent that can one-shot it); close finishes ride the badge
+      const rk = stepRisk(st);
+      const mark = rk.tier >= 2 ? `<span class="rmark ${rk.tier === 3 ? "risk-hi" : "risk-mid"}" title="${esc(rk.label)}">⚠ ${esc(rk.tier === 3 ? "faints" : "OHKO")}</span>` : "";
       // the second half of a mid-fight handover: same opponent, new Pokemon
       if (handover) return `<span class="step ho" title="Switched in mid-fight to finish this Pokémon">
         <span class="num">↳ then</span>
         <span class="by">${esc(str(by))}</span>
-        <span class="num">${esc(str(move))} · ${turns.toFixed(1)}t</span></span>`;
+        <span class="num">${esc(str(move))} · ${turns.toFixed(1)}t</span>${mark}</span>`;
       return `<span class="step"><b>${esc(str(opp))}</b>
         <span class="num">L${lvl}</span>
         <span class="by">${esc(str(by))}</span>
         <span class="num">${esc(str(move))} · ${turns.toFixed(1)}t</span>
-        ${selfKO ? `<span class="num" style="color:var(--bad)">self-KO</span>` : ""}</span>`;
+        ${selfKO ? `<span class="num" style="color:var(--bad)">self-KO</span>` : ""}${mark}</span>`;
     }).join("")}</div>
     ${healed ? `<div class="healnote">Fully healed here${
       typeof healed === "number" && healed > 1 ? " at " + esc(str(healed)) : ""} — HP and PP restored</div>` : ""}
@@ -2728,7 +2807,6 @@ function renderPlay(){
   let descHtml = "";
   if (desc){
     const key = node && node.stop ? stopKey(node.stop) : null;
-    const done = node && node.stop ? stopDone(node.stop) : false;
     // a catch stop's big box ticks every species at once (each also has its own
     // box in the wild band below); other stops tick their single key
     const allkeys = node && node.stop && str(node.stop[0]) === "catch"
@@ -2736,7 +2814,7 @@ function renderPlay(){
     let extra = "";
     if (row) extra = vsBand(row);
     else if (node && node.stop && str(node.stop[0]) === "event")
-      extra = tradeBand(str(node.stop[1]));
+      extra = tradeBand(node.stop);
     else if (node && node.stop && str(node.stop[0]) === "heal"){
       // the evolve call-outs belong to the section's last leg (where they count)
       extra = isLastLeg(ctx.d, PLAY.leg) ? dexEvoHtml(ctx.d) : "";
@@ -2751,8 +2829,13 @@ function renderPlay(){
         : "");
     }
     const stopNote = node && node.stop ? str(node.stop[12] || "") : "";
+    // the big box reflects the state of the key it actually toggles (a catch
+    // stop's whole species set, else the stop's own action) -- an in-game trade
+    // carries its give-away species as a separate box on the GIVE card below.
+    const bigOn = allkeys ? allkeys.split("||").filter(Boolean).every(k => DONE.has(k))
+                          : (key ? DONE.has(key) : false);
     descHtml = `<div class="po-desc">
-      ${key ? `<span class="chk big${done ? " on" : ""}" ${allkeys ? `data-allkeys="${esc(allkeys)}"` : `data-key="${esc(key)}"`} title="${allkeys ? "mark every species here caught" : "mark this step done"}">✓</span>` : ""}
+      ${key ? `<span class="chk big${bigOn ? " on" : ""}" ${allkeys ? `data-allkeys="${esc(allkeys)}"` : `data-key="${esc(key)}"`} title="${allkeys ? "mark every species here caught" : "mark this step done"}">✓</span>` : ""}
       <div class="po-body">${desc}${stopNote ? `<div class="stop-note">⚠ ${esc(stopNote)}</div>` : ""}${extra}</div></div>`;
   }
   dEl.hidden = !descHtml;
@@ -2950,15 +3033,20 @@ window.addEventListener("resize", () => {
 });
 
 /* an in-game trade, drawn: the Pokémon you give, an arrow, the one you get */
-function tradeBand(what){
+function tradeBand(s){
+  const what = str(s[1]);
   const m = /^Trade for (.+?) \(give (.+?)\)$/.exec(what || "");
   if (!m) return "";
   const get = m[1], give = m[2];
+  // the give-away species is a catch sub-task: its box lives on the GIVE card,
+  // keyed the same as the guide's box so both views tick the one checkbox
+  const giveName = (catchNames(s)[0] || give), sk = speciesKey(s, giveName), on = DONE.has(sk);
   const card = (nm, tag) => {
     const spr = SPRITES[nm];
     return `<div class="foe trade ${tag === "GIVE" ? "give" : "get"}">
       <div class="tr-tag">${tag}</div>
       <div class="foe-h">
+        ${tag === "GIVE" ? `<span class="chk sp${on ? " on" : ""}" data-key="${esc(sk)}" title="mark a spare ${esc(giveName)} caught to trade">✓</span>` : ""}
         ${spr ? `<img src="data:image/png;base64,${spr}" alt="">`
               : `<span style="font-size:22px">◓</span>`}
         <span class="foe-n">${esc(nm)}</span></div></div>`;

@@ -5,7 +5,7 @@ These encode the legality rules that are easy to break silently:
 LeafGreen-only availability, one Pokemon per evolution line, one per
 thing the game hands you once, and no other-starter Pokemon in a run.
 """
-import json, os, sys, collections
+import json, os, sys, collections, re
 import engine as E
 import progression as P
 import constraints as C
@@ -756,6 +756,70 @@ check("nothing is buyable before its shop opens",
 # the Game Corner / Dept. TM gap)
 check("purchasable TMs the run teaches are priced",
       all(b.get("yen", 0) > 0 and b.get("count", 0) > 0 for b in _tmbuys))
+
+# ------------------------------------------------------------------ danger radar
+# Every fight step carries a risk reading (worst single hit as % of the mon's HP,
+# whether that hit can one-shot it, whether it faints). These drive the app's
+# danger badges, so each reading must be internally consistent, and each leg's
+# tier must match the per-step signals it claims to summarize — a silent
+# packer/aggregator drift here would mislead the player about what's dangerous.
+def _all_legs(pl):
+    for _mode in pl.get("sections", {}).values():
+        for _per_starter in _mode.values():
+            for _sec in _per_starter.values():
+                for _leg in _sec.get("legs", []):
+                    yield _leg
+# step_row indices (compact.py): hpLeft=8, worstTaken=14, ohkoRisk=15, faint=16.
+_steps = [(s[14], s[15], s[16]) for leg in _all_legs(_pl)
+          for lg in leg.get("log", []) for s in lg[4]]
+check("every fight step carries a consistent danger reading",
+      all(o in (0, 1) and f in (0, 1) and w >= 0 and (o == 0 or w >= 100)
+          for w, o, f in _steps),
+      f"{sum(1 for w, o, f in _steps if o and w < 100)} OHKO flags under 100% of HP")
+
+def _danger_tier(u, f, ok, cf):
+    return 3 if (u or f) else 2 if ok else 1 if cf else 0
+_bad_legs = []
+for leg in _all_legs(_pl):
+    ohko = sum(1 for lg in leg.get("log", []) for s in lg[4] if s[15])
+    if (leg.get("dg", 0) != _danger_tier(leg.get("u", 0), leg.get("f", 0),
+                                         leg.get("ok", 0), leg.get("cf", 0))
+            or ohko != leg.get("ok", 0)):
+        _bad_legs.append(leg.get("ti"))
+check("each leg's danger tier matches its OHKO / faint / close counts",
+      not _bad_legs, f"{len(_bad_legs)} legs mismatch")
+
+# ------------------------------------------------------------------ level targets
+# The app frames each gym (and the League) as a no-grind level target; because
+# the run never grinds, a stage's level IS that target, so the payload's
+# levelTargets must match progression exactly and cover every one of them.
+_lt = _pl.get("levelTargets", [])
+_lt_stages = {t[2] for t in _lt}
+_want_stages = {s["id"] for s in P.STAGES if s.get("gym") or s["id"] == 32}
+check("level targets cover every gym and the League",
+      _lt_stages == _want_stages, f"have {sorted(_lt_stages)} want {sorted(_want_stages)}")
+check("every level target matches its stage's progression level",
+      all(t[1] == P.STAGE_BY_ID[t[2]]["level"] for t in _lt),
+      str([t for t in _lt if t[1] != P.STAGE_BY_ID[t[2]]["level"]][:4]))
+check("level targets rise monotonically toward the League",
+      all(b[1] >= a[1] for a, b in zip(_lt, _lt[1:])))
+
+# ------------------------------------------------------------------ in-game trades
+# Each in-game-trade stop carries a checkbox for the species you must obtain to
+# hand over. That give-away species must be the ROM's requestedSpecies, not the
+# one you receive -- LeafGreen reverses the Nidoran/Nidorina pair vs FireRed, and
+# a past route bug had it backwards (progression.INGAME_TRADES is the ROM truth).
+_rt_trades = [s for st in json.load(open(f"{OUT}/route.json"))["stages"]
+              for s in st["steps"] if str(s.get("what", "")).startswith("Trade for ")]
+_give_want = {E.SPECIES[g]["name"] for _r, g, *_ in P.INGAME_TRADES}
+def _trade_give(s):
+    m = re.match(r"Trade for .+? \(give (.+?)\)$", s.get("what", ""))
+    return m.group(1) if m else None
+_bad_trades = [s.get("what") for s in _rt_trades
+               if (s.get("species") or []) != [_trade_give(s)]
+               or _trade_give(s) not in _give_want]
+check("every in-game trade names the ROM's give-away species to catch",
+      bool(_rt_trades) and not _bad_trades, str(_bad_trades[:4]))
 
 print()
 if fails:
