@@ -4,7 +4,7 @@ single self-contained page. Same information, far fewer bytes: repeated object
 keys become positional arrays, and shared strings become indices into pools.
 """
 import base64, json, os
-import engine, progression
+import engine, progression, capture
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 
@@ -474,7 +474,8 @@ def main():
                  if mp in used_maps}
 
     # ---- Pokédex: every species obtainable in a LeafGreen run, for the Dex tab.
-    # [natNo, name, types, firstStage, source, kind, tradeOnly, evolvesFromName]
+    # [natNo, name, types, firstStage, source, kind, tradeOnly, evolvesFromName,
+    #  catchRate]  (catchRate feeds the catch-odds table below)
     dex = []
     _av = progression.full_availability()
     for _sp, _r in _av.items():
@@ -487,8 +488,51 @@ def main():
             _r.get("stage"), S(_r.get("source") or ""), S(_r.get("kind") or ""),
             1 if _r.get("requiresTrade") else 0,
             S(engine.SPECIES[_frm]["name"]) if _frm in engine.SPECIES else -1,
+            _info.get("catchRate", 0),
         ])
     dex.sort(key=lambda d: (d[0] or 999))
+
+    # ---- Catch odds. The capture math (capture.py) depends only on catch rate,
+    # ball, HP fraction and status -- never level -- so the whole app needs just
+    # one table keyed by the catch rates that actually occur, computed once here.
+    # For each: the per-throw chance with each buyable ball at full HP and at the
+    # optimal setup (1 HP + asleep). The Master Ball is always 1.0 (not tabled).
+    _CATCH_BALLS = ("Poke", "Great", "Ultra")
+    catch_by_rate = {}
+    for _cr in sorted({d[8] for d in dex}):
+        catch_by_rate[str(_cr)] = {
+            "full": {b: round(capture.catch_chance(_cr, b, 1.0), 4) for b in _CATCH_BALLS},
+            "opt":  {b: round(capture.catch_chance(_cr, b, 0.01, "sleep"), 4) for b in _CATCH_BALLS},
+        }
+
+    # ---- Legendary / one-off playbooks for the Catching tab. The birds, Mewtwo
+    # and Snorlax are the run's ball-throw one-offs; fossils are lab revivals
+    # (gifts), so they are noted in the tab, not tabled. Levels/locations from
+    # progression.STATIC_SOURCES (setwildbattle in each map's scripts.inc).
+    _PLAYBOOK = [
+        ("SPECIES_SNORLAX", 30, "Route 12 and Route 16 — two of them, both L30",
+         "Woken by the Poké Flute, so it acts on turn one. Lead with a False Swipe "
+         "user to chip it to red, then re-inflict Sleep (or Paralysis) and throw "
+         "Ultra Balls. Soft-reset friendly if you miss."),
+        ("SPECIES_ARTICUNO", 50, "Seafoam Islands B4F",
+         "Catch rate 3. False Swipe to 1 HP, then Sleep (best) or Paralyze and "
+         "throw Ultra Balls — bring a stack. Static encounter, no Repel tricks."),
+        ("SPECIES_ZAPDOS", 50, "Power Plant",
+         "Catch rate 3. False Swipe to red, Sleep or Paralyze, Ultra Balls. Its "
+         "Drill Peck hits hard — keep your catcher healthy."),
+        ("SPECIES_MOLTRES", 50, "Mt. Ember summit (Sevii Islands)",
+         "Catch rate 3. False Swipe to 1 HP, Sleep or Paralyze, Ultra Balls. Mind "
+         "its Fire Spin chip on your catcher."),
+        ("SPECIES_MEWTWO", 70, "Cerulean Cave B1F",
+         "Catch rate 3 at L70 — the hardest catch in the game. Survive its Psychic "
+         "and Recover, False Swipe to 1 HP, Sleep it, then Ultra Balls — or spend "
+         "the Master Ball here, which most runs save exactly for this."),
+    ]
+    playbooks = [{
+        "name": engine.SPECIES[_sp]["name"], "cr": engine.SPECIES[_sp].get("catchRate", 0),
+        "level": _lvl, "where": _where, "setup": _setup,
+        "master": _sp == "SPECIES_MEWTWO",
+    } for _sp, _lvl, _where, _setup in _PLAYBOOK if _sp in engine.SPECIES]
 
     # The money model is small (an income curve + a shopping list), so it ships
     # as-is rather than through the string pool.
@@ -507,6 +551,7 @@ def main():
                "mapart": art, "sprites": sprites, "tpics": tpics,
                "ow": ow, "owByMap": ow_by_map, "dex": dex,
                "economy": economy, "levelTargets": level_targets,
+               "catchByRate": catch_by_rate, "playbooks": playbooks,
                "route": {"total": route["stepTotal"]},
                "sections": out_sections, "choices": choices,
                "commitments": secs.get("tradeCommitments", {}),

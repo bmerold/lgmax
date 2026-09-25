@@ -365,6 +365,25 @@ button{font:inherit;color:inherit}
 .risk-mid{background:var(--warn);color:#fff}
 .risk-hi{background:var(--bad);color:#fff}
 .nextgym{color:var(--ink-2)}
+/* Catch odds: an inline line on catch stops, and the Catching tab's playbooks. */
+.catch-odds{font-size:10.5px;color:var(--ink-3);margin-top:2px;padding-left:26px}
+.pb-intro p{font-size:13px;color:var(--ink-2);line-height:1.5;margin:6px 0}
+.pb-tip{background:var(--good-soft);border-left:3px solid var(--good);padding:8px 12px}
+.pb-h{margin:2px 16px 8px}
+.pb-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;padding:0 16px}
+.pb-card{border:1px solid var(--line);background:var(--surface-2);padding:12px}
+.pb-head{display:flex;gap:10px;align-items:center;margin-bottom:8px}
+.pb-head img{width:46px;height:46px;image-rendering:pixelated}
+.pb-ball{font-size:30px;color:var(--ink-3);width:46px;text-align:center}
+.pb-head h3{margin:0;font-size:15px}
+.pb-meta{font-size:11px;color:var(--ink-3);font-family:var(--mono)}
+.pb-odds{width:100%;border-collapse:collapse;font-size:11px;margin:4px 0 8px}
+.pb-odds th,.pb-odds td{border:1px solid var(--line);padding:3px 6px;text-align:center;font-variant-numeric:tabular-nums}
+.pb-odds td:first-child,.pb-odds th:first-child{text-align:left;color:var(--ink-3);white-space:nowrap}
+.pb-balls{display:block;font-size:9px;color:var(--ink-3);font-weight:400}
+.pb-setup{font-size:12px;color:var(--ink-2);line-height:1.45;margin:4px 0 0}
+.pb-master{font-size:11.5px;color:var(--good);font-weight:600;margin:6px 0 0}
+.pb-foss{font-size:12px;color:var(--ink-3);padding:12px 16px 0;line-height:1.45}
 .mapwrap{overflow-x:auto;margin:0 16px 14px;border:1px solid var(--line);position:relative;
   border-radius:0;background:var(--surface-2)}
 .mapbox{position:relative;width:max-content}
@@ -797,6 +816,7 @@ details.notes[open] summary::after{content:"−"}
       <button class="navb" data-view="enc" aria-current="false">Encounters</button>
       <button class="navb" data-view="sec" aria-current="false">The guide</button>
       <button class="navb" data-view="tm" aria-current="false">TM plan</button>
+      <button class="navb" data-view="cat" aria-current="false">Catching</button>
       <button class="navb" data-view="cho" aria-current="false">Choices</button>
       <button class="navb" data-view="dex" aria-current="false">Dex</button>
       <button class="navb" data-view="money" aria-current="false">Money</button>
@@ -852,6 +872,7 @@ details.notes[open] summary::after{content:"−"}
         <span class="drawer-links">
           <button data-view="sec">full guide</button>
           <button data-view="tm">TM plan</button>
+          <button data-view="cat">catching</button>
           <button data-view="cho">choices</button>
           <button data-view="dex">dex</button>
           <button data-view="money">money</button>
@@ -896,6 +917,10 @@ details.notes[open] summary::after{content:"−"}
 
   <div id="view-tm" hidden>
     <main class="panel" id="tmPanel"></main>
+  </div>
+
+  <div id="view-cat" hidden>
+    <main class="panel" id="catPanel"></main>
   </div>
 
   <div id="view-cho" hidden>
@@ -946,8 +971,37 @@ const ROUTE = DATA.route || {total: 0, stages: []};
 /* The game's own front sprites, keyed by display name. */
 const SPRITES = DATA.sprites || {};
 /* The Pokédex: every species obtainable in a run. Field map matches compact.py:
-   [natNo, name, types, firstStage, source, kind, tradeOnly, evolvesFromName]. */
+   [natNo, name, types, firstStage, source, kind, tradeOnly, evolvesFromName,
+    catchRate]. */
 const DEX = DATA.dex || [];
+/* Catch odds keyed by catch rate (capture.py's ROM formula, computed in the
+   pipeline), plus the legendary/one-off playbooks. A species' catch rate rides
+   on its Dex row (index 8), so name -> rate -> odds without a JS formula. */
+const CATCH_BY_RATE = DATA.catchByRate || {};
+const PLAYBOOKS = DATA.playbooks || [];
+const CR_BY_NAME = {};
+// index the pool directly (a Dex name is always a real pool entry): `str` is a
+// const defined further down, so calling it here would hit its dead zone.
+DEX.forEach(d => { CR_BY_NAME[S[d[1]]] = d[8] || 0; });
+/* Catch odds for a species name: {cr, full{Poke,Great,Ultra}, opt{...}} or null.
+   "full" is a raw throw at full HP; "opt" is the 1-HP + asleep setup. */
+function catchInfo(name){
+  const cr = CR_BY_NAME[name]; if (cr == null) return null;
+  const t = CATCH_BY_RATE[String(cr)];
+  return {cr, full: t ? t.full : null, opt: t ? t.opt : null};
+}
+const oddsPct = p => p >= 1 ? "guaranteed"
+  : (p * 100 < 1 ? (p * 100).toFixed(1) : Math.round(p * 100)) + "%";
+const oddsBalls = p => p <= 0 ? "∞" : p >= 1 ? "1" : "~" + Math.max(1, Math.round(1 / p));
+const bestBall = sc => !sc ? null
+  : ["Ultra", "Great", "Poke"].reduce((a, b) => sc[b] > (sc[a] || 0) ? b : a, "Poke");
+/* a compact inline catch line for a species, used on catch/legendary stops */
+function catchLine(name){
+  const ci = catchInfo(name); if (!ci || !ci.opt) return "";
+  if (ci.cr >= 150) return `catch ~${oddsPct(ci.full.Great)}/throw with Great Balls at full HP`;
+  const b = bestBall(ci.opt), p = ci.opt[b];
+  return `catch ~${oddsPct(p)}/throw (${oddsBalls(p)} balls) using ${b} Balls at 1 HP + asleep`;
+}
 /* The money model: prize-money income by stage vs the run's real purchases. */
 const ECON = DATA.economy || {};
 /* Level targets: [leaderName idx, assumed level, stage] per gym + the League,
@@ -1066,7 +1120,7 @@ try {
     trading = !!u.trading;
     if (typeof u.sec === "number") selectedSec = u.sec;
     if (typeof u.leg === "number") selectedLeg = u.leg;
-    if (["enc","sec","tm","cho","play","dex","money"].includes(u.view)) view = u.view;
+    if (["enc","sec","tm","cat","cho","play","dex","money"].includes(u.view)) view = u.view;
     if (typeof u.enc === "string") selected = u.enc;
   }
 } catch (e) {}
@@ -1234,10 +1288,11 @@ document.getElementById("nav").addEventListener("click", ev => {
   view = b.dataset.view;
   document.querySelectorAll("[data-view]").forEach(x =>
     x.setAttribute("aria-current", x.dataset.view === view));
-  ["enc","sec","tm","cho","play","dex","money"].forEach(v =>
+  ["enc","sec","tm","cat","cho","play","dex","money"].forEach(v =>
     document.getElementById("view-" + v).hidden = v !== view);
   if (view === "dex") renderDex();     // reflects whatever you've checked off so far
   if (view === "money") renderMoney();
+  if (view === "cat") renderCatch();
   updateSticky();
   saveUi();
 });
@@ -2143,7 +2198,8 @@ function rtRow(s, n, st){
       ${digFrom ? `<div class="rt-fly">⛏ Dig (or Escape Rope) out to ${esc(prettyMap(digFrom))}, then walk</div>` : ""}
       ${species.length ? `<div class="rt-species">${species.map(x => {
         const nm = str(x).split(" (")[0].trim(), sk = speciesKey(s, nm), on = DONE.has(sk);
-        return `<span class="rt-sp"><span class="chk sp${on ? " on" : ""}" data-key="${esc(sk)}" title="mark ${esc(nm)} caught">✓</span>${esc(str(x))}</span>`;
+        const cl = catchLine(nm);
+        return `<span class="rt-sp"${cl ? ` title="${esc(cl)}"` : ""}><span class="chk sp${on ? " on" : ""}" data-key="${esc(sk)}" title="mark ${esc(nm)} caught">✓</span>${esc(str(x))}</span>`;
       }).join("")}${
         hunt > 3 ? `<span class="note">~${hunt} encounters on average for the rarest${huntHi > hunt ? `, up to ~${huntHi} on an unlucky run` : ""}</span>` : ""}</div>` : ""}
     </span>
@@ -2388,7 +2444,7 @@ function openEncounter(id, fromN){
   selected = id; view = "enc";
   document.querySelectorAll("[data-view]").forEach(x =>
     x.setAttribute("aria-current", x.dataset.view === "enc"));
-  ["enc","sec","tm","cho","play","dex","money"].forEach(v =>
+  ["enc","sec","tm","cat","cho","play","dex","money"].forEach(v =>
     document.getElementById("view-" + v).hidden = v !== "enc");
   renderList();
   renderPanel(e);
@@ -3064,12 +3120,14 @@ function wildBand(st){
     const spr = SPRITES[nm];
     // each species tracks its own catch -- its own checkbox, its own DONE key
     const sk = speciesKey(st, nm.trim()), on = DONE.has(sk);
+    const cl = catchLine(nm.trim());
     return `<div class="foe wild${on ? " caught" : ""}">
       <div class="foe-h">
         <span class="chk sp${on ? " on" : ""}" data-key="${esc(sk)}" title="mark ${esc(nm.trim())} caught">✓</span>
         ${spr ? `<img src="data:image/png;base64,${spr}" alt="">` : ""}
         <span class="foe-n">${esc(nm)}</span>
         ${odds ? `<span class="wild-odds">${esc(odds)}</span>` : ""}</div>
+      ${cl ? `<div class="catch-odds">${esc(cl)}</div>` : ""}
     </div>`;
   }).join("");
   return cards ? `<div class="vsband"><div class="foes">${cards}</div></div>` : "";
@@ -3596,6 +3654,46 @@ document.getElementById("dexGrid").addEventListener("keydown", ev => {
   if (c){ ev.preventDefault(); dexToggle(c.dataset.dex); }
 });
 
+/* ---------------- catching ---------------- */
+function renderCatch(){
+  const el = document.getElementById("catPanel");
+  if (!el) return;
+  const oddsTable = cr => {
+    const t = CATCH_BY_RATE[String(cr)];
+    if (!t) return "";
+    const row = (label, sc) => `<tr><td>${label}</td>` + ["Poke", "Great", "Ultra"].map(b => {
+      const p = sc[b];
+      return `<td><b>${oddsPct(p)}</b>${p > 0 && p < 1 ? `<span class="pb-balls">${oddsBalls(p)} balls</span>` : ""}</td>`;
+    }).join("") + `</tr>`;
+    return `<table class="pb-odds"><thead><tr><th></th><th>Poké</th><th>Great</th><th>Ultra</th></tr></thead>
+      <tbody>${row("Full HP", t.full)}${row("1 HP + asleep", t.opt)}</tbody></table>`;
+  };
+  const cards = PLAYBOOKS.map(p => {
+    const spr = SPRITES[p.name];
+    return `<article class="pb-card">
+      <div class="pb-head">
+        ${spr ? `<img src="data:image/png;base64,${spr}" alt="">` : `<span class="pb-ball">◓</span>`}
+        <div><h3>${esc(p.name)}</h3>
+          <div class="pb-meta">Lv ${p.level} · ${esc(p.where)} · catch rate ${p.cr}</div></div>
+      </div>
+      ${oddsTable(p.cr)}
+      <p class="pb-setup">${esc(p.setup)}</p>
+      ${p.master ? `<p class="pb-master">Master Ball → guaranteed. Most runs spend their one Master Ball right here.</p>` : ""}
+    </article>`;
+  }).join("");
+  el.innerHTML = `
+    <section class="card pb-intro">
+      <h2>Catching</h2>
+      <p>Every chance below is the Game Boy Advance's own capture math — catch rate, ball, HP and status — so the numbers are what the cartridge actually rolls. Odds are per throw; “balls” is the average number you'll spend.</p>
+      <p class="pb-tip"><b>The universal setup:</b> put the target to <b>Sleep</b> (best) or <b>Paralysis</b>, chip it to <b>1 HP</b> with <b>False Swipe</b>, then throw. Sleep doubles your odds and 1 HP roughly triples them — together they turn a coin-flip catch into a near-lock and a legendary from “bring 100 balls” into “bring 20.”</p>
+    </section>
+    <section class="card">
+      <h2 class="pb-h">Legendaries &amp; one-offs</h2>
+      <div class="pb-grid">${cards}</div>
+      <p class="pb-foss">Fossils (Omanyte, Kabuto, Aerodactyl) aren't thrown at — you revive them at the Cinnabar Lab, so they're free once you hand over the fossil. Same for the gifts: Eevee, Lapras, Hitmonlee/Hitmonchan, and your starter.</p>
+    </section>`;
+}
+
 /* ---------------- money ---------------- */
 const yen = n => "¥" + (n || 0).toLocaleString();
 const stageName = id => (STAGE_BY_ID[id] || {}).name || ("stage " + id);
@@ -3659,6 +3757,7 @@ renderList();
 renderSecList();
 renderChoices();
 renderTM();
+renderCatch();
 renderDex();
 renderMoney();
 if (!selected || !ENC.some(e => e.id === selected && forStarter(e)))
@@ -3675,7 +3774,7 @@ document.querySelectorAll("[data-trade]").forEach(x =>
   x.setAttribute("aria-pressed", String((x.dataset.trade === "yes") === trading)));
 document.querySelectorAll("#nav [data-view]").forEach(x =>
   x.setAttribute("aria-current", x.dataset.view === view));
-["enc","sec","tm","cho","play","dex","money"].forEach(v =>
+["enc","sec","tm","cat","cho","play","dex","money"].forEach(v =>
   document.getElementById("view-" + v).hidden = v !== view);
 const _selRow = document.querySelector(`.sec-row[data-sec="${selectedSec}"][data-leg="${selectedLeg}"]`);
 if (_selRow) _selRow.scrollIntoView({block: "center"});

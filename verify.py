@@ -821,6 +821,35 @@ _bad_trades = [s.get("what") for s in _rt_trades
 check("every in-game trade names the ROM's give-away species to catch",
       bool(_rt_trades) and not _bad_trades, str(_bad_trades[:4]))
 
+# ------------------------------------------------------------------ catch odds
+# Catch odds are the ROM's capture math (capture.py). The shipped table must be
+# well-formed: every chance in [0,1], the 1-HP+asleep setup never worse than a
+# full-HP throw, better catch rates never catch worse, and every legendary
+# playbook resolving to a real catch rate. A final anchor pins the formula.
+_cbr = _pl.get("catchByRate", {})
+_cbr_ok = True
+for _t in _cbr.values():
+    for _b in ("Poke", "Great", "Ultra"):
+        if not (0.0 <= _t["full"][_b] <= 1.0 and 0.0 <= _t["opt"][_b] <= 1.0
+                and _t["opt"][_b] >= _t["full"][_b] - 1e-9):
+            _cbr_ok = False
+check("catch odds stay within [0,1] and the setup never hurts", bool(_cbr) and _cbr_ok)
+_rates = sorted(int(k) for k in _cbr)
+check("catch odds rise with catch rate",
+      all(_cbr[str(a)]["full"]["Ultra"] <= _cbr[str(b)]["full"]["Ultra"] + 1e-9
+          for a, b in zip(_rates, _rates[1:])))
+_pb = _pl.get("playbooks", [])
+check("every legendary playbook resolves a catch rate in the odds table",
+      bool(_pb) and all(str(p["cr"]) in _cbr and p.get("level", 0) > 0 and p.get("where")
+                        for p in _pb),
+      str([p.get("name") for p in _pb if str(p.get("cr")) not in _cbr][:4]))
+import capture as CAP
+check("the capture formula matches the ROM at its anchors",
+      CAP.catch_chance(255, "Ultra", 0.01, "sleep") == 1.0
+      and 0.0 < CAP.catch_chance(3, "Poke", 1.0) < 0.02
+      and CAP.catch_chance(3, "Master", 1.0) == 1.0,
+      f"cr3poke={CAP.catch_chance(3, 'Poke', 1.0):.4f}")
+
 print()
 if fails:
     print(f"{len(fails)} check(s) FAILED")
