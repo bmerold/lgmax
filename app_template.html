@@ -4,6 +4,15 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
 
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0F8A3C">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="LG Maximizer">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<script>if("serviceWorker" in navigator)addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}));</script>
+
 <style>
 :root{
   --bg:#FAFAF7; --surface:#FAFAF7; --surface-2:#F1F0EB; --surface-3:#E7E6DF;
@@ -60,7 +69,33 @@ button{font:inherit;color:inherit}
 .mast-title .dim{color:var(--ink-3);font-weight:500}
 .mast-sub{color:var(--ink-2);max-width:60ch;margin-top:6px;font-size:13.5px}
 .mast-right{display:flex;flex-direction:column;gap:12px;align-items:flex-start}
-.mast-stats{display:flex;gap:20px;flex-wrap:wrap}
+.mast-stats{display:flex;gap:20px;flex-wrap:wrap;align-items:center}
+.mast-prog{display:flex;align-items:center;gap:9px}
+.ring-bg{fill:none;stroke:var(--line);stroke-width:5}
+.ring-fg{fill:none;stroke:var(--good);stroke-width:5;stroke-linecap:round;
+  transform:rotate(-90deg);transform-origin:26px 26px;transition:stroke-dashoffset .45s ease}
+.ring-pct{text-anchor:middle;dominant-baseline:central;font:700 13px var(--mono),sans-serif;fill:var(--ink)}
+.ring-l{display:flex;flex-direction:column;line-height:1.15}
+.ring-l b{font-family:var(--mono);font-size:15px;font-weight:600;font-variant-numeric:tabular-nums}
+.ring-l span{font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3)}
+.onboard-bg{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:120;display:flex;
+  align-items:center;justify-content:center;padding:16px}
+.onboard{background:var(--surface);border:1px solid var(--line-strong);border-radius:12px;
+  max-width:520px;width:100%;padding:22px 24px;box-shadow:0 12px 40px rgba(0,0,0,.4);
+  max-height:92vh;overflow-y:auto}
+.onboard h2{font-size:20px;margin:0 0 4px}
+.ob-sub{color:var(--ink-2);font-size:13.5px;margin:0 0 12px}
+.ob-rule{font-size:12px;color:var(--ink-2);border-left:3px solid var(--good);
+  padding:5px 10px;margin:0 0 14px;background:var(--surface-2);border-radius:0 5px 5px 0}
+.ob-how{list-style:none;padding:0;margin:0 0 16px;display:flex;flex-direction:column;gap:7px}
+.ob-how li{font-size:13px;color:var(--ink-2)}
+.ob-how b{color:var(--ink)}
+.ob-pick{display:flex;flex-direction:column;gap:5px;margin-bottom:12px}
+.ob-pl{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3)}
+.ob-pick .starter-btns{display:flex;gap:6px;flex-wrap:wrap}
+.ob-start{margin-top:6px;width:100%;padding:11px;border-radius:8px;border:none;
+  background:var(--good);color:#fff;font-weight:600;font-size:14px;cursor:pointer}
+.ob-start:hover{filter:brightness(1.07)}
 .mstat{display:flex;flex-direction:column;gap:1px}
 .mstat b{font-family:var(--mono);font-size:18px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.1}
 .mstat span{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3)}
@@ -738,6 +773,7 @@ details.notes[open] summary::after{content:"−"}
           <span class="rec-tag" id="tradeNote"></span>
         </div>
         <div class="mast-stats" id="mastStats"></div>
+        <div class="mast-prog" id="mastProg"></div>
       </div>
     </div>
     <nav class="nav" id="nav">
@@ -751,6 +787,39 @@ details.notes[open] summary::after{content:"−"}
       <button class="navb sync-navb" id="syncBtn" title="carry your progress between devices">⇄ Sync</button>
     </nav>
   </header>
+
+  <div class="onboard-bg" id="onboard" hidden>
+    <div class="onboard" role="dialog" aria-modal="true" aria-labelledby="ob-title">
+      <h2 id="ob-title">LeafGreen Maximizer</h2>
+      <p class="ob-sub">The fastest completionist run through Kanto — every fight solved with the
+        game's own damage math, every item and catch laid out on a single route.</p>
+      <p class="ob-rule">Ruleset: no in-battle items · no grinding (one level per section) · fewest
+        turns to win. Every fact comes from the game's code, never a wiki.</p>
+      <ul class="ob-how">
+        <li><b>Play</b> — follow the walk step by step, the map and your party in view.</li>
+        <li><b>The guide</b> — the fights for each area with the party that clears them; tick things
+          off as you go and the ring up top fills.</li>
+        <li>Everything adapts to your <b>starter</b> and whether you'll <b>trade</b> — pick below
+          (changeable any time up top).</li>
+      </ul>
+      <div class="ob-pick">
+        <span class="ob-pl">Your starter</span>
+        <div class="starter-btns" id="obStarter">
+          <button class="sbtn" data-ob-starter="Bulbasaur">Bulbasaur</button>
+          <button class="sbtn" data-ob-starter="Charmander">Charmander</button>
+          <button class="sbtn" data-ob-starter="Squirtle">Squirtle</button>
+        </div>
+      </div>
+      <div class="ob-pick">
+        <span class="ob-pl">Trading</span>
+        <div class="starter-btns" id="obTrade">
+          <button class="sbtn" data-ob-trade="no">Solo</button>
+          <button class="sbtn" data-ob-trade="yes">Trades OK</button>
+        </div>
+      </div>
+      <button class="ob-start" id="obStart">Start planning →</button>
+    </div>
+  </div>
 
   <div id="view-play" hidden>
     <div id="playTop">
@@ -996,6 +1065,47 @@ let syncStatusText = "", syncStatusCls = "";
 const forStarter = e => !e.sv || e.sv === starter;
 
 /* ---------------- masthead ---------------- */
+/* whole-run completion: sum every section leg's done/total (stops + per-species
+   catches + evolution call-outs) into one figure for the masthead ring */
+function runProgress(){
+  let done = 0, total = 0;
+  for (const s of STAGES){
+    const d = secData(s.id);
+    legsOf(d).forEach((L, k) => { const p = legProgress(d, k, L); done += p.done; total += p.total; });
+  }
+  return {done, total, pct: total ? Math.round(100 * done / total) : 0};
+}
+function renderRunProgress(){
+  const el = document.getElementById("mastProg");
+  if (!el) return;
+  const rp = runProgress();
+  const r = 20, C = 2 * Math.PI * r, off = C * (1 - rp.pct / 100);
+  el.innerHTML = `<svg width="52" height="52" viewBox="0 0 52 52" role="img"
+      aria-label="${rp.pct}% of the run complete — ${rp.done} of ${rp.total} items done">
+      <circle class="ring-bg" cx="26" cy="26" r="${r}"/>
+      <circle class="ring-fg" cx="26" cy="26" r="${r}"
+        stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}"/>
+      <text class="ring-pct" x="26" y="26">${rp.pct}%</text></svg>
+    <div class="ring-l"><b>${rp.done}/${rp.total}</b><span>run complete</span></div>`;
+}
+/* Rough playtime for pacing, not a stopwatch: running-speed walking + per-turn
+   battle animation + per-fight dialogue overhead. The three constants are the
+   obvious knobs; the estimate excludes grinding (the run never grinds). */
+const SEC_PER_STEP = 0.28, SEC_PER_TURN = 9, SEC_PER_FIGHT = 22;
+const estSeconds = (steps, turns, fights) =>
+  steps * SEC_PER_STEP + turns * SEC_PER_TURN + fights * SEC_PER_FIGHT;
+function fmtDur(sec){
+  const m = Math.round(sec / 60);
+  if (m < 60) return "~" + Math.max(1, m) + "m";
+  const h = Math.floor(m / 60), r = m % 60;
+  return "~" + h + "h" + (r ? " " + r + "m" : "");
+}
+function legSeconds(L){ return L ? estSeconds(L.st || 0, L.t || 0, L.b || 0) : 0; }
+function runSeconds(){
+  let turns = 0, fights = 0;
+  for (const s of STAGES) legsOf(secData(s.id)).forEach(L => { if (L){ turns += L.t || 0; fights += L.b || 0; } });
+  return estSeconds(ROUTE.total || 0, turns, fights);
+}
 function renderMast(){
   const list = ENC.filter(forStarter);
   const n = k => list.filter(e => e.k === k).length;
@@ -1005,10 +1115,13 @@ function renderMast(){
     [n("trainer") + n("rematch") + n("rival"), "trainer battles"],
     [n("wild"), "wild areas"],
     [totalSections(), "sections"],
-    [(ROUTE.total || 0).toLocaleString(), "steps to 100%"]
+    [(ROUTE.total || 0).toLocaleString(), "steps to 100%"],
+    [fmtDur(runSeconds()), "est. playtime",
+     `Rough estimate: ${SEC_PER_STEP}s per step (running), ${SEC_PER_TURN}s per battle turn, ${SEC_PER_FIGHT}s per fight for dialogue. No grinding, since the run never grinds.`]
   ];
   document.getElementById("mastStats").innerHTML = rows
-    .map(([v, l]) => `<div class="mstat"><b>${v}</b><span>${l}</span></div>`).join("");
+    .map(([v, l, t]) => `<div class="mstat"${t ? ` title="${esc(t)}"` : ""}><b>${v}</b><span>${l}</span></div>`).join("");
+  renderRunProgress();
   const sc = CHOICES().find(c => c.id === "starter");
   document.getElementById("starterRec").textContent =
     sc ? "Most effective overall: " + sc.best : "";
@@ -1046,6 +1159,40 @@ document.getElementById("tradeBtns").addEventListener("click", ev => {
   if (view === "money") renderMoney();
   saveUi(); syncTouch();
 });
+
+/* ---- first-run onboarding: a one-screen intro + starter/trade picker.
+   The pickers reuse the masthead handlers via a click dispatch, so choosing
+   here does exactly what choosing up top does. Shown once, to a genuinely new
+   visitor (no onboarding flag and no saved session). ---- */
+(function(){
+  const ob = document.getElementById("onboard");
+  if (!ob) return;
+  const syncPicks = () => {
+    ob.querySelectorAll("[data-ob-starter]").forEach(x =>
+      x.setAttribute("aria-pressed", String(x.dataset.obStarter === starter)));
+    ob.querySelectorAll("[data-ob-trade]").forEach(x =>
+      x.setAttribute("aria-pressed", String((x.dataset.obTrade === "yes") === trading)));
+  };
+  const dismiss = () => { try { localStorage.setItem("lgmax-onboarded", "1"); } catch (e) {} ob.hidden = true; };
+  document.getElementById("obStarter").addEventListener("click", ev => {
+    const b = ev.target.closest("[data-ob-starter]"); if (!b) return;
+    const mb = document.querySelector(`#starterBtns [data-starter="${b.dataset.obStarter}"]`);
+    if (mb) mb.click();
+    syncPicks();
+  });
+  document.getElementById("obTrade").addEventListener("click", ev => {
+    const b = ev.target.closest("[data-ob-trade]"); if (!b) return;
+    const mb = document.querySelector(`#tradeBtns [data-trade="${b.dataset.obTrade}"]`);
+    if (mb) mb.click();
+    syncPicks();
+  });
+  document.getElementById("obStart").addEventListener("click", dismiss);
+  ob.addEventListener("click", ev => { if (ev.target === ob) dismiss(); });
+  document.addEventListener("keydown", ev => { if (ev.key === "Escape" && !ob.hidden) dismiss(); });
+  let seen = false, hadUi = false;
+  try { seen = !!localStorage.getItem("lgmax-onboarded"); hadUi = !!localStorage.getItem("lgmax-ui"); } catch (e) {}
+  if (!seen && !hadUi){ syncPicks(); ob.hidden = false; }
+})();
 
 document.getElementById("nav").addEventListener("click", ev => {
   const b = ev.target.closest("[data-view]"); if (!b) return;
@@ -1530,7 +1677,7 @@ function renderSecPanel(id, leg){
     <h2 class="enc-title">${esc(title)}</h2>
     <div class="enc-meta"><span>Lv <b>${d.lv}</b> · <b>${d.bg}</b> badge${d.bg === 1 ? "" : "s"}</span>
       <span><b>${L.b}</b> fight${L.b === 1 ? "" : "s"} · <b>${(L.st || 0).toLocaleString()}</b> steps
-        · <b>${L.t}</b> turns${L.f ? ` · <b class="bad">${L.f} faint${L.f === 1 ? "" : "s"}</b>` : ""}</span>
+        · <b>${L.t}</b> turns · <b title="rough playtime estimate for this leg">${fmtDur(legSeconds(L))}</b>${L.f ? ` · <b class="bad">${L.f} faint${L.f === 1 ? "" : "s"}</b>` : ""}</span>
       ${secTotal ? `<span class="prog"><b>${secDone}</b> of <b>${secTotal}</b> done</span>` : ""}</div>
     ${arrive || ends || L.cold || size || (d.hm || []).length || d.tp ? `<div class="hchips">${
         L.cold ? `<span class="hchip bad" title="No Pokémon Center since the previous section">HP·PP carry over</span>` : ""}${

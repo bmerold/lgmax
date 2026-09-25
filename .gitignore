@@ -12,6 +12,8 @@ __pycache__/
 node_modules/
 package-lock.json
 *.png
+# PWA app icons are committed output (see pwa/make_icons.py), not generated map art
+!pwa/icon-*.png
 vexcl*.py
 peek.py
 shot.js
