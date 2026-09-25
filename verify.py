@@ -851,59 +851,40 @@ check("the capture formula matches the ROM at its anchors",
       f"cr3poke={CAP.catch_chance(3, 'Poke', 1.0):.4f}")
 
 # ------------------------------------------------------------------ grind calc
-# The training calculator's fastest-grind spots (training.py): each resolved one
-# names a real wild area with positive turns/level and >=1 battle; giving a mon
-# MORE move freedom (none -> renewable -> any TM) never makes its best grind
-# slower (the engine only ever adds better attacking options); and every section
-# party mon has a lookup for every TM policy, so the app's rows never come up
-# empty for a reason other than "no reachable area".
-_grind = _pl.get("grind", {})
-_gv = [v for v in _grind.values() if v]     # [area, method, tpl, battles, move, encRate]
-check("every resolved grind spot has positive turns and a real area",
-      bool(_gv) and all(v[2] > 0 and v[3] >= 1 and v[0] != -1 for v in _gv))
-_g_bases = {k.rsplit("|", 1)[0] for k in _grind}
-_g_mono = []
-for _b in _g_bases:
-    _n, _r, _a = _grind.get(_b + "|none"), _grind.get(_b + "|renew"), _grind.get(_b + "|any")
-    if _r and _n and _r[2] > _n[2] + 0.2:
-        _g_mono.append(_b)
-    if _a and _r and _a[2] > _r[2] + 0.2:
-        _g_mono.append(_b)
-check("more TM freedom never makes the best grind slower", not _g_mono, str(_g_mono[:4]))
-_g_missing = set()
-for _mode in _pl.get("sections", {}).values():
-    for _per in _mode.values():
-        for _stg, _sec in _per.items():
-            for _leg in _sec.get("legs", []):
-                for _t in _leg.get("team", []):
-                    _key = f"{_pool[_t[0]]}|{_t[2]}|{_stg}"
-                    for _tg in ("none", "renew", "any"):
-                        if f"{_key}|{_tg}" not in _grind:
-                            _g_missing.add(_key)
-check("every party mon has a grind lookup for every TM policy",
-      not _g_missing, str(sorted(_g_missing)[:5]))
-# picker (scope B) coverage: every obtainable species at every grid level has a
-# lookup (resolved or explicitly null) for each TM policy, so the picker never
-# offers a selection that comes back undefined.
-_levels = _pl.get("grindLevels", [])
-def _stage_for_level(lv):
-    b = 0
-    for s in P.STAGES:
-        if s["level"] <= lv:
-            b = s["id"]
-    return b
-_pick_missing = set()
-for _sp in av:
-    if _sp not in E.SPECIES:
-        continue
-    _nm = E.SPECIES[_sp]["name"]
-    for _lv in _levels:
-        _st = _stage_for_level(_lv)
-        for _tg in ("none", "renew", "any"):
-            if f"{_nm}|{_lv}|{_st}|{_tg}" not in _grind:
-                _pick_missing.add(f"{_nm}|{_lv}")
-check("the grind picker covers every obtainable species and grid level",
-      bool(_levels) and not _pick_missing, str(sorted(_pick_missing)[:5]))
+# The training itineraries (training.py): each segment [from,to,area,method,move,
+# tplLo,tplHi,battles] is well-formed and the per-species segments run in strict
+# ascending, non-overlapping level order; every obtainable species has an
+# itinerary for all three TM policies; and because a broader TM pool can only add
+# clearable areas, the "any" itinerary covers every level "no TMs" does.
+_itin = _pl.get("itineraries", {})
+def _seg_ok(s):
+    return (s[0] <= s[1] and s[2] != -1 and s[5] > 0 and s[6] >= s[5] - 1e-9 and s[7] >= 1)
+_bad_seg = []
+for _nm, _tgs in _itin.items():
+    for _tg, _segs in _tgs.items():
+        _prev = -1
+        for _s in _segs:
+            if not _seg_ok(_s) or _s[0] <= _prev:
+                _bad_seg.append((_nm, _tg))
+                break
+            _prev = _s[1]
+check("every grind itinerary segment is well-formed and in order",
+      bool(_itin) and not _bad_seg, str(_bad_seg[:4]))
+_it_missing = [E.SPECIES[_sp]["name"] for _sp in av
+               if _sp in E.SPECIES
+               and (E.SPECIES[_sp]["name"] not in _itin
+                    or set(_itin[E.SPECIES[_sp]["name"]]) != {"none", "renew", "any"})]
+check("every obtainable species has an itinerary for each TM policy",
+      not _it_missing, str(_it_missing[:5]))
+def _levels_covered(nm, tg):
+    out = set()
+    for s in _itin.get(nm, {}).get(tg, []):
+        out |= set(range(s[0], s[1] + 1))
+    return out
+_bad_cov = [nm for nm in _itin
+            if not _levels_covered(nm, "none") <= _levels_covered(nm, "any")]
+check("the 'any TM' itinerary covers every level 'no TMs' does",
+      not _bad_cov, str(_bad_cov[:4]))
 
 print()
 if fails:

@@ -181,22 +181,6 @@ def best_grind(species, level, stage, toggle, encounters, badges):
 
 
 # ------------------------------------------------------------------ pipeline
-def _section_keys(secs):
-    """Every (species, level, stage) a solved party mon actually stands at -- the
-    scope-A key set. Grind cost is starter/mode-independent, so we dedupe across
-    all of them and the app looks each party mon up by this key."""
-    keys = set()
-    for by_starter in secs.get("sections", {}).values():
-        for per_stage in by_starter.values():
-            for stg, sec in per_stage.items():
-                if not sec:
-                    continue
-                for m in sec.get("team", []):
-                    if m.get("species") in E.SPECIES:
-                        keys.add((m["species"], int(m["level"]), int(stg)))
-    return keys
-
-
 def _faster(a, b):
     """The fewer-turns-per-level of two grind results (either may be None)."""
     if not a:
@@ -206,16 +190,17 @@ def _faster(a, b):
     return a if a["turnsPerLevel"] <= b["turnsPerLevel"] else b
 
 
-# The mon-picker (scope B) grid: any obtainable species at these levels. A mon's
-# level pins its stage (the run never grinds, so stage levels are strictly
-# increasing), so the picker derives the stage from the level -- the SAME key
-# scheme the section table uses, one map for both.
-PICK_LEVELS = list(range(5, 66, 5))
+# The leveling itinerary is computed at EVERY level (not a coarse grid), then
+# consecutive levels that share the same spot and move are merged into one
+# segment -- so the app can show "L12-18: Route 3, Double Kick" for each mon. A
+# mon's level pins its stage (the run never grinds, so stage levels climb), so
+# the stage is derived from the level.
+ITIN_LEVELS = list(range(5, 56))
 
 
 def stage_for_level(level):
     """The point in the run a mon of this level fits: the last stage whose party
-    baseline is at or below it. Used to gate which wild areas the picker offers."""
+    baseline is at or below it. Gates which wild areas are reachable."""
     best = 0
     for s in P.STAGES:
         if s["level"] <= level:
@@ -223,26 +208,16 @@ def stage_for_level(level):
     return best
 
 
-def _grid_keys():
-    """(species, level, stage) for every obtainable species across the picker
-    grid -- the scope-B universe."""
-    keys = set()
-    for sp in P.full_availability():
-        if sp not in E.SPECIES:
-            continue
-        for lv in PICK_LEVELS:
-            keys.add((sp, lv, stage_for_level(lv)))
-    return keys
-
-
 # Set before forking so every worker inherits it (fork start method); the grind
 # math is pure and keyed by (attacker, defender), so workers never contend.
 _ENCOUNTERS = None
 
 
-def _grind_one(species, level, stage):
-    """All three TM policies for one mon-state, clamped so more move freedom
-    never yields a slower spot."""
+def _clamped(species, level):
+    """All three TM policies at one level, clamped so more move freedom never
+    yields a slower spot (the engine can over-pick a recharge move like Hyper
+    Beam; a broader pool can always fall back to a narrower moveset)."""
+    stage = stage_for_level(level)
     badges = O.badges_for(stage)
     r = {tg: best_grind(species, level, stage, tg, _ENCOUNTERS, badges) for tg in TOGGLES}
     r["renew"] = _faster(r["none"], r["renew"])
@@ -250,8 +225,39 @@ def _grind_one(species, level, stage):
     return r
 
 
-def _worker(chunk):
-    return [(k, _grind_one(*k)) for k in chunk]
+def species_itinerary(species):
+    """Per-TM-policy leveling itinerary for one species: an ordered list of
+    segments {from, to, area, method, move, tplLo, tplHi, battles}, one per run
+    of levels that share a best spot and move. Levels with no reachable spot are
+    left out, so the itinerary is exactly the trainable stretch."""
+    per = {lv: _clamped(species, lv) for lv in ITIN_LEVELS}
+    out = {}
+    for tg in TOGGLES:
+        segs = []
+        for lv in ITIN_LEVELS:
+            v = per[lv][tg]
+            key = (v["area"], v["move"]) if v else None
+            if key is not None and segs and segs[-1]["_k"] == key:
+                s = segs[-1]
+                s["to"] = lv
+                # turns/level isn't monotonic across a segment (the mon can
+                # strengthen faster than the xp cost rises), so track true min/max
+                s["tplLo"] = min(s["tplLo"], v["turnsPerLevel"])
+                s["tplHi"] = max(s["tplHi"], v["turnsPerLevel"])
+                s["battles"] = max(s["battles"], v["battles"])
+            elif key is not None:
+                segs.append({"_k": key, "from": lv, "to": lv, "area": v["area"],
+                             "method": v["method"], "move": v["move"],
+                             "tplLo": v["turnsPerLevel"], "tplHi": v["turnsPerLevel"],
+                             "battles": v["battles"]})
+        out[tg] = [{k: s[k] for k in
+                    ("from", "to", "area", "method", "move", "tplLo", "tplHi", "battles")}
+                   for s in segs]
+    return out
+
+
+def _worker(species_list):
+    return [(sp, species_itinerary(sp)) for sp in species_list]
 
 
 def main():
@@ -259,28 +265,25 @@ def main():
     import multiprocessing as _mp
     import concurrent.futures as _cf
     _ENCOUNTERS = _json.load(open(f"{_OUT}/encounters.json"))
-    secs = _json.load(open(f"{_OUT}/sections.json"))
-    keys = sorted(_section_keys(secs) | _grid_keys())
+    species = sorted(sp for sp in P.full_availability() if sp in E.SPECIES)
     workers = int(_os.environ.get("LGMAX_WORKERS") or (_os.cpu_count() or 4))
-    workers = max(1, min(workers, len(keys)))
-    # even-ish chunks; fork so the loaded engine/encounter tables are shared
+    workers = max(1, min(workers, len(species)))
+    # fork so the loaded engine/encounter tables are shared; one species per task
     n_chunks = workers * 4
-    chunks = [keys[i::n_chunks] for i in range(n_chunks)]
+    chunks = [species[i::n_chunks] for i in range(n_chunks)]
     chunks = [c for c in chunks if c]
     ctx = _mp.get_context("fork")
     with _cf.ProcessPoolExecutor(max_workers=workers, mp_context=ctx) as ex:
         parts = list(ex.map(_worker, chunks))
-    grind = {}
+    itin = {}
     for part in parts:
-        for (species, level, stage), r in part:
-            name = E.SPECIES[species]["name"]
-            for tg in TOGGLES:
-                grind[f"{name}|{level}|{stage}|{tg}"] = r[tg]
-    out = {"grind": grind, "levels": PICK_LEVELS}
+        for sp, tg_segs in part:
+            itin[E.SPECIES[sp]["name"]] = tg_segs
+    out = {"itineraries": itin, "range": [ITIN_LEVELS[0], ITIN_LEVELS[-1]]}
     with open(f"{_OUT}/training.json", "w") as f:
         _json.dump(out, f, separators=(",", ":"))
-    resolved = sum(1 for v in grind.values() if v)
-    print(f"training: {len(grind)} grind keys ({len(keys)} states), {resolved} resolved")
+    n_segs = sum(len(t) for s in itin.values() for t in s.values())
+    print(f"training: {len(itin)} species, {n_segs} itinerary segments")
 
 
 if __name__ == "__main__":

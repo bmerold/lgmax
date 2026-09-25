@@ -400,12 +400,12 @@ button{font:inherit;color:inherit}
 .train-pick label{font-size:11px;color:var(--ink-3);display:flex;gap:6px;align-items:center}
 .train-pick select{font-size:13px;font-family:var(--body);padding:4px 6px;border:1px solid var(--line);background:var(--surface);color:var(--ink)}
 .train-pick .grind-toggle{margin:0}
-.train-result{display:flex;gap:14px;align-items:center;padding:6px 16px 12px;border-top:1px solid var(--line);margin-top:2px}
-.train-result img{width:56px;height:56px;image-rendering:pixelated}
-.tr-head{font-size:15px;font-weight:600}
-.tr-spot{font-size:14px;margin:2px 0}
-.tr-nums{font-size:12px;color:var(--ink-2)}
-.tr-none{font-size:13px;color:var(--ink-3);font-style:italic}
+.train-head{display:flex;gap:10px;align-items:center;padding:2px 16px 8px}
+.train-head img{width:44px;height:44px;image-rendering:pixelated}
+.tr-head{font-size:16px;font-weight:600}
+.it-tbl{margin-top:0}
+.it-tbl .it-lv{white-space:nowrap;font-family:var(--mono);font-variant-numeric:tabular-nums}
+.tr-none{font-size:13px;color:var(--ink-3);font-style:italic;padding:4px 16px 10px}
 .mapwrap{overflow-x:auto;margin:0 16px 14px;border:1px solid var(--line);position:relative;
   border-radius:0;background:var(--surface-2)}
 .mapbox{position:relative;width:max-content}
@@ -1010,15 +1010,17 @@ const PLAYBOOKS = DATA.playbooks || [];
 /* Grind calculator (training.py): fastest wild spot per party mon, keyed
    "name|level|stage|toggle"; value [area, method, turnsPerLevel, battles, move,
    encRate]. The run never grinds -- this is a catch-up tool for falling behind. */
-const GRIND = DATA.grind || {};
-const GRIND_LEVELS = DATA.grindLevels || [];
-/* A mon's level pins the point in the run (the run never grinds, so stage levels
-   climb): the last stage whose baseline level is at or below it. The picker uses
-   this to gate which wild areas are reachable, matching training.py. */
-function stageForLevel(level){
-  let best = 0;
-  for (const s of STAGES){ if (s.level <= level) best = s.id; }
-  return best;
+/* Grind itineraries (training.py): {name: {toggle: [segment...]}}, each segment
+   [fromLv, toLv, area, method, move, tplLo, tplHi, battles]. A catch-up tool --
+   the run itself never grinds. */
+const ITIN = DATA.itineraries || {};
+const GRIND_RANGE = DATA.grindRange || [5, 55];
+/* the itinerary segment covering a mon at `level` under `toggle`, or null */
+function grindAt(name, level, toggle){
+  for (const s of (ITIN[name] || {})[toggle] || []){
+    if (s[0] <= level && level <= s[1]) return s;
+  }
+  return null;
 }
 const CR_BY_NAME = {};
 // index the pool directly (a Dex name is always a real pool entry): `str` is a
@@ -1106,7 +1108,7 @@ let selected = null, selectedSec = 18, selectedLeg = 0, tab = "team";
 /* grind-calculator TM policy: none / renewable-only / any single-use */
 let grindTM = "renew";
 /* the Train tab's mon picker (scope B) */
-let pickSpecies = null, pickLevel = 25;
+let pickSpecies = null;
 
 /* ---- play-through progress + where-you-were, kept in this browser ---- */
 let DONE = new Set();
@@ -1778,13 +1780,15 @@ function grindCard(d, L, id){
   if (!team.length) return "";
   const rows = team.map(t => {
     const nm = str(t[0]), lv = t[2];
-    const g = GRIND[`${nm}|${lv}|${id}|${grindTM}`];
+    // segment = [from, to, area, method, move, tplLo, tplHi, battles]
+    const g = grindAt(nm, lv, grindTM);
     if (!g) return `<tr><td>${esc(nm)} <span class="num">Lv ${lv}</span></td>
       <td colspan="3" class="grind-none">no reachable grind spot at this point</td></tr>`;
+    const tpl = g[5] === g[6] ? `${g[5]}` : `${g[5]}–${g[6]}`;
     return `<tr>
       <td>${esc(nm)} <span class="num">Lv ${lv}</span></td>
-      <td>${esc(str(g[0]))} <span class="num">${esc(str(g[1]))}</span></td>
-      <td><b>${g[2]}</b> <span class="num">~${g[3]} battle${g[3] === 1 ? "" : "s"}</span></td>
+      <td>${esc(str(g[2]))} <span class="num">${esc(str(g[3]))}</span></td>
+      <td><b>${tpl}</b> <span class="num">~${g[7]} battle${g[7] === 1 ? "" : "s"}</span></td>
       <td>${g[4] !== -1 ? esc(str(g[4])) : "—"}</td></tr>`;
   }).join("");
   const btn = (v, lbl, tip) => `<button class="gtm${grindTM === v ? " on" : ""}" data-grindtm="${v}" title="${esc(tip)}">${lbl}</button>`;
@@ -3785,12 +3789,13 @@ function renderCatch(){
     </section>`;
 }
 
-/* ---------------- train (grind picker, scope B) ---------------- */
+/* ---------------- train (grind itinerary, scope B) ---------------- */
 const GRIND_TM_LABEL = {none: "No TMs", renew: "Renewable TMs", any: "Any TM"};
 function grindPickNames(){
-  // obtainable species that resolve at least one grind spot somewhere on the grid
-  return [...new Set(DEX.map(d => str(d[1])))].filter(n =>
-    GRIND_LEVELS.some(lv => GRIND[`${n}|${lv}|${stageForLevel(lv)}|any`])).sort();
+  // obtainable species that have any itinerary under some TM policy
+  return [...new Set(DEX.map(d => str(d[1])))].filter(n => {
+    const t = ITIN[n]; return t && Object.values(t).some(segs => segs.length);
+  }).sort();
 }
 function renderTrain(){
   const el = document.getElementById("trainPanel");
@@ -3798,29 +3803,34 @@ function renderTrain(){
   const names = grindPickNames();
   if (!names.length){ el.innerHTML = `<p class="foot">No training data.</p>`; return; }
   if (!pickSpecies || !names.includes(pickSpecies)) pickSpecies = names[0];
-  if (!GRIND_LEVELS.includes(pickLevel)) pickLevel = GRIND_LEVELS[Math.floor(GRIND_LEVELS.length / 2)];
-  const st = stageForLevel(pickLevel);
-  const g = GRIND[`${pickSpecies}|${pickLevel}|${st}|${grindTM}`];
+  const segs = (ITIN[pickSpecies] || {})[grindTM] || [];
   const spr = SPRITES[pickSpecies];
   const opt = (v, cur, lbl) => `<option value="${esc(String(v))}"${v === cur ? " selected" : ""}>${esc(lbl)}</option>`;
+  // segment = [from, to, area, method, move, tplLo, tplHi, battles]
+  const rows = segs.map(s => {
+    const rng = s[0] === s[1] ? `Lv ${s[0]}` : `Lv ${s[0]}–${s[1]}`;
+    const tpl = s[5] === s[6] ? `${s[5]}` : `${s[5]}–${s[6]}`;
+    return `<tr><td class="it-lv">${rng}</td>
+      <td>${esc(str(s[2]))} <span class="num">${esc(str(s[3]))}</span></td>
+      <td>${s[4] !== -1 ? esc(str(s[4])) : "—"}</td>
+      <td><b>${tpl}</b> <span class="num">~${s[7]}</span></td></tr>`;
+  }).join("");
   el.innerHTML = `<section class="card">
-    <div class="card-h"><h2>Where to grind</h2>
-      <span class="note">the fewest battle turns to level any Pokémon — a catch-up tool; the run itself never grinds</span></div>
+    <div class="card-h"><h2>Where to grind — level by level</h2>
+      <span class="note">the fastest wild spot and move for each stretch of levels — a catch-up tool; the run itself never grinds</span></div>
     <div class="train-pick">
       <label>Pokémon <select id="pickSp">${names.map(n => opt(n, pickSpecies, n)).join("")}</select></label>
-      <label>Level <select id="pickLv">${GRIND_LEVELS.map(lv => opt(lv, pickLevel, "Lv " + lv)).join("")}</select></label>
       <div class="grind-toggle" role="group" aria-label="TM policy">${["none", "renew", "any"].map(v =>
         `<button class="gtm${grindTM === v ? " on" : ""}" data-grindtm="${v}">${GRIND_TM_LABEL[v]}</button>`).join("")}</div>
     </div>
-    <div class="train-result">
+    <div class="train-head">
       ${spr ? `<img src="data:image/png;base64,${spr}" alt="">` : `<span class="pb-ball">◓</span>`}
-      ${g ? `<div class="tr-body">
-        <div class="tr-head">${esc(pickSpecies)} <span class="num">Lv ${pickLevel}</span></div>
-        <div class="tr-spot"><b>${esc(str(g[0]))}</b> <span class="num">${esc(str(g[1]))}</span></div>
-        <div class="tr-nums"><b>${g[2]}</b> battle turns / level · ~${g[3]} battle${g[3] === 1 ? "" : "s"} · best move <b>${g[4] !== -1 ? esc(str(g[4])) : "—"}</b></div></div>`
-       : `<div class="tr-none">No reachable grind spot for ${esc(pickSpecies)} around Lv ${pickLevel} — nothing beatable is available yet at this point in the run.</div>`}
-    </div>
-    <p class="grind-note">Assumes you're about where a mon of this level fits in the run (which wild areas are open). It stays with this mon — no switching. Turns are battle turns to gain one full level, from the ROM's experience math; “Any TM” may spend a single-use TM the plan wants elsewhere.</p>
+      <div class="tr-head">${esc(pickSpecies)}</div></div>
+    ${segs.length ? `<table class="grind-tbl it-tbl">
+        <thead><tr><th>Levels</th><th>Where</th><th>Best move</th><th>Turns / lvl · battles</th></tr></thead>
+        <tbody>${rows}</tbody></table>`
+      : `<p class="tr-none">No reachable grind spots for ${esc(pickSpecies)} in range (Lv ${GRIND_RANGE[0]}–${GRIND_RANGE[1]}).</p>`}
+    <p class="grind-note">Turns are battle turns to gain one full level, from the ROM's experience math (no walking time). It stays with this mon — no switching. “Any TM” may spend a single-use TM the plan wants elsewhere; where you're behind, that's usually worth it.</p>
   </section>`;
 }
 document.getElementById("trainPanel").addEventListener("click", ev => {
@@ -3828,9 +3838,8 @@ document.getElementById("trainPanel").addEventListener("click", ev => {
   if (gt){ grindTM = gt.dataset.grindtm; renderTrain(); saveUi(); }
 });
 document.getElementById("trainPanel").addEventListener("change", ev => {
-  if (ev.target.id === "pickSp") pickSpecies = ev.target.value;
-  else if (ev.target.id === "pickLv") pickLevel = parseInt(ev.target.value, 10);
-  else return;
+  if (ev.target.id !== "pickSp") return;
+  pickSpecies = ev.target.value;
   renderTrain();
 });
 
