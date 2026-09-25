@@ -33,6 +33,7 @@ else
   python3 tour.py       # the completionist route: every item, trainer, catch
 fi
 python3 sections.py     # solves every section, battles in ROUTE order
+python3 training.py     # grind calculator: fewest turns/level per party mon
 python3 optimize.py     # per-encounter rankings (reads commitments.json)
 python3 economy.py      # money: prize income vs Game Corner / stone costs
 python3 render_maps.py  # map PNGs from the decomp's tilesets (incremental)

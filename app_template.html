@@ -384,6 +384,17 @@ button{font:inherit;color:inherit}
 .pb-setup{font-size:12px;color:var(--ink-2);line-height:1.45;margin:4px 0 0}
 .pb-master{font-size:11.5px;color:var(--good);font-weight:600;margin:6px 0 0}
 .pb-foss{font-size:12px;color:var(--ink-3);padding:12px 16px 0;line-height:1.45}
+/* Grind (training) card in a section panel */
+.grind-toggle{display:flex;gap:0;margin:0 16px 10px;border:1px solid var(--line);width:max-content;max-width:calc(100% - 32px)}
+.gtm{font-size:11px;padding:5px 11px;background:var(--surface);color:var(--ink-2);border:none;border-right:1px solid var(--line);cursor:pointer}
+.gtm:last-child{border-right:none}
+.gtm.on{background:var(--good);color:#fff;font-weight:600}
+.grind-tbl{width:calc(100% - 32px);margin:0 16px 8px;border-collapse:collapse;font-size:12px}
+.grind-tbl th,.grind-tbl td{border-bottom:1px solid var(--line);padding:5px 8px;text-align:left;vertical-align:baseline}
+.grind-tbl th{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);font-weight:600}
+.grind-tbl td b{font-variant-numeric:tabular-nums}
+.grind-none{color:var(--ink-3);font-style:italic}
+.grind-note{font-size:11px;color:var(--ink-3);padding:0 16px 12px;line-height:1.45}
 .mapwrap{overflow-x:auto;margin:0 16px 14px;border:1px solid var(--line);position:relative;
   border-radius:0;background:var(--surface-2)}
 .mapbox{position:relative;width:max-content}
@@ -979,6 +990,10 @@ const DEX = DATA.dex || [];
    on its Dex row (index 8), so name -> rate -> odds without a JS formula. */
 const CATCH_BY_RATE = DATA.catchByRate || {};
 const PLAYBOOKS = DATA.playbooks || [];
+/* Grind calculator (training.py): fastest wild spot per party mon, keyed
+   "name|level|stage|toggle"; value [area, method, turnsPerLevel, battles, move,
+   encRate]. The run never grinds -- this is a catch-up tool for falling behind. */
+const GRIND = DATA.grind || {};
 const CR_BY_NAME = {};
 // index the pool directly (a Dex name is always a real pool entry): `str` is a
 // const defined further down, so calling it here would hit its dead zone.
@@ -1062,6 +1077,8 @@ const hpColor = p => p > 50 ? "var(--good)" : (p > 15 ? "var(--warn)" : "var(--b
 
 let starter = "Bulbasaur", view = "play";
 let selected = null, selectedSec = 18, selectedLeg = 0, tab = "team";
+/* grind-calculator TM policy: none / renewable-only / any single-use */
+let grindTM = "renew";
 
 /* ---- play-through progress + where-you-were, kept in this browser ---- */
 let DONE = new Set();
@@ -1112,7 +1129,7 @@ function toggleChk(c){
 /* the "||"-joined species keys for a catch stop, for a toggle-all checkbox */
 const allSpeciesKeys = s => catchNames(s).map(n => speciesKey(s, n)).join("||");
 const saveUi = () => { try { localStorage.setItem("lgmax-ui",
-  JSON.stringify({view, starter, trading, sec: selectedSec, leg: selectedLeg, enc: selected})); } catch (e) {} };
+  JSON.stringify({view, starter, trading, sec: selectedSec, leg: selectedLeg, enc: selected, grindTM})); } catch (e) {} };
 try {
   const u = JSON.parse(localStorage.getItem("lgmax-ui") || "null");
   if (u){
@@ -1122,6 +1139,7 @@ try {
     if (typeof u.leg === "number") selectedLeg = u.leg;
     if (["enc","sec","tm","cat","cho","play","dex","money"].includes(u.view)) view = u.view;
     if (typeof u.enc === "string") selected = u.enc;
+    if (["none","renew","any"].includes(u.grindTM)) grindTM = u.grindTM;
   }
 } catch (e) {}
 let active = new Set(["boss","rival","trainer","wild"]);
@@ -1612,6 +1630,15 @@ const flashEl = el => {
   el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
 };
 document.getElementById("secPanel").addEventListener("click", ev => {
+  const gt = ev.target.closest("[data-grindtm]");
+  if (gt){
+    grindTM = gt.dataset.grindtm;
+    const y = window.scrollY;
+    renderSecPanel(selectedSec, selectedLeg);
+    window.scrollTo(0, y);
+    saveUi();
+    return;
+  }
   const z = ev.target.closest(".zoomb");
   if (z){
     MAPZOOM = z.dataset.zoom;
@@ -1710,6 +1737,40 @@ function wildPlanCard(d){
   return `<section class="card"><div class="card-h"><h2>Wild encounters</h2>
     <span class="note">what your point Pokémon uses on the grass while you walk — its PP is already spent in the section plan</span></div>
     <div class="wp-wrap">${inner}</div></section>`;
+}
+
+/* Scope A of the grind calculator: for this section's party, the fastest wild
+   spot to level each mon (fewest battle turns per level), under the chosen TM
+   policy. A catch-up aid — the run itself never grinds. Lookups are keyed
+   name|level|stage|toggle to match training.py; a value is
+   [area, method, turnsPerLevel, battles, move, encRate]. */
+function grindCard(d, L, id){
+  const team = (L && L.team) || [];
+  if (!team.length) return "";
+  const rows = team.map(t => {
+    const nm = str(t[0]), lv = t[2];
+    const g = GRIND[`${nm}|${lv}|${id}|${grindTM}`];
+    if (!g) return `<tr><td>${esc(nm)} <span class="num">Lv ${lv}</span></td>
+      <td colspan="3" class="grind-none">no reachable grind spot at this point</td></tr>`;
+    return `<tr>
+      <td>${esc(nm)} <span class="num">Lv ${lv}</span></td>
+      <td>${esc(str(g[0]))} <span class="num">${esc(str(g[1]))}</span></td>
+      <td><b>${g[2]}</b> <span class="num">~${g[3]} battle${g[3] === 1 ? "" : "s"}</span></td>
+      <td>${g[4] !== -1 ? esc(str(g[4])) : "—"}</td></tr>`;
+  }).join("");
+  const btn = (v, lbl, tip) => `<button class="gtm${grindTM === v ? " on" : ""}" data-grindtm="${v}" title="${esc(tip)}">${lbl}</button>`;
+  return `<section class="card grind-card">
+    <div class="card-h"><h2>Behind on levels? Fastest places to grind</h2>
+      <span class="note">only for catching up if you've fallen behind the level targets — the run itself never grinds</span></div>
+    <div class="grind-toggle" role="group" aria-label="TM policy">
+      ${btn("none", "No TMs", "level-up and HM moves only")}${
+        btn("renew", "Renewable TMs", "also restockable Dept.-store / Game Corner TMs")}${
+        btn("any", "Any TM", "also single-use TMs — may spend one the plan wants elsewhere")}</div>
+    <table class="grind-tbl">
+      <thead><tr><th>Pokémon</th><th>Best spot</th><th>Battle turns / level</th><th>Best move</th></tr></thead>
+      <tbody>${rows}</tbody></table>
+    <p class="grind-note">Turns are battle turns to gain one full level, from the ROM's experience math (no walking time). It stays with this mon — no switching to a stronger sweeper.</p>
+  </section>`;
 }
 
 function renderSecPanel(id, leg){
@@ -2069,6 +2130,7 @@ function renderSecPanel(id, leg){
       ${doneCount ? `<button class="hdone" aria-pressed="${HIDEDONE}">hide done (${doneCount})</button>` : ""}</div>
     ${listHtml}</section>`;
   html += wildPlanCard(d);
+  html += grindCard(d, L, id);
   // shown on the section's LAST leg only, where they're also counted toward 100%
   { const de = isLastLeg(d, k) ? dexEvoHtml(d) : "";
     if (de) html += `<section class="card"><div class="card-h"><h2>Pokédex progress</h2>

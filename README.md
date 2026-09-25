@@ -76,7 +76,7 @@ them.
 | `render_maps.py` | renders each section's maps to PNG from the decomp's tilesets/layouts, and pins every trainer to the tile its object event stands on |
 | `sections.py` | two-pass per-section party optimizer + choice evaluation |
 | `compact.py` | array-encoded payload (~25 MB → ~5 MB) |
-| `verify.py` | **75 guard rails; all must pass after every rebuild** |
+| `verify.py` | **78 guard rails; all must pass after every rebuild** |
 | `setup_study.py` | standalone: does setting up beat hit-and-switch? (it does not) |
 
 `sections.py` runs before `optimize.py` because it writes `data/commitments.json`, which the

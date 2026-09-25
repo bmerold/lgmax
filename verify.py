@@ -850,6 +850,39 @@ check("the capture formula matches the ROM at its anchors",
       and CAP.catch_chance(3, "Master", 1.0) == 1.0,
       f"cr3poke={CAP.catch_chance(3, 'Poke', 1.0):.4f}")
 
+# ------------------------------------------------------------------ grind calc
+# The training calculator's fastest-grind spots (training.py): each resolved one
+# names a real wild area with positive turns/level and >=1 battle; giving a mon
+# MORE move freedom (none -> renewable -> any TM) never makes its best grind
+# slower (the engine only ever adds better attacking options); and every section
+# party mon has a lookup for every TM policy, so the app's rows never come up
+# empty for a reason other than "no reachable area".
+_grind = _pl.get("grind", {})
+_gv = [v for v in _grind.values() if v]     # [area, method, tpl, battles, move, encRate]
+check("every resolved grind spot has positive turns and a real area",
+      bool(_gv) and all(v[2] > 0 and v[3] >= 1 and v[0] != -1 for v in _gv))
+_g_bases = {k.rsplit("|", 1)[0] for k in _grind}
+_g_mono = []
+for _b in _g_bases:
+    _n, _r, _a = _grind.get(_b + "|none"), _grind.get(_b + "|renew"), _grind.get(_b + "|any")
+    if _r and _n and _r[2] > _n[2] + 0.2:
+        _g_mono.append(_b)
+    if _a and _r and _a[2] > _r[2] + 0.2:
+        _g_mono.append(_b)
+check("more TM freedom never makes the best grind slower", not _g_mono, str(_g_mono[:4]))
+_g_missing = set()
+for _mode in _pl.get("sections", {}).values():
+    for _per in _mode.values():
+        for _stg, _sec in _per.items():
+            for _leg in _sec.get("legs", []):
+                for _t in _leg.get("team", []):
+                    _key = f"{_pool[_t[0]]}|{_t[2]}|{_stg}"
+                    for _tg in ("none", "renew", "any"):
+                        if f"{_key}|{_tg}" not in _grind:
+                            _g_missing.add(_key)
+check("every party mon has a grind lookup for every TM policy",
+      not _g_missing, str(sorted(_g_missing)[:5]))
+
 print()
 if fails:
     print(f"{len(fails)} check(s) FAILED")

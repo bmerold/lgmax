@@ -538,6 +538,16 @@ def main():
     # as-is rather than through the string pool.
     economy = json.load(open(f"{OUT}/economy.json")) if os.path.exists(f"{OUT}/economy.json") else {}
 
+    # ---- grind calculator (training.py): the fewest-turns-per-level wild spot for
+    # each party mon, per TM toggle. Keyed "name|level|stage|toggle"; each value
+    # packs [area, method, turnsPerLevel, battles, move, encounterRate] (pooled).
+    _grind_raw = (json.load(open(f"{OUT}/training.json"))["grind"]
+                  if os.path.exists(f"{OUT}/training.json") else {})
+    grind = {_k: (None if not _v else
+                  [S(_v["area"]), S(_v["method"]), _v["turnsPerLevel"], _v["battles"],
+                   S(_v.get("move")), _v.get("encRate") or 0])
+             for _k, _v in _grind_raw.items()}
+
     # Level targets: the assumed party level on arrival at each gym (and the
     # League), straight from progression.STAGES. The run never grinds, so a
     # stage's level IS the "be at least this by here" number. [leaderIdx, level,
@@ -552,6 +562,7 @@ def main():
                "ow": ow, "owByMap": ow_by_map, "dex": dex,
                "economy": economy, "levelTargets": level_targets,
                "catchByRate": catch_by_rate, "playbooks": playbooks,
+               "grind": grind,
                "route": {"total": route["stepTotal"]},
                "sections": out_sections, "choices": choices,
                "commitments": secs.get("tradeCommitments", {}),
