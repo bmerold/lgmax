@@ -56,35 +56,47 @@ STATIC_MON_GFX = {
 }
 
 # One-time events with no sprite of their own to find: gift Pokémon, key
-# hand-outs, the choices. Anchored inside the door of the map they happen in
-# (or at given coords); the stage is when the story hands them out.
+# hand-outs, the choices. The 4th field, when present, is a substring of the
+# giver's object-event `script` label (the same anchoring INGAME_TRADE_NPC uses):
+# the stop pins on the NPC who hands the thing over -- so render_maps draws that
+# NPC's own overworld sprite on their tile and the walk routes to them -- instead
+# of falling back to the map's door. Choices spread across several prop balls
+# (the starter, the Fighting Dojo) and pure map puzzles (Surge's trash cans) name
+# no single giver and stay door-anchored. Stage is when the story hands them out.
 EVENTS = [
     ("Choose your starter", "PalletTown_ProfessorOaksLab", 0),
+    # the Mart clerk stands behind the counter -- no tile beside them to talk
+    # from -- so this stays door-anchored (no NPC sprite), like every over-the-
+    # counter clerk (the Bike Shop, the Game Corner prize desk)
     ("Oak's Parcel from the Mart clerk", "ViridianCity_Mart", 1),
-    ("Deliver the Parcel — Pokédex from Oak", "PalletTown_ProfessorOaksLab", 1),
+    ("Deliver the Parcel — Pokédex from Oak", "PalletTown_ProfessorOaksLab", 1, "ProfOak"),
     ("Town Map from Daisy", "PalletTown_RivalsHouse", 1, "Daisy"),
     ("Old Amber from the scientist", "PewterCity_Museum_1F", 4, "OldAmberScientist"),
     ("Helix or Dome Fossil (pick one)", "MtMoon_B2F", 5, "Fossil"),
     # the salesman shares the Route 4 Center the walk heals at BEFORE Mt.
     # Moon -- buy on the way in, not on some later loop back
-    ("Buy the Magikarp (500)", "Route4_PokemonCenter_1F", 5),
+    ("Buy the Magikarp (500)", "Route4_PokemonCenter_1F", 5, "MagikarpSalesman"),
     ("S.S. Ticket from Bill", "Route25_SeaCottage", 7, "Bill"),
-    ("Bike Voucher from the Fan Club", "VermilionCity_PokemonFanClub", 9),
+    ("Bike Voucher from the Fan Club", "VermilionCity_PokemonFanClub", 9, "Chairman"),
     # the shop only hands the Bicycle over FOR the Vermilion voucher, so the
     # pickup waits for the next natural pass through Cerulean -- stage 13
     # leaves for Routes 9-10 from Cerulean's east side
-    ("Bicycle from the Bike Shop", "CeruleanCity_BikeShop", 13),
+    ("Bicycle from the Bike Shop", "CeruleanCity_BikeShop", 13),  # over-the-counter clerk: door-anchored
     ("Powder Jar from the Berry lady", "CeruleanCity_House5", 6, "BerryPowderMan"),
-    ("Old Rod", "VermilionCity_House1", 9),
-    ("HM01 Cut from the Captain", "SSAnne_CaptainsOffice", 10),
+    ("Old Rod", "VermilionCity_House1", 9, "FishingGuru"),
+    ("HM01 Cut from the Captain", "SSAnne_CaptainsOffice", 10, "Captain"),
     ("Trash-can switches (open Surge's door)", "VermilionCity_Gym", 11),
-    ("Itemfinder from Oak's aide", "Route11_EastEntrance_2F", 12),
-    ("HM05 Flash from Oak's aide (10 owned)", "Route2_EastBuilding", 12),
+    ("Itemfinder from Oak's aide", "Route11_EastEntrance_2F", 12, "Aide"),
+    ("HM05 Flash from Oak's aide (10 owned)", "Route2_EastBuilding", 12, "Aide"),
     ("Tea from the old lady (opens Saffron's gates)", "CeladonCity_Condominiums_1F", 15, "TeaWoman"),
     ("Everstone from the collector", "Route10_PokemonCenter_1F", 13, "Gentleman"),
-    ("Coin Case from the gambler", "CeladonCity_Restaurant", 15),
+    ("Coin Case from the gambler", "CeladonCity_Restaurant", 15, "CoinCaseMan"),
+    # the three prize clerks stand behind the counter (no tile beside them), so
+    # this stays door-anchored like the other over-the-counter clerks
     ("Game Corner prize (one pick)", "CeladonCity_GameCorner_PrizeRoom", 15),
-    ("Eevee on the Condominiums roof", "CeladonCity_Condominiums_RoofRoom", 15),
+    # the Eevee is a gift Poké Ball on the roof (..._EventScript_EeveeBall), so it
+    # shows the item-ball sprite, not an NPC
+    ("Eevee on the Condominiums roof", "CeladonCity_Condominiums_RoofRoom", 15, "EeveeBall"),
     # the Ghost Marowak on Pokémon Tower 6F blocks the climb: a scripted
     # setwildbattle (SPECIES_MAROWAK, 30) you must defeat, and only the Silph
     # Scope (from Giovanni in the Rocket Hideout, stage 17) lets you fight it.
@@ -100,13 +112,13 @@ EVENTS = [
     # top (stage 18, the climb's climax), and the walk resumes from his house.
     ("Poké Flute from Mr. Fuji", "PokemonTower_7F", 18, "MrFuji", "event",
      ("LavenderTown_VolunteerPokemonHouse", 4, 7)),
-    ("Super Rod", "Route12_FishingHouse", 19),
-    ("TM27 Return from the gate girl", "Route12_NorthEntrance_2F", 19),
-    ("Exp. Share from Oak's aide (50 owned)", "Route15_WestEntrance_2F", 19),
-    ("HM02 Fly from the trapped girl", "Route16_House", 20),
-    ("Amulet Coin from Oak's aide (40 owned)", "Route16_NorthEntrance_2F", 20),
-    ("Good Rod", "FuchsiaCity_House2", 21),
-    ("HM03 Surf in the Secret House", "SafariZone_SecretHouse", 21),
+    ("Super Rod", "Route12_FishingHouse", 19, "FishingGuruBrother"),
+    ("TM27 Return from the gate girl", "Route12_NorthEntrance_2F", 19, "Lass"),
+    ("Exp. Share from Oak's aide (50 owned)", "Route15_WestEntrance_2F", 19, "Aide"),
+    ("HM02 Fly from the trapped girl", "Route16_House", 20, "Woman"),
+    ("Amulet Coin from Oak's aide (40 owned)", "Route16_NorthEntrance_2F", 20, "Aide"),
+    ("Good Rod", "FuchsiaCity_House2", 21, "FishingGurusBrother"),
+    ("HM03 Surf in the Secret House", "SafariZone_SecretHouse", 21, "Attendant"),
     ("HM04 Strength for the Gold Teeth", "FuchsiaCity_WardensHouse", 21, "Warden"),
     ("Lapras from the Silph employee", "SilphCo_7F", 23, "LaprasGuy"),
     ("Master Ball from the President", "SilphCo_11F", 23, "President"),
@@ -120,7 +132,7 @@ EVENTS = [
     ("Togepi egg from the caretaker", "FiveIsland_WaterLabyrinth", 33, "EggGentleman"),
     ("TM42 Facade for a Lemonade", "FiveIsland_MemorialPillar", 33, "MemorialMan"),
     ("Take the Ruby", "MtEmber_RubyPath_B3F", 33),
-    ("The Sapphire from Gideon", "FiveIsland_RocketWarehouse", 33),
+    ("The Sapphire from Gideon", "FiveIsland_RocketWarehouse", 33, "Gideon"),
     ("Ruby and Sapphire to Celio — trading unlocked", "OneIsland_PokemonCenter_1F", 33, "Celio"),
     # The Lift Key operates the Rocket Hideout elevator. It's a giveitem ball
     # (skipped by the finditem harvest), and it's the gate: B4F's right wing --

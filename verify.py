@@ -585,6 +585,39 @@ for _st in _routej["stages"]:
             _item_nosprite.append((_st["stage"], _s["map"], _s["what"]))
 check("every item ball on the route carries its overworld sprite",
       not _item_nosprite, str(_item_nosprite[:4]))
+# Every interacted-NPC stop -- a gift/HM/story event that names its giver, plus
+# every in-game trade -- must show that NPC's real overworld sprite on their tile,
+# standing on ground the walk can reach. This locks the script-substring anchors
+# (the 4th field of tour.EVENTS and INGAME_TRADE_NPC): a typo that stopped matching
+# would silently fall back to the map's door and drop the sprite. Scripted one-offs
+# (the Ghost Marowak coord_event) have no object-event sprite and are exempt above.
+_giver_labels = {(ev[1], ev[0]) for ev in TOUR.EVENTS
+                 if len(ev) > 3 and ev[3] and (len(ev) <= 4 or ev[4] == "event")}
+_giver_labels |= {(m, f"Trade for {got} (give {give})")
+                  for got, give, _s2, m, _n2 in TOUR.INGAME_TRADE_STOPS}
+_npc_bad = []
+for _st in _routej["stages"]:
+    for _s in _st["steps"]:
+        if (_s["map"], _s["what"]) not in _giver_labels: continue
+        _ax, _ay = _s["at"][0], _s["at"][1]
+        _a = _owby.get(_s["map"], {}).get(f"{_ax},{_ay}")
+        if not _a or _a[0] not in _ow:
+            _npc_bad.append((_s["map"], _s["what"], "no sprite")); continue
+        # you must be able to stand next to the giver: an orthogonal neighbour is
+        # walkable AND not itself an object body (an NPC stands ON a solid tile,
+        # so _tile_open alone -- which ignores bodies -- isn't enough; the walk
+        # talks from the open tile beside them). Counter clerks fail this, which
+        # is why they stay door-anchored and out of _giver_labels above.
+        _g = WORLD.grid(_s["map"]); _surf = WORLD._surf_ok(_g, _st["stage"])
+        _stand = any(
+            _g.inb(_ax + dx, _ay + dy)
+            and WORLD._tile_open(_g, _ax + dx, _ay + dy, _st["stage"], _surf)
+            and (_ax + dx, _ay + dy) not in _g.bodies
+            for dx, dy in WORLD.DIRS)
+        if not _stand:
+            _npc_bad.append((_s["map"], _s["what"], "no reachable tile"))
+check("every interacted-NPC stop shows its giver's overworld sprite on a reachable tile",
+      not _npc_bad, str(_npc_bad[:4]))
 
 # Moon Stones are finite: a party can only hold as many stone evolutions as
 # the route has picked up stones by that stage.
