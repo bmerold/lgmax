@@ -974,7 +974,14 @@ def solve(max_stage=34, verbose=True):
         # the town you're working out of, i.e. the one nearest where you're
         # STANDING, never one near the target. Both depart from the open air only.
         fly = stage >= P.HM_STAGE["FLY"]
-        teleport = (stage >= TELEPORT_STAGE) and not fly
+        # Teleport shortcut is disabled: the suggested party is not guaranteed to
+        # carry Teleport, and its true landing (the Center you LAST HEALED at) can't
+        # be resolved from tile geometry here -- the nearest-to-departure Center is
+        # often the wrong town (Route 12 resolves to Vermilion, not Lavender). So
+        # the route walks those legs instead of printing a wrong "use Teleport"
+        # step. Fly (a guaranteed HM) and Dig still apply. (Backlog: a proper
+        # Teleport model would thread last-healed state and force a carrier.)
+        teleport = False
         cdist, cparent, centers = {}, {}, []
         if fly or teleport:
             centers = [c for c in WD.center_nodes() if WD._open_map(c[0], stage)]

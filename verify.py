@@ -284,30 +284,19 @@ check("the Pokemon assigned an HM can actually learn it",
       not cant_learn, str(cant_learn[:4]))
 
 # ------------------------------------------------------------------ Teleport
-# Teleport shortcuts the walk back to a Pokémon Center, so the route uses it and
-# the party carries a Teleport user for those legs -- treated like an HM, but a
-# level-up move (the Abra line in Kanto), not an HM item.
-import sections as SEC
+# Teleport is DISABLED as a routing shortcut: the suggested party isn't guaranteed
+# to carry it, and its real destination (the last-healed Center, not the nearest
+# one to where you stand) can't be resolved from the route geometry. So the route
+# must never tell you to Teleport, and no section may claim a Teleport carrier. If
+# Teleport is reintroduced, restore the carrier/destination legality checks here.
 _tele_route = {st["stage"] for st in json.load(open(f"{OUT}/route.json"))["stages"]
                if st.get("teleport")}
-check("the route uses Teleport to shorten some legs", bool(_tele_route),
-      "no stage teleports")
-_tele_bad, _tele_offroute = [], []
-for starter, per_stage in raw["sections"].items():
-    for st, sec in per_stage.items():
-        if not sec: continue
-        tp = sec.get("teleport")
-        if not tp: continue
-        # only claimed where the route actually teleports
-        if int(st) not in _tele_route:
-            _tele_offroute.append((starter, int(st)))
-        # and the carrier is a real Teleport learner
-        if tp["species"] not in SEC.TELE_LEARNERS:
-            _tele_bad.append((starter, int(st), tp["by"]))
-check("Teleport is only carried on legs the route teleports on",
-      not _tele_offroute, str(_tele_offroute[:4]))
-check("the Pokemon carrying Teleport can actually learn it",
-      not _tele_bad, str(_tele_bad[:4]))
+check("the route never uses the (disabled) Teleport shortcut", not _tele_route,
+      f"stages {sorted(_tele_route)}")
+_tele_claims = [(starter, int(st)) for starter, per_stage in raw["sections"].items()
+                for st, sec in per_stage.items() if sec and sec.get("teleport")]
+check("no section claims a Teleport carrier while Teleport is disabled",
+      not _tele_claims, str(_tele_claims[:4]))
 
 # ------------------------------------------------------------------ walk order
 # The completionist route decides the order battles happen in, and the

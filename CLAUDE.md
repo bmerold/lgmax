@@ -10,7 +10,7 @@ the working contract for changing the code.
    trainer parties, encounter tables, map geometry, item scripts, mechanics — all parsed from
    `$LGMAX_POKEFIRERED` (default `~/pokefirered`). If the ROM disagrees with received wisdom, the
    ROM wins, and a comment should cite the source file (e.g. `src/data/…` or a map's `scripts.inc`).
-2. **`verify.py` is the safety net — it must print all OKs after every rebuild.** It encodes 79
+2. **`verify.py` is the safety net — it must print all OKs after every rebuild.** It encodes 78
    executable invariants (route coverage/continuity, no illegal party, sight-line/aggro legality,
    Fly/Teleport/Dig legality,
    move/TM/HM legality, Moon-Stone accounting, prize-money/affordability, Teleport-carrier
