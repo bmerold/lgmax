@@ -364,6 +364,171 @@ def candidates(stage, allow_trade=None):
         out.append(sp)
     return out
 
+# ------------------------------------------------------------------ double battles
+# FRLG marks a trainer battle double with `.doubleBattle = TRUE` on struct Trainer
+# (include/battle.h). Every such entry is a paired-NPC class -- Twins, Young Couple,
+# Cool Couple, Crush Kin, Sis and Bro -- whose two on-map sprites both run
+# `trainerbattle_double` against one 2-mon party (data/scripts/trainers.inc, plus
+# VictoryRoad_3F for Ray & Tyra). So a double always fields TWO of your Pokemon
+# against exactly TWO foes at once; the 1v1 sweep recommends a single sweeper,
+# which under-serves it. This scores and names the PAIR to lead with.
+DOUBLE_ROUND_CAP = 40          # a pair that can't clear two foes in 40 rounds is unusable
+
+def _double_dir(attacker, defender, pool, badges, obey=1.0):
+    """One direction of a 2v2 exchange: the expected damage `attacker` lands on
+    `defender` in a round it acts (accuracy folded in as in sweep, obedience
+    charged as a damage divisor -- a traded mon over its badge cap wastes rounds).
+    `badges` carries only the half that applies in this direction: atk/spatk when
+    the attacker is yours, def/spdef (the DEFENDER's own) when the foe swings, so
+    best_move never boosts the wrong side (same split sweep uses). Returns
+    (dmgPerRound, moveProfile), or None if it cannot damage `defender`."""
+    off = E.best_move(attacker, defender, badges=badges, moves=pool)
+    if off is None:
+        return None
+    # spread a charge/recharge move (Solar Beam, Hyper Beam) across the rounds it
+    # actually occupies, so its per-round output is honest in a sustained 2v2
+    per_round = off["avg"] * off["accuracy"] / 100.0 / max(off.get("turnsPerUse", 1.0), 1.0)
+    return per_round / max(obey, 1e-6), off
+
+def _simulate_double(mine, foes, badges):
+    """Round-based expected-value model of a 2-vs-2 opening. All four mons act
+    once per round in effective-speed order (Gen 3 doubles resolve every mon each
+    turn); each of your two focuses a foe and retargets the survivor when its own
+    target drops, and each foe fires at whichever of your two it hurts the largest
+    share of. Damage is expected per round, so a foe with H HP taking d/round falls
+    after about H/d rounds. Returns rounds to clear both foes, the share of your
+    pair's HP spent, how many of your two faint, and each mon's opener -- or None
+    if the pair cannot clear both foes inside the cap. Deliberately coarser than
+    the 1v1 DP: expected per-round damage rather than the exact turn distribution,
+    no crit/secondary-status tempo cross-terms, and no spread-move split."""
+    off_b = {"atk": badges.get("atk", False), "spatk": badges.get("spatk", False)}
+    def_b = {"def": badges.get("def", False), "spdef": badges.get("spdef", False)}
+    you_dmg = [[None, None], [None, None]]      # you_dmg[i][j]: your mon i -> foe j
+    you_move = [[None, None], [None, None]]
+    foe_dmg = [[0.0, 0.0], [0.0, 0.0]]          # foe_dmg[j][i]: foe j -> your mon i
+    for i, m in enumerate(mine):
+        for j, f in enumerate(foes):
+            pl, opp = E.with_entry_boosts(m["mon"], f)
+            d = _double_dir(pl, opp, m["pool"], off_b, m["obey"])
+            if d: you_dmg[i][j], you_move[i][j] = d
+        for j, f in enumerate(foes):
+            pl, opp = E.with_entry_boosts(m["mon"], f)   # foe j swings at your mon i
+            d = _double_dir(opp, pl, opp["moves"], def_b)
+            foe_dmg[j][i] = d[0] if d else 0.0
+    # a mon that scratches NEITHER foe is dead weight; a foe NEITHER of you can
+    # touch can never be cleared -- either way this pairing is not a real answer
+    if any(you_dmg[i][0] is None and you_dmg[i][1] is None for i in (0, 1)):
+        return None
+    if any(you_dmg[0][j] is None and you_dmg[1][j] is None for j in (0, 1)):
+        return None
+    ymax = [m["mon"]["stats"]["hp"] * 1.0 for m in mine]
+    yspe = [E.effective_speed(m["mon"]) for m in mine]
+    fspe = [E.effective_speed(f) for f in foes]
+    best = None
+    for assign in ((0, 1), (1, 0)):             # which mon primaries which foe
+        ytgt = list(assign)
+        # fix an opener aimed at a foe it can't touch when the other is hittable
+        for i in (0, 1):
+            if you_dmg[i][ytgt[i]] is None and you_dmg[i][1 - ytgt[i]] is not None:
+                ytgt[i] = 1 - ytgt[i]
+        yhp = list(ymax)
+        fhp = [f["stats"]["hp"] * 1.0 for f in foes]
+        rounds, cleared = 0, False
+        while rounds < DOUBLE_ROUND_CAP:
+            actors = ([("y", i, yspe[i]) for i in (0, 1) if yhp[i] > 0]
+                      + [("f", j, fspe[j]) for j in (0, 1) if fhp[j] > 0])
+            # resolve fastest first; assume you LOSE speed ties (foe acts first),
+            # so the HP estimate is never rosier than the real fight
+            actors.sort(key=lambda a: (-a[2], 0 if a[0] == "f" else 1))
+            for side, k, _ in actors:
+                if side == "y":
+                    if yhp[k] <= 0: continue
+                    t = ytgt[k]
+                    if fhp[t] <= 0 or you_dmg[k][t] is None:
+                        t = 1 - t
+                        if fhp[t] <= 0 or you_dmg[k][t] is None: continue
+                    fhp[t] -= you_dmg[k][t]
+                else:
+                    if fhp[k] <= 0: continue
+                    alive = [i for i in (0, 1) if yhp[i] > 0]
+                    if not alive: continue
+                    t = max(alive, key=lambda i: foe_dmg[k][i] / ymax[i])
+                    yhp[t] -= foe_dmg[k][t]
+            rounds += 1
+            if fhp[0] <= 0 and fhp[1] <= 0: cleared = True; break
+            if yhp[0] <= 0 and yhp[1] <= 0: break
+        if not cleared: continue
+        faints = sum(1 for h in yhp if h <= 0)
+        hp_pct = sum(max(0.0, ymax[i] - yhp[i]) for i in (0, 1)) / max(1e-6, sum(ymax)) * 100.0
+        key = (faints, rounds, hp_pct)
+        if best is None or key < best[0]:
+            best = (key, ytgt, rounds, faints, hp_pct)
+    if best is None:
+        return None
+    _, ytgt, rounds, faints, hp_pct = best
+    members = []
+    for i, m in enumerate(mine):
+        t = ytgt[i] if you_move[i][ytgt[i]] else (1 - ytgt[i])
+        mv = you_move[i][t]
+        members.append({"species": m["sp"], "target": t,
+                        "move": mv["name"] if mv else None,
+                        "moveType": mv["type"] if mv else None,
+                        "eff": mv["effectiveness"] if mv else 1})
+    return {"rounds": rounds, "faints": faints, "takenPct": round(hp_pct, 1),
+            "survives": faints == 0, "members": members}
+
+def double_plan(opp_mons, evaluated, level, stage, badges):
+    """Pick the PAIR of Pokemon to lead a double-battle trainer with, scored by
+    the 2v2 model. Candidates are the finalists the 1v1 pass already evaluated,
+    which include each foe's own best answers. The pair is built starter- and
+    trade-agnostic (starter lines and trade evolutions dropped) so one canonical
+    recommendation is valid for every reader -- a double's answerers are route
+    coverage mons, never a starter. Pairs repeating an evolution line are skipped,
+    as everywhere. Returns a compact block for the page, or None."""
+    if len(opp_mons) != 2:
+        return None
+    cands = [sp for sp in evaluated
+             if not C.starter_of(sp) and not AVAIL[sp].get("requiresTrade")]
+    # ground the tie-break in 1v1 sweep quality so equally-clean pairs prefer the
+    # mons you would actually be carrying, not whoever sorts first alphabetically
+    solo_turns = {sp: evaluated[sp]["turns"] for sp in cands}
+    prof = {}
+    for sp in cands:
+        pm = player_mon(sp, level)
+        # a "field these two" pair should win by sustained output, so drop
+        # Self-Destruct/Explosion from its own choices -- a mon that can only
+        # answer a foe by KOing itself is not the pair you lead a double with
+        pool = [mv for mv in move_pool(sp, level, stage)
+                if E.MOVES.get(mv, {}).get("effect") != "EXPLOSION"]
+        prof[sp] = {"sp": sp, "mon": pm, "pool": pool, "obey": obey_mult(pm, badges)}
+    best = None
+    for a in range(len(cands)):
+        for b in range(a + 1, len(cands)):
+            spA, spB = cands[a], cands[b]
+            if C.line_root(spA) == C.line_root(spB):
+                continue          # a run carries only one form of an evolution line
+            sim = _simulate_double([prof[spA], prof[spB]], opp_mons, badges)
+            if sim is None: continue
+            key = (sim["faints"], sim["rounds"], sim["takenPct"],
+                   round(solo_turns[spA] + solo_turns[spB], 2),
+                   E.SPECIES[spA]["name"], E.SPECIES[spB]["name"])
+            if best is None or key < best[0]:
+                best = (key, sim)
+    if best is None:
+        return None
+    sim = best[1]
+    out = {"rounds": sim["rounds"], "takenPct": sim["takenPct"],
+           "survives": sim["survives"], "faints": sim["faints"], "members": []}
+    for mem in sim["members"]:
+        sp = mem["species"]
+        out["members"].append({
+            "species": sp, "name": E.SPECIES[sp]["name"],
+            "types": [t for i, t in enumerate(E.SPECIES[sp]["types"])
+                      if i == 0 or t != E.SPECIES[sp]["types"][0]],
+            "target": opp_mons[mem["target"]]["name"],
+            "move": mem["move"], "moveType": mem["moveType"], "eff": mem["eff"]})
+    return out
+
 # ------------------------------------------------------------------ per-encounter
 def analyze(enc, allow_trade=False):
     stage = enc["stage"]
@@ -479,8 +644,14 @@ def analyze(enc, allow_trade=False):
             "chance": round(weight * 100, 1) if weighted else None,
             "best": rows[:9],
         })
-    return {"team": ranked, "counters": counters,
-            "playerLevel": level, "badges": badges["count"]}
+    out = {"team": ranked, "counters": counters,
+           "playerLevel": level, "badges": badges["count"]}
+    # A double-battle trainer (`.doubleBattle = TRUE`, include/battle.h) fields two
+    # of your Pokemon at once, so name the PAIR rather than one sweeper.
+    if enc.get("doubleBattle") and not weighted and len(opp_mons) == 2:
+        dbl = double_plan(opp_mons, evaluated, level, stage, badges)
+        if dbl: out["double"] = dbl
+    return out
 
 def _weighted_sweep(player, opps, pool, badges):
     """Wild areas: one encounter at a time, weighted by how often each shows up."""
