@@ -101,7 +101,13 @@ MAP_STAGE = {
     "ROUTE16": 20, "ROUTE17": 20, "ROUTE18": 20,
     "FUCHSIA_CITY": 21, "SAFARI_ZONE_CENTER": 21, "SAFARI_ZONE_EAST": 21,
     "SAFARI_ZONE_NORTH": 21, "SAFARI_ZONE_WEST": 21,
-    "SAFFRON_CITY": 23,
+    # Saffron opens for TRANSIT once you hand a gate guard the Tea from the
+    # Celadon Condominiums (stage 15; the gate scripts check FLAG_GOT_TEA), not
+    # at the Silph/Sabrina story (23). Opening it here lets the walk cut straight
+    # through Saffron instead of the long Rock Tunnel backtrack -- Silph Co., the
+    # gym and the Dojo stay gated by LOCATION_STAGE (23/24), so only the outdoor
+    # city opens early.
+    "SAFFRON_CITY": 16,
     "ROUTE19": 25, "ROUTE20": 25, "ROUTE21_NORTH": 25, "ROUTE21_SOUTH": 25,
     "SEAFOAM_ISLANDS_1F": 25, "SEAFOAM_ISLANDS_B1F": 25, "SEAFOAM_ISLANDS_B2F": 25,
     "SEAFOAM_ISLANDS_B3F": 25, "SEAFOAM_ISLANDS_B4F": 25,
