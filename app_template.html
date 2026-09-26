@@ -1154,15 +1154,23 @@ const stopKey = s => [str(s[0]), str(s[1]), s[2], s[3], s[4]].join("|");
    name is the species string with its "(NN%)" odds suffix stripped. */
 const catchNames = s => (s[8] || []).map(x => str(x).split(" (")[0].trim());
 const speciesKey = (s, name) => stopKey(s) + "|" + name;
-/* Stop completion: a catch stop is done when EVERY species in it is ticked; any
-   other stop when its own key is ticked AND any catch sub-tasks it carries are
-   done too. An in-game-trade stop is the latter: its trade action plus a box for
-   the give-away species you must obtain to hand over. Used by every counter. */
+/* Does a stop have its OWN action checkbox, separate from any species it lists?
+   A catch stop and a static-mon catch (Snorlax, the legendaries) are their
+   species -- no separate box. An in-game trade keeps its own box (do the trade)
+   ALONGSIDE the give-away species. Everything else (item, heal, event) has just
+   its own box and no species. */
+const hasOwnAction = s => {
+  if (str(s[0]) === "catch") return false;
+  if (!(s[8] || []).length) return true;
+  return (str(s[1]) || "").startsWith("Trade for");
+};
+/* Stop completion: species sub-tasks (if any) must all be ticked, plus the stop's
+   own action box when it has one. Used by every progress counter. */
 const stopDone = s => {
   const names = catchNames(s), speciesOK = names.every(n => DONE.has(speciesKey(s, n)));
-  return str(s[0]) === "catch"
-    ? (names.length > 0 && speciesOK)
-    : (DONE.has(stopKey(s)) && speciesOK);
+  return hasOwnAction(s)
+    ? (DONE.has(stopKey(s)) && speciesOK)
+    : (names.length > 0 && speciesOK);
 };
 /* Toggle a checkbox: a plain one flips its own data-key; a "toggle-all" one
    (data-allkeys, "||"-joined) flips every key together -- on if any is off,
@@ -1626,15 +1634,12 @@ function legProgress(d, k, L){
   let done = 0, total = 0;
   for (const s of (L && L.rt) || []){
     const names = catchNames(s);
-    if (str(s[0]) === "catch"){
-      total += names.length;
-      done += names.filter(n => DONE.has(speciesKey(s, n))).length;
-    } else {
-      // the stop's own action, plus any give-away species (in-game trades)
-      total += 1 + names.length;
-      if (DONE.has(stopKey(s))) done += 1;
-      done += names.filter(n => DONE.has(speciesKey(s, n))).length;
-    }
+    // the stop's own action box (item/heal/event/trade), if it has one...
+    if (hasOwnAction(s)){ total += 1; if (DONE.has(stopKey(s))) done += 1; }
+    // ...plus one box per species (a catch stop, a static-mon catch, or an
+    // in-game trade's give-away species)
+    total += names.length;
+    done += names.filter(n => DONE.has(speciesKey(s, n))).length;
   }
   for (const key of isLastLeg(d, k) ? secEvoKeys(d) : []){
     total += 1; if (DONE.has(key)) done += 1;
@@ -2302,9 +2307,10 @@ function rtRow(s, n, st){
         flyFrom = s[6], teleFrom = s[14], digFrom = s[15], species = s[8] || [], underfoot = s[9],
         renew = str(s[10]), hunt = s[11] || 0, huntHi = s[13] || 0;
   st = st || {};
-  // a catch stop has no single checkbox -- each species carries its own, below
+  // a species-only stop (catch, static-mon catch) has no single box -- each
+  // species carries its own, below; other stops show their own action box
   return `<div class="rt-row${st.done ? " done" : ""}${st.next ? " next" : ""}" id="fight-${n}">
-    ${st.key && kind !== "catch" ? `<span class="chk${st.done ? " on" : ""}" data-key="${esc(st.key)}" title="mark done">✓</span>` : `<span class="chk-sp"></span>`}
+    ${st.key && hasOwnAction(s) ? `<span class="chk${st.done ? " on" : ""}" data-key="${esc(st.key)}" title="mark done">✓</span>` : `<span class="chk-sp"></span>`}
     <span class="rt-no" style="background:${(RKIND[kind] || RKIND.event).color}">${n}</span>
     <span>
       <span class="rt-what">${esc(what || "")}</span>
@@ -2983,14 +2989,16 @@ function renderPlay(){
   let descHtml = "";
   if (desc){
     const key = node && node.stop ? stopKey(node.stop) : null;
-    // a catch stop's big box ticks every species at once (each also has its own
-    // box in the wild band below); other stops tick their single key
-    const allkeys = node && node.stop && str(node.stop[0]) === "catch"
+    const stSpecies = node && node.stop ? (node.stop[8] || []) : [];
+    // a species-only stop's big box ticks every species at once (each also has
+    // its own box in the band below); other stops tick their single key
+    const allkeys = node && node.stop && !hasOwnAction(node.stop) && stSpecies.length
       ? allSpeciesKeys(node.stop) : "";
     let extra = "";
     if (row) extra = vsBand(row);
     else if (node && node.stop && str(node.stop[0]) === "event")
-      extra = tradeBand(node.stop);
+      // an in-game trade shows GIVE→GET; a static-mon catch shows the mon + odds
+      extra = hasOwnAction(node.stop) ? tradeBand(node.stop) : wildBand(node.stop);
     else if (node && node.stop && str(node.stop[0]) === "heal"){
       // the evolve call-outs belong to the section's last leg (where they count)
       extra = isLastLeg(ctx.d, PLAY.leg) ? dexEvoHtml(ctx.d) : "";

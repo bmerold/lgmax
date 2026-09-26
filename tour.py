@@ -42,13 +42,17 @@ FLY_COST = 30      # menu, animation, landing -- a nominal fare, not a walk
 TELEPORT_COST = 25
 TELEPORT_STAGE = 7   # Abra (the LeafGreen Teleport user) is catchable at Route 24
 
-# The overworld's fixed Pokémon, found by their own sprites.
+# The overworld's fixed Pokémon, found by their own sprites. Each is a catchable
+# one-off, so the stop carries the species as a catch sub-task -- the app renders
+# a per-species checkbox (the two Snorlax on Route 12 and Route 16 each get their
+# own). Snorlax you wake with the Poké Flute, then catch; the birds and Mewtwo
+# you catch outright.
 STATIC_MON_GFX = {
-    "OBJ_EVENT_GFX_SNORLAX": "Wake Snorlax (Poké Flute)",
-    "OBJ_EVENT_GFX_ARTICUNO": "Catch Articuno",
-    "OBJ_EVENT_GFX_ZAPDOS": "Catch Zapdos",
-    "OBJ_EVENT_GFX_MOLTRES": "Catch Moltres",
-    "OBJ_EVENT_GFX_MEWTWO": "Catch Mewtwo",
+    "OBJ_EVENT_GFX_SNORLAX": ("Wake & catch Snorlax (Poké Flute)", "Snorlax"),
+    "OBJ_EVENT_GFX_ARTICUNO": ("Catch Articuno", "Articuno"),
+    "OBJ_EVENT_GFX_ZAPDOS": ("Catch Zapdos", "Zapdos"),
+    "OBJ_EVENT_GFX_MOLTRES": ("Catch Moltres", "Moltres"),
+    "OBJ_EVENT_GFX_MEWTWO": ("Catch Mewtwo", "Mewtwo"),
 }
 
 # One-time events with no sprite of their own to find: gift Pokémon, key
@@ -186,7 +190,12 @@ EVENT_BEFORE = [
     ("Super Nerd Miguel", "Helix or Dome Fossil (pick one)"),
     ("Oak's Parcel from the Mart clerk", "Deliver the Parcel — Pokédex from Oak"),
     ("Deliver the Parcel — Pokédex from Oak", "Town Map from Daisy"),
-    ("Poké Flute from Mr. Fuji", "Wake Snorlax (Poké Flute)"),
+    ("Poké Flute from Mr. Fuji", "Wake & catch Snorlax (Poké Flute)"),
+    # The Leftovers hidden item sits on the EXACT tile the Snorlax blocks (Route 12
+    # (14,70) and Route 16 (31,13) in the decomp, both underfoot). You can only
+    # stand there to dig it up once the Snorlax is woken and beaten, so it must be
+    # collected after that fight, never before.
+    ("Wake & catch Snorlax (Poké Flute)", "Leftovers"),
     ("Take the Ruby", "Ruby and Sapphire to Celio — trading unlocked"),
     ("The Sapphire from Gideon", "Ruby and Sapphire to Celio — trading unlocked"),
 ]
@@ -269,10 +278,12 @@ def harvest():
     for name, mj in R.maps().items():
         if WD._map_stage(name) is None: continue
         for o in mj.get("object_events", []):
-            label = STATIC_MON_GFX.get(o.get("graphics_id"))
-            if label:
+            got = STATIC_MON_GFX.get(o.get("graphics_id"))
+            if got:
+                label, species = got
                 nodes.append({"kind": "event", "what": label, "map": name,
-                              "x": o.get("x", 0), "y": o.get("y", 0)})
+                              "x": o.get("x", 0), "y": o.get("y", 0),
+                              "species": [species]})
 
     # gift/choice/hand-out events: anchored on the NPC who gives them when
     # one is named (the Old Amber scientist stands in the museum's cut-gated

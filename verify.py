@@ -358,6 +358,19 @@ for st in routej["stages"]:
 check("the route visits every stop exactly once", want == got,
       str(list(((want - got) + (got - want)).items())[:3]))
 
+# The Route 12/16 Leftovers sits on the exact tile the Snorlax blocks (both
+# underfoot, same coords in the decomp), so it can only be dug up after that
+# Snorlax is woken and beaten -- the route must order it after, never before.
+_bad_snorlax = []
+for st in routej["stages"]:
+    steps = st["steps"]
+    snor = next((i for i, s in enumerate(steps) if "Snorlax" in str(s.get("what", ""))), None)
+    left = next((i for i, s in enumerate(steps) if str(s.get("what", "")) == "Leftovers"), None)
+    if snor is not None and left is not None and left < snor:
+        _bad_snorlax.append(st["stage"])
+check("the Leftovers is collected after the Snorlax that blocks it",
+      not _bad_snorlax, f"stages {_bad_snorlax}")
+
 prev_end, disc = None, []
 for st in routej["stages"]:
     if prev_end is not None and st["startsAt"] != prev_end:
