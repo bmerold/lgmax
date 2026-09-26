@@ -977,6 +977,50 @@ for _node in _areas[:20]:
 check("PP-aware grind never picks a move set slower than max-damage",
       not _grind_slower, str(_grind_slower[:4]))
 
+# ------------------------------------------------------------------ double battles
+# FRLG marks a trainer battle double with `.doubleBattle = TRUE` on struct Trainer
+# (include/battle.h); the flag rides extract -> trainers.json -> the encounter graph
+# -> optimize.double_plan. A double always fields TWO of your Pokemon against the
+# trainer's TWO at once, so these guards pin that the flag round-trips and that
+# every double is answered by a real two-mon pair (never a lone sweeper).
+_dbg = json.load(open(f"{OUT}/encounters.json"))
+_dbl_encs = [e for e in _dbg if e.get("doubleBattle")]
+_trainers = json.load(open(f"{OUT}/trainers.json"))
+# detection didn't silently collapse to nothing (26 used FRLG doubles: Twins,
+# Young Couple, Cool Couple, Crush Kin, Sis and Bro, plus their VS Seeker rematches)
+check("double-battle trainers are detected from the decomp", len(_dbl_encs) > 0,
+      f"{len(_dbl_encs)} found")
+# a real double is exactly two foes on the field, and its flag must trace back to
+# a `.doubleBattle = TRUE` trainer entry (never invented by the pipeline)
+_bad_flag = [e["name"] for e in _dbl_encs
+             if len(e.get("party", [])) != 2
+             or not _trainers.get(e.get("trainerConst", ""), {}).get("doubleBattle")]
+check("every double battle is two foes from a doubleBattle=TRUE trainer",
+      not _bad_flag, str(_bad_flag[:5]))
+# the flag propagates the other way too: any 2-mon doubleBattle trainer that made
+# it into the graph is flagged on its node, so none are silently modelled as 1v1
+_dbl_consts = {c for c, t in _trainers.items()
+               if t.get("doubleBattle") and len(t.get("party", [])) == 2}
+_unflagged = [e["name"] for e in _dbg
+              if e.get("trainerConst") in _dbl_consts and not e.get("doubleBattle")]
+check("no double-battle trainer is modelled as a single battle",
+      not _unflagged, str(_unflagged[:5]))
+# every double is answered by a genuine PAIR: two distinct, obtainable species
+# from two different evolution lines
+_no_pair, _bad_pair = [], []
+for e in _dbl_encs:
+    d = recs.get(e["id"], {}).get("double")
+    if not d or len(d.get("members", [])) != 2:
+        _no_pair.append(e["name"]); continue
+    sp = [m["species"] for m in d["members"]]
+    if (sp[0] == sp[1] or C.line_root(sp[0]) == C.line_root(sp[1])
+            or any(s not in av for s in sp)):
+        _bad_pair.append(e["name"])
+check("every double battle is answered by a two-Pokémon pair", not _no_pair,
+      str(_no_pair[:5]))
+check("a double battle's recommended pair is two distinct obtainable lines",
+      not _bad_pair, str(_bad_pair[:5]))
+
 print()
 if fails:
     print(f"{len(fails)} check(s) FAILED")

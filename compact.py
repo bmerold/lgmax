@@ -101,6 +101,16 @@ def main():
                             c["chance"] if c["chance"] is not None else -1,
                             [counter_row(b) for b in c["best"]]]
                            for c in rec["counters"]]
+            # a double battle's two-vs-two recommendation (optimize.double_plan):
+            # node["dbl"] = [rounds, takenPct, survives(0/1), faints, members],
+            #   member = [name, types, targetName, move, moveType, eff]
+            if rec.get("double"):
+                d = rec["double"]
+                node["dbl"] = [r2(d["rounds"]), r1(d["takenPct"]),
+                               1 if d["survives"] else 0, d["faints"],
+                               [[S(m["name"]), [S(x) for x in m["types"]],
+                                 S(m["target"]), S(m["move"]), S(m["moveType"]),
+                                 m["eff"]] for m in d["members"]]]
         out_encs.append(node)
 
     stages = [{"id": s["id"], "name": s["name"], "chapter": s["chapter"],

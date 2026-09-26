@@ -1475,6 +1475,7 @@ function renderPanel(e){
   }
 
   const hasTeam = e.team && e.team.length;
+  if (e.dbl) html += doubleBanner(e);
   html += `<section class="card"><div class="card-h">
       <h2>${e.k === "wild" ? "Best Pokémon to lead with" : "Best Pokémon for this fight"}</h2>
       <div class="tabs" role="tablist">
@@ -1516,6 +1517,34 @@ function wildRow(w){
     <td class="r num">${lo === hi ? lo : lo + "–" + hi}</td>
     <td><span class="rate"><span class="ratebar" style="width:${Math.max(2, chance * 1.6)}px"></span>
       <span class="num">${chance}%</span></span></td></tr>`;
+}
+
+/* A double battle (`.doubleBattle = TRUE` in the decomp -- the Twins / Young
+   Couple / Cool Couple / Crush Kin / Sis and Bro paired NPCs) puts two of your
+   Pokémon on the field against the trainer's two at once, so it is won by a PAIR,
+   not one sweeper. optimize.double_plan scores the two-vs-two and names the pair
+   to lead with; this shows both, each with the foe it answers. The pair is
+   starter- and trade-agnostic, so it holds for every reader. */
+function doubleBanner(e){
+  const rounds = e.dbl[0], taken = e.dbl[1], survives = e.dbl[2],
+        faints = e.dbl[3], members = e.dbl[4];
+  const cards = members.map(m => {
+    const name = m[0], types = m[1], target = m[2], move = m[3], eff = m[5];
+    return `<div style="flex:1;min-width:150px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2)">
+      <div><span class="mon-n">${esc(str(name))}</span> <span class="tw">${typeChips(types)}</span></div>
+      <div class="num" style="margin:4px 0;color:var(--ink-2)">answers <b>${esc(str(target))}</b></div>
+      <div>${esc(str(move) || "—")} <span class="eff ${effClass(eff)}">${effLabel(eff)}</span></div>
+    </div>`;
+  }).join("");
+  return `<section class="card"><div class="card-h">
+      <h2>Double battle — lead with these two</h2>
+      <span class="note">Both sides field two Pokémon at once</span></div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">${cards}</div>
+    <p class="note" style="margin-top:10px">Modelled two-on-two: both of your Pokémon attack each
+      round, both foes answer, resolved in speed order.${survives
+        ? ` Clears in about ${rounds.toFixed(0)} round${rounds === 1 ? "" : "s"} for roughly ${taken.toFixed(0)}% HP lost across the pair.`
+        : ` A close one — this pair expects to lose ${faints} of the two.`}</p>
+  </section>`;
 }
 
 function teamView(e){

@@ -20,7 +20,7 @@ export LGMAX_POKEFIRERED=~/pokefirered      # optional; this is the default
 ```
 
 Python 3.10+, no third-party packages. `build.sh` runs the whole pipeline and finishes with
-`verify.py`, which must print 64 OKs. The output is `app.html` — one self-contained file, ~10 MB,
+`verify.py`, which must print 84 OKs. The output is `app.html` — one self-contained file, ~10 MB,
 no server needed. The per-starter solves run in parallel (one process each) and the build pins
 `PYTHONHASHSEED=0`, so it's byte-reproducible; `route.json` (map-geometry TSP) is the one slow
 stage, so `LGMAX_REUSE_ROUTE=1 ./build.sh` reuses it and turns an engine-only rebuild into ~2
@@ -76,7 +76,7 @@ them.
 | `render_maps.py` | renders each section's maps to PNG from the decomp's tilesets/layouts, and pins every trainer to the tile its object event stands on |
 | `sections.py` | two-pass per-section party optimizer + choice evaluation |
 | `compact.py` | array-encoded payload (~25 MB → ~5 MB) |
-| `verify.py` | **81 guard rails; all must pass after every rebuild** |
+| `verify.py` | **86 guard rails; all must pass after every rebuild** |
 | `setup_study.py` | standalone: does setting up beat hit-and-switch? (it does not) |
 
 `sections.py` runs before `optimize.py` because it writes `data/commitments.json`, which the
@@ -128,6 +128,16 @@ See `docs/` for the working notes behind each of these.
   after are not modeled, and a plan can't steer a move that refuses orders.
 - Trainer AI is "their single best damaging move", close to but not identical to
   `AI_SCRIPT_CHECK_BAD_MOVE`.
+- **Double battles** (the 26 paired-NPC fights the ROM flags with `.doubleBattle = TRUE` —
+  Twins, Young Couple, Cool Couple, Crush Kin, Sis and Bro, and their VS Seeker rematches) are
+  recognized and given a two-vs-two recommendation: the encounter card names the **pair** to lead
+  with, each with the foe it answers, scored by a round-based model where both of your Pokémon
+  attack each round, both foes answer, and all four resolve in speed order (`optimize.double_plan`).
+  The pair is chosen starter- and trade-agnostic, so one recommendation holds for every run.
+  Deliberately out of scope for now: spread moves (Surf/Earthquake hitting both), the exact turn
+  distribution (the double model uses expected per-round damage, not the 1v1 DP), and the *section
+  simulator's* HP/PP ledger, which still walks a double's two foes one at a time under Gen 3's free
+  Shift switches — a sound "can this party clear it" model, just not two-active.
 - Handovers are searched two segments deep; the party builder is greedy, so individual section
   numbers are not monotonic in the size of the candidate pool.
 - The post-game stage lumps Sevii 4–7 and the Elite Four rematch together, so the route fights
