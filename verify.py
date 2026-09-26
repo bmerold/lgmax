@@ -912,6 +912,38 @@ _bad_cov = [nm for nm in _itin
 check("the 'any TM' itinerary covers every level 'no TMs' does",
       not _bad_cov, str(_bad_cov[:4]))
 
+# The grind search (training.area_grind) may swap the max-damage move for a
+# higher-PP one, but ONLY when that lowers the effective grind time (fewer
+# Pokémon Center trips). The whole point is that it can never pick a slower set,
+# so recompute a deterministic sample and assert the PP-aware choice's effective
+# time is never worse than the pure max-damage baseline's. The heal round-trip is
+# seeded to a fixed value for both sides, so this tests the move choice, not the
+# expensive world-graph walk.
+import training as _TR
+import optimize as _O
+_enc = json.load(open(f"{OUT}/encounters.json"))
+_areas = [n for n in _enc if n.get("kind") == "wild" and (n.get("wildMons") or [])]
+_probe_sp = [s for s in ("SPECIES_PIDGEY", "SPECIES_RATTATA", "SPECIES_NIDORAN_M",
+                         "SPECIES_MACHOP", "SPECIES_GEODUDE", "SPECIES_ABRA",
+                         "SPECIES_BULBASAUR", "SPECIES_CHARMANDER", "SPECIES_SQUIRTLE")
+             if s in E.SPECIES]
+_grind_slower = []
+for _node in _areas[:20]:
+    _TR._HEAL_CACHE[_TR._folder_of(_node)] = (400, "PROBE")   # skip the world BFS
+    for _lv in (14, 28, 42):
+        _stg = _TR.stage_for_level(_lv)
+        _bd = _O.badges_for(_stg)
+        for _sp in _probe_sp:
+            _pool = _TR.build_pool(_sp, _lv, _stg, "any")
+            if not _pool:
+                continue
+            _fast = _TR.area_grind(_sp, _lv, _stg, _pool, _node, _bd, pp_aware=True)
+            _base = _TR.area_grind(_sp, _lv, _stg, _pool, _node, _bd, pp_aware=False)
+            if _fast and _base and _fast["eff_sec"] > _base["eff_sec"] + 1e-6:
+                _grind_slower.append((_sp, _lv, _node.get("id")))
+check("PP-aware grind never picks a move set slower than max-damage",
+      not _grind_slower, str(_grind_slower[:4]))
+
 print()
 if fails:
     print(f"{len(fails)} check(s) FAILED")
