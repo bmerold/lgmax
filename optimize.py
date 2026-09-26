@@ -108,7 +108,18 @@ def move_pool(species, level, stage):
     for item in E.TMHM.get(species, []):
         const = "ITEM_" + item.split("_")[0] if item.startswith(("TM", "HM")) else None
         mv = G.TMHM_MOVE.get(const)
-        if mv and mv in tms:
+        if not mv:
+            continue
+        if item.startswith("HM"):
+            # An HM move is usable only once you hold the HM *and* its badge
+            # (progression.HM_STAGE) -- which can be a stage LATER than the item's
+            # pickup. Fly (HM02) is grabbed partway through stage 20 on Route 16
+            # but only reliably in hand from 21, so gating it on the item stage
+            # (tm_moves_by_stage) would teach it a stage early. Gate HMs on
+            # HM_STAGE; ordinary TMs stay gated on the item.
+            if stage >= P.HM_STAGE.get(mv.replace("MOVE_", ""), 99):
+                moves.add(mv)
+        elif mv in tms:
             moves.add(mv)
     if stage >= 28:      # Move tutors live on Two Island (post-Blaine)
         for t in E.TUTOR.get(species, []):
