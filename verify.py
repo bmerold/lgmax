@@ -298,6 +298,27 @@ _tele_claims = [(starter, int(st)) for starter, per_stage in raw["sections"].ite
 check("no section claims a Teleport carrier while Teleport is disabled",
       not _tele_claims, str(_tele_claims[:4]))
 
+# No party may carry an HM field move before that HM is usable (the HM item and
+# its badge in hand at the START of the stage). Fly is the subtle one: HM02 is
+# picked up partway through stage 20 at the Route 16 house and answers no
+# obstacle, so it's only reliably in hand from stage 21 and must not appear on
+# the stage-20 party. The obstacle HMs are obtained before their puzzle in the
+# same stage, so they're legal at their pickup stage.
+_HM_MOVE_KEY = {"Fly": "FLY", "Cut": "CUT", "Surf": "SURF", "Strength": "STRENGTH",
+                "Flash": "FLASH", "Rock Smash": "ROCK_SMASH", "Waterfall": "WATERFALL"}
+_hm_early = []
+for _sk, _per in raw["sections"].items():
+    for _st, _sec in _per.items():
+        if not _sec:
+            continue
+        for _m in _sec.get("team", []):
+            for _mv in _m.get("moves", []):
+                _hm = _HM_MOVE_KEY.get(_mv.get("name"))
+                if _hm and int(_st) < P.HM_STAGE[_hm]:
+                    _hm_early.append((_sk, int(_st), _m["species"], _mv["name"]))
+check("no party carries an HM move before that HM is usable",
+      not _hm_early, str(_hm_early[:4]))
+
 # ------------------------------------------------------------------ walk order
 # The completionist route decides the order battles happen in, and the
 # section simulation must fight in exactly that order — the checklist, the

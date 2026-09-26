@@ -63,7 +63,12 @@ BADGE_STAGE = {1: 5, 2: 9, 3: 12, 4: 17, 5: 23, 6: 25, 7: 28, 8: 30}
 # (HM location and badge requirement both verified in the decomp.)
 HM_STAGE = {
     "CUT": 11,        # HM01 on the S.S. Anne; needs Cascade Badge (held from 9)
-    "FLY": 20,        # HM02 Route 16 house; needs Thunder Badge
+    # HM02 is picked up mid-stage-20 at the Route 16 house. Fly answers no
+    # obstacle (unlike the other HMs, which the route uses on a puzzle later in
+    # the same stage they're obtained), so nothing pins its pickup before its
+    # use -- showing the party carrying Fly for all of stage 20 (on Route 16,
+    # before the house) is premature. It's reliably in hand from stage 21.
+    "FLY": 21,        # HM02 Route 16 house (stage 20); needs Thunder Badge
     "SURF": 23,       # HM03 Safari Zone Secret House; needs Soul Badge (held from 23)
     "STRENGTH": 21,   # HM04 from the Warden for the Gold Teeth; needs Rainbow Badge
     "FLASH": 13,      # HM05 Route 2 East Building; needs Boulder Badge
