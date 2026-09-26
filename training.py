@@ -91,6 +91,11 @@ _SUPPLY = _TMS.extract()
 _HM_MOVES = [(h, mv) for h, mv in HM.HM_MOVE.items()]
 TOGGLES = ("none", "renew", "any")   # TMs: none / renewable-only / any single-use
 SUSTAIN_CAP = 99   # fights before healing; above this is effectively "no limit"
+# Besides the max-damage move set, the grind search also scores the top-N
+# damaging moves in the pool (plus the single highest-PP damaging move) as
+# one-move grind sets: a weaker but higher-PP attack KOs slower yet lets you camp
+# far longer, and can win on effective time by saving Pokémon Center round-trips.
+GRIND_ALT_MOVES = 3
 
 # Effective grind time = battle time + the walk to a Pokémon Center and back
 # whenever HP/PP runs out. Time constants mirror the app's playtime model
@@ -182,25 +187,59 @@ def _wild_areas(encounters, stage):
     return [e for e in encounters if e.get("kind") == "wild" and e.get("stage", 99) <= stage]
 
 
-def area_grind(species, level, stage, pool, node, badges):
-    """Battle turns to gain one full level grinding this mon in one wild area, or
-    None if it can't clear the area's encounters. Turns and XP are both averaged
-    over the area's encounter slots (weighted by slot chance), so the ratio is
-    scale-free -- turns/level = xp_to_next * (turns/encounter) / (xp/encounter)."""
-    slots = node.get("wildMons") or []
+def _area_opponents(node):
+    """The wild slots as (mon, slot-chance) plus the chance-weighted XP one KO
+    yields -- both averaged over the encounter table so the grind ratio is
+    scale-free. Returns (opps, xp_per) or ([], 0) if the area has no fightable
+    slot. XP is expYield * level / 7 per src/battle_script_commands.c."""
     opps, xp_per = [], 0.0
-    for s in slots:
+    for s in node.get("wildMons") or []:
         w = (s.get("chance") or 0) / 100.0
         if w <= 0 or s["species"] not in E.SPECIES:
             continue
         lvl = round((s["minLevel"] + s["maxLevel"]) / 2)
         opps.append((E.make_mon(s["species"], lvl), w))
         xp_per += w * exp_on_ko(E.SPECIES[s["species"]].get("expYield", 0), lvl)
-    if not opps or xp_per <= 0:
-        return None
-    res = O._weighted_sweep(E.make_mon(species, level), opps, pool, badges)
-    if res is None or not res.get("turns"):
-        return None
+    return opps, xp_per
+
+
+def _alt_grind_moves(player, opps, pool, badges):
+    """Higher-PP attacking moves worth trying as a single-move grind set: the
+    top-N damaging moves in the pool plus the one with the most PP, ranked
+    against the likeliest wild slot. PP is engine.MOVES[m]["pp"]; damage-per-turn
+    comes from the same engine the sweep uses, so this adds no new mechanic --
+    just a shortlist of alternatives to the max-damage pick. Order is explicit
+    (damage desc, then const) so the byte-reproducible build stays stable."""
+    if not opps:
+        return []
+    ref0, _ = max(opps, key=lambda ow: ow[1])   # the slot you meet most often
+    pl, ref = E.with_entry_boosts(player, ref0)
+    ab = {"atk": badges["atk"], "spatk": badges["spatk"]}
+    scored = []
+    for mv in pool:
+        if mv not in E.MOVES:
+            continue
+        p = E.move_profile(pl, ref, mv, ab)
+        if not p or p.get("immune") or p.get("avgPerTurn", 0) <= 0:
+            continue
+        rate = p["avgPerTurn"] / p.get("turnsPerUse", 1.0)
+        scored.append((rate, E.MOVES[mv]["pp"], mv))
+    if not scored:
+        return []
+    cands = [mv for _, _, mv in sorted(scored, key=lambda t: (-t[0], t[2]))[:GRIND_ALT_MOVES]]
+    high_pp = sorted(scored, key=lambda t: (-t[1], t[2]))[0][2]
+    if high_pp not in cands:
+        cands.append(high_pp)
+    return cands
+
+
+def _score_sweep(res, species, level, xp_per, node, stage):
+    """Turn one weighted sweep into the grind-cost metrics, including the
+    EFFECTIVE time (the fights plus a Pokémon Center round-trip whenever HP or PP
+    runs dry). Split out of area_grind so several candidate move sets can be
+    scored the same way and the fastest kept. Carries the raw HP/PP fight limits
+    and heal-trip count so the caller can tell whether PP is the binding
+    constraint before spending sweeps on alternatives."""
     xp_needed = exp_to_next(E.SPECIES[species].get("growthRate", "MEDIUM_FAST"), level)
     turns_per_level = xp_needed / xp_per * res["turns"]
     per = res.get("perOpponent") or []
@@ -237,7 +276,37 @@ def area_grind(species, level, stage, pool, node, badges):
     return {"turns_per_level": turns_per_level, "turns_per_battle": res["turns"],
             "xp_per_battle": xp_per, "move": (top or {}).get("move"),
             "sustain": sustain, "mons": mons, "eff_sec": eff_sec,
-            "round_trip": rt, "center": cmap, "node": node}
+            "round_trip": rt, "center": cmap, "node": node,
+            # gating hints for the alt-move search (not emitted downstream)
+            "_pp_bound": sustain_pp < sustain_hp, "_heal_trips": heal_trips}
+
+
+def area_grind(species, level, stage, pool, node, badges, pp_aware=True):
+    """Least EFFECTIVE grind time to gain one full level in one wild area, or None
+    if this mon can't clear its encounters. The max-damage move set is the
+    baseline; when it's PP-limited AND pays a Center round-trip, also score a few
+    higher-PP single-move sets and keep whichever minimizes effective time. A
+    higher-PP move only ever helps that case: it KOs slower (never less HP damage,
+    so never a longer HP camp) but drains PP more slowly, so it's only worth the
+    extra sweeps when PP -- not HP -- is what forces the walk. `pp_aware=False`
+    returns the pure max-damage baseline (used by the verify guard)."""
+    opps, xp_per = _area_opponents(node)
+    if not opps or xp_per <= 0:
+        return None
+    player = E.make_mon(species, level)
+    base = O._weighted_sweep(player, opps, pool, badges)
+    if base is None or not base.get("turns"):
+        return None
+    best = _score_sweep(base, species, level, xp_per, node, stage)
+    if pp_aware and best["_heal_trips"] > 0 and best["_pp_bound"]:
+        for mv in _alt_grind_moves(player, opps, pool, badges):
+            alt = O._weighted_sweep(player, opps, [mv], badges)
+            if alt is None or not alt.get("turns"):
+                continue
+            cand = _score_sweep(alt, species, level, xp_per, node, stage)
+            if cand["eff_sec"] < best["eff_sec"]:
+                best = cand
+    return best
 
 
 def best_grind(species, level, stage, toggle, encounters, badges):
