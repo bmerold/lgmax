@@ -545,9 +545,15 @@ def main():
     # (strings pooled). Both the section card and the Train tab read this.
     _train = (json.load(open(f"{OUT}/training.json"))
               if os.path.exists(f"{OUT}/training.json") else {})
+    # segment: [from, to, area, method, move, tplLo, tplHi, battles, sustainLo,
+    #  sustainHi, mons, roundTrip, center] where mons = [[wildName, wildLevel,
+    #  chance%, move]...] and roundTrip/center are the nearest-Center heal walk.
     itineraries = {
         _nm: {_tg: [[s["from"], s["to"], S(s["area"]), S(s["method"]),
-                     S(s.get("move")), s["tplLo"], s["tplHi"], s["battles"]]
+                     S(s.get("move")), s["tplLo"], s["tplHi"], s["battles"],
+                     s["sustainLo"], s["sustainHi"],
+                     [[S(m[0]), m[1], m[2], S(m[3])] for m in s.get("mons", [])],
+                     s.get("roundTrip") or 0, S(s.get("center"))]
                     for s in _segs]
               for _tg, _segs in _tgs.items()}
         for _nm, _tgs in _train.get("itineraries", {}).items()}

@@ -406,6 +406,14 @@ button{font:inherit;color:inherit}
 .it-tbl{margin-top:0}
 .it-tbl .it-lv{white-space:nowrap;font-family:var(--mono);font-variant-numeric:tabular-nums}
 .tr-none{font-size:13px;color:var(--ink-3);font-style:italic;padding:4px 16px 10px}
+.it-sus{white-space:nowrap}
+.it-heal{display:block;font-size:10px;color:var(--ink-3);margin-top:1px}
+.sus-tight{color:var(--bad);font-weight:600}
+.sus-ok{color:var(--good);font-weight:600}
+.it-mons{line-height:1.7}
+.gm{display:inline-block;font-size:11px;background:var(--surface-2);border:1px solid var(--line);
+  padding:0 6px;margin:0 4px 3px 0;white-space:nowrap}
+.gm .num{color:var(--ink-3)}
 .mapwrap{overflow-x:auto;margin:0 16px 14px;border:1px solid var(--line);position:relative;
   border-radius:0;background:var(--surface-2)}
 .mapbox{position:relative;width:max-content}
@@ -1015,12 +1023,28 @@ const PLAYBOOKS = DATA.playbooks || [];
    the run itself never grinds. */
 const ITIN = DATA.itineraries || {};
 const GRIND_RANGE = DATA.grindRange || [5, 55];
-/* the itinerary segment covering a mon at `level` under `toggle`, or null */
+/* the itinerary segment covering a mon at `level` under `toggle`, or null.
+   segment = [from,to,area,method,move,tplLo,tplHi,battles,sustainLo,sustainHi,mons] */
 function grindAt(name, level, toggle){
   for (const s of (ITIN[name] || {})[toggle] || []){
     if (s[0] <= level && level <= s[1]) return s;
   }
   return null;
+}
+/* how many fights before you must walk to a Center (HP or PP runs out); >=99 is
+   effectively no limit. `tight` when it's fewer than a whole level of battles. */
+function grindSustain(s){
+  const lo = s[8], hi = s[9], battles = s[7];
+  if (lo >= 99) return `<span class="sus-ok" title="grind a full level or more without healing">no limit</span>`;
+  const n = lo === hi ? `${lo}` : `${lo}–${hi}`;
+  const tight = lo < battles;
+  return `<span class="${tight ? "sus-tight" : ""}" title="fights before you need to heal (HP or PP run out)${tight ? ` — fewer than a full level (~${battles} fights), so you'll heal mid-level` : ""}">${n} fight${hi === 1 ? "" : "s"}</span>`;
+}
+/* the nearest Pokémon Center for this spot and the round-trip walk to it */
+function grindHeal(s){
+  const rt = s[11], center = s[12];
+  if (center === -1 || center == null || !rt) return "";
+  return `<span class="it-heal" title="round trip to the nearest Center when you heal">↺ ${esc(prettyMap(str(center)))} · ~${rt} steps</span>`;
 }
 const CR_BY_NAME = {};
 // index the pool directly (a Dex name is always a real pool entry): `str` is a
@@ -1780,15 +1804,16 @@ function grindCard(d, L, id){
   if (!team.length) return "";
   const rows = team.map(t => {
     const nm = str(t[0]), lv = t[2];
-    // segment = [from, to, area, method, move, tplLo, tplHi, battles]
+    // segment = [from,to,area,method,move,tplLo,tplHi,battles,sustainLo,sustainHi,mons,roundTrip,center]
     const g = grindAt(nm, lv, grindTM);
     if (!g) return `<tr><td>${esc(nm)} <span class="num">Lv ${lv}</span></td>
-      <td colspan="3" class="grind-none">no reachable grind spot at this point</td></tr>`;
+      <td colspan="4" class="grind-none">no reachable grind spot at this point</td></tr>`;
     const tpl = g[5] === g[6] ? `${g[5]}` : `${g[5]}–${g[6]}`;
     return `<tr>
       <td>${esc(nm)} <span class="num">Lv ${lv}</span></td>
       <td>${esc(str(g[2]))} <span class="num">${esc(str(g[3]))}</span></td>
       <td><b>${tpl}</b> <span class="num">~${g[7]} battle${g[7] === 1 ? "" : "s"}</span></td>
+      <td class="it-sus">${grindSustain(g)}${grindHeal(g)}</td>
       <td>${g[4] !== -1 ? esc(str(g[4])) : "—"}</td></tr>`;
   }).join("");
   const btn = (v, lbl, tip) => `<button class="gtm${grindTM === v ? " on" : ""}" data-grindtm="${v}" title="${esc(tip)}">${lbl}</button>`;
@@ -1800,9 +1825,9 @@ function grindCard(d, L, id){
         btn("renew", "Renewable TMs", "also restockable Dept.-store / Game Corner TMs")}${
         btn("any", "Any TM", "also single-use TMs — may spend one the plan wants elsewhere")}</div>
     <table class="grind-tbl">
-      <thead><tr><th>Pokémon</th><th>Best spot</th><th>Battle turns / level</th><th>Best move</th></tr></thead>
+      <thead><tr><th>Pokémon</th><th>Best spot</th><th>Turns / level</th><th>Sustain before healing</th><th>Best move</th></tr></thead>
       <tbody>${rows}</tbody></table>
-    <p class="grind-note">Turns are battle turns to gain one full level, from the ROM's experience math (no walking time). It stays with this mon — no switching to a stronger sweeper.</p>
+    <p class="grind-note">The spot balances battle speed against sustainability — “sustain” is how many fights before HP or PP runs out and you head to the nearest Center. It stays with this mon — no switching to a stronger sweeper.</p>
   </section>`;
 }
 
@@ -3806,18 +3831,22 @@ function renderTrain(){
   const segs = (ITIN[pickSpecies] || {})[grindTM] || [];
   const spr = SPRITES[pickSpecies];
   const opt = (v, cur, lbl) => `<option value="${esc(String(v))}"${v === cur ? " selected" : ""}>${esc(lbl)}</option>`;
-  // segment = [from, to, area, method, move, tplLo, tplHi, battles]
+  // segment = [from,to,area,method,move,tplLo,tplHi,battles,sustainLo,sustainHi,mons,roundTrip,center]
   const rows = segs.map(s => {
     const rng = s[0] === s[1] ? `Lv ${s[0]}` : `Lv ${s[0]}–${s[1]}`;
     const tpl = s[5] === s[6] ? `${s[5]}` : `${s[5]}–${s[6]}`;
-    return `<tr><td class="it-lv">${rng}</td>
+    const mons = (s[10] || []).map(m =>
+      `<span class="gm"><b>${esc(str(m[0]))}</b> <span class="num">${m[2]}%</span> ${m[3] !== -1 ? esc(str(m[3])) : "—"}</span>`).join("");
+    return `<tr>
+      <td class="it-lv">${rng}</td>
       <td>${esc(str(s[2]))} <span class="num">${esc(str(s[3]))}</span></td>
-      <td>${s[4] !== -1 ? esc(str(s[4])) : "—"}</td>
-      <td><b>${tpl}</b> <span class="num">~${s[7]}</span></td></tr>`;
+      <td><b>${tpl}</b> <span class="num">~${s[7]} b</span></td>
+      <td class="it-sus">${grindSustain(s)}${grindHeal(s)}</td>
+      <td class="it-mons">${mons}</td></tr>`;
   }).join("");
   el.innerHTML = `<section class="card">
     <div class="card-h"><h2>Where to grind — level by level</h2>
-      <span class="note">the fastest wild spot and move for each stretch of levels — a catch-up tool; the run itself never grinds</span></div>
+      <span class="note">the fastest wild spot for each stretch of levels, and the move for each Pokémon there — a catch-up tool; the run itself never grinds</span></div>
     <div class="train-pick">
       <label>Pokémon <select id="pickSp">${names.map(n => opt(n, pickSpecies, n)).join("")}</select></label>
       <div class="grind-toggle" role="group" aria-label="TM policy">${["none", "renew", "any"].map(v =>
@@ -3827,10 +3856,10 @@ function renderTrain(){
       ${spr ? `<img src="data:image/png;base64,${spr}" alt="">` : `<span class="pb-ball">◓</span>`}
       <div class="tr-head">${esc(pickSpecies)}</div></div>
     ${segs.length ? `<table class="grind-tbl it-tbl">
-        <thead><tr><th>Levels</th><th>Where</th><th>Best move</th><th>Turns / lvl · battles</th></tr></thead>
+        <thead><tr><th>Levels</th><th>Where</th><th>Turns/lvl</th><th>Sustain before healing</th><th>Wild Pokémon → move</th></tr></thead>
         <tbody>${rows}</tbody></table>`
       : `<p class="tr-none">No reachable grind spots for ${esc(pickSpecies)} in range (Lv ${GRIND_RANGE[0]}–${GRIND_RANGE[1]}).</p>`}
-    <p class="grind-note">Turns are battle turns to gain one full level, from the ROM's experience math (no walking time). It stays with this mon — no switching. “Any TM” may spend a single-use TM the plan wants elsewhere; where you're behind, that's usually worth it.</p>
+    <p class="grind-note">The pick balances battle speed against sustainability: “sustain” is how many fights before HP or PP runs out and you walk to the nearest Center (round-trip shown), and the recommended spot is the one with the least real grind time, not just the fewest turns. Each wild Pokémon there gets the move that beats it fastest.</p>
   </section>`;
 }
 document.getElementById("trainPanel").addEventListener("click", ev => {

@@ -72,7 +72,7 @@ def exp_on_ko(exp_yield, foe_level):
 
 
 # ------------------------------------------------------------------ grind cost
-import json as _json, os as _os
+import json as _json, os as _os, math as _math
 import engine as E
 import progression as P
 import optimize as O
@@ -90,6 +90,60 @@ _ITEM_STAGE = (_json.load(open(f"{_OUT}/itemStages.json"))
 _SUPPLY = _TMS.extract()
 _HM_MOVES = [(h, mv) for h, mv in HM.HM_MOVE.items()]
 TOGGLES = ("none", "renew", "any")   # TMs: none / renewable-only / any single-use
+SUSTAIN_CAP = 99   # fights before healing; above this is effectively "no limit"
+
+# Effective grind time = battle time + the walk to a Pokémon Center and back
+# whenever HP/PP runs out. Time constants mirror the app's playtime model
+# (SEC_PER_STEP / SEC_PER_TURN / SEC_PER_FIGHT); HEAL_SEC covers the nurse.
+SEC_PER_STEP, SEC_PER_TURN, SEC_PER_FIGHT, HEAL_SEC = 0.28, 9.0, 22.0, 15.0
+
+# Nearest-Center round-trip steps per map folder, via the world graph. The world
+# BFS is expensive (cold-grid parse + Dijkstra), so we compute ONE round-trip per
+# area at a "settled" stage where the local Centers are open, and reuse it across
+# levels -- the nearest Center barely moves once a town is reachable, and this is
+# a heal-cost estimate for ranking, not an exact walk. Cached by folder and (in
+# main) prefilled before forking so workers share it. See tour.insert_heal for
+# the same door-tile BFS pattern.
+_HEAL_CACHE = {}
+_CENTER_DOORS = {}
+_SETTLE_STAGE = 25   # by here every Kanto Pokémon Center is open
+
+
+def _center_doors_at(stage):
+    import world as WD, tour as TOUR
+    if stage not in _CENTER_DOORS:
+        _CENTER_DOORS[stage] = [(m, x, y) for m, xys in TOUR.center_doors().items()
+                                if WD._open_map(m, stage) for (x, y) in xys]
+    return _CENTER_DOORS[stage]
+
+
+def heal_roundtrip(folder, area_stage):
+    """(round-trip steps, Center map) from a map's grind tile to the nearest
+    Pokémon Center, or (None, None) if none is reachable. Computed once per folder
+    at a settled stage (so the town's own Center is open) and cached."""
+    if folder in _HEAL_CACHE:
+        return _HEAL_CACHE[folder]
+    import world as WD
+    stage = max(int(area_stage or 0), _SETTLE_STAGE)
+    res = (None, None)
+    anchor = WD.encounter_anchor(folder, "land") or WD.first_open_tile(folder)
+    if anchor:
+        start = WD.reach_tile((folder, anchor[0], anchor[1]), stage)
+        doors = _center_doors_at(stage)
+        dist = WD.bfs(start, stage, targets=set(doors)) if doors else {}
+        reach = [(dist[t], t[0]) for t in doors if t in dist]
+        if reach:
+            near, cmap = min(reach)
+            res = (2 * near, cmap)
+    _HEAL_CACHE[folder] = res
+    return res
+
+
+def _folder_of(node):
+    import world as WD
+    const = (node.get("id") or "").split(":")
+    const = const[1] if len(const) > 1 else None
+    return WD._const_to_folder().get(const) if const else None
 
 
 def _tm_renewable(item):
@@ -149,22 +203,54 @@ def area_grind(species, level, stage, pool, node, badges):
         return None
     xp_needed = exp_to_next(E.SPECIES[species].get("growthRate", "MEDIUM_FAST"), level)
     turns_per_level = xp_needed / xp_per * res["turns"]
+    per = res.get("perOpponent") or []
     # the move it leans on (vs the likeliest slot), for the "which HM/TM helps" note
-    top = max(res.get("perOpponent") or [], key=lambda r: r.get("chance", 0), default=None)
+    top = max(per, key=lambda r: r.get("chance", 0), default=None)
+    # Sustainability: how many fights before you must walk to a Center, the tighter
+    # of HP attrition and PP. HP: you heal once your HP would fall below the worst
+    # single fight (so the next one can't KO you), losing `damageTaken` per fight.
+    # PP: each attacking move drains by how often it's used; the first to empty caps
+    # the run. (The sweep already computes damage taken and the per-slot move.)
+    maxhp, avg_taken = res["hp"], res["damageTaken"]
+    worst = max((p.get("takenHere", 0) for p in per), default=0)
+    sustain_hp = (maxhp - worst) / avg_taken if avg_taken > 0 else float("inf")
+    usage = {}
+    for p in per:
+        mv = p.get("moveConst")
+        usage[mv] = usage.get(mv, 0.0) + (p.get("chance", 0) / 100.0) * p.get("turns", 0)
+    sustain_pp = min((E.MOVES[mv]["pp"] / u for mv, u in usage.items()
+                      if u > 0 and mv in E.MOVES), default=float("inf"))
+    sustain = min(SUSTAIN_CAP, max(0, int(min(sustain_hp, sustain_pp))))
+    # per-wild-mon breakdown: the move used against each slot (it differs by type)
+    mons = [[p["opp"], p["oppLevel"], round(p.get("chance", 0)), p.get("move")]
+            for p in per]
+    # Effective time to level = the fights, plus a Center round-trip each time HP
+    # or PP would run dry. This is the ranking key, so a fragile spot near no
+    # Center loses to a steady one you can camp -- sustainability, not raw speed.
+    battles = turns_per_level / res["turns"]
+    battle_sec = battles * (res["turns"] * SEC_PER_TURN + SEC_PER_FIGHT)
+    folder = _folder_of(node)
+    rt, cmap = heal_roundtrip(folder, stage) if folder else (None, None)
+    heal_trips = max(0, _math.ceil(battles / max(1, sustain)) - 1)
+    step_sec = (rt if rt is not None else 400) * SEC_PER_STEP + HEAL_SEC
+    eff_sec = battle_sec + heal_trips * step_sec
     return {"turns_per_level": turns_per_level, "turns_per_battle": res["turns"],
             "xp_per_battle": xp_per, "move": (top or {}).get("move"),
-            "node": node}
+            "sustain": sustain, "mons": mons, "eff_sec": eff_sec,
+            "round_trip": rt, "center": cmap, "node": node}
 
 
 def best_grind(species, level, stage, toggle, encounters, badges):
-    """The reachable wild area with the fewest battle turns per level, or None."""
+    """The reachable wild area with the least EFFECTIVE grind time (fights plus
+    heal round-trips), or None. Ranking by effective time is what folds
+    sustainability into the recommendation."""
     pool = build_pool(species, level, stage, toggle)
     if not pool:
         return None
     best = None
     for node in _wild_areas(encounters, stage):
         got = area_grind(species, level, stage, pool, node, badges)
-        if got and (best is None or got["turns_per_level"] < best["turns_per_level"]):
+        if got and (best is None or got["eff_sec"] < best["eff_sec"]):
             best = got
     if not best:
         return None
@@ -177,17 +263,19 @@ def best_grind(species, level, stage, toggle, encounters, badges):
         "turnsPerBattle": round(best["turns_per_battle"], 2),
         "battles": round(best["turns_per_level"] / best["turns_per_battle"]) if best["turns_per_battle"] else 0,
         "move": best["move"],   # perOpponent already carries the display name
+        "sustain": best["sustain"], "mons": best["mons"], "effSec": best["eff_sec"],
+        "roundTrip": best["round_trip"], "center": best["center"],
     }
 
 
 # ------------------------------------------------------------------ pipeline
 def _faster(a, b):
-    """The fewer-turns-per-level of two grind results (either may be None)."""
+    """The lower effective-time of two grind results (either may be None)."""
     if not a:
         return b
     if not b:
         return a
-    return a if a["turnsPerLevel"] <= b["turnsPerLevel"] else b
+    return a if a["effSec"] <= b["effSec"] else b
 
 
 # The leveling itinerary is computed at EVERY level (not a coarse grid), then
@@ -245,13 +333,21 @@ def species_itinerary(species):
                 s["tplLo"] = min(s["tplLo"], v["turnsPerLevel"])
                 s["tplHi"] = max(s["tplHi"], v["turnsPerLevel"])
                 s["battles"] = max(s["battles"], v["battles"])
+                s["sustainLo"] = min(s["sustainLo"], v["sustain"])
+                s["sustainHi"] = max(s["sustainHi"], v["sustain"])
+                s["mons"] = v["mons"]           # breakdown at the top of the range
+                s["roundTrip"] = v["roundTrip"]
+                s["center"] = v["center"]
             elif key is not None:
                 segs.append({"_k": key, "from": lv, "to": lv, "area": v["area"],
                              "method": v["method"], "move": v["move"],
                              "tplLo": v["turnsPerLevel"], "tplHi": v["turnsPerLevel"],
-                             "battles": v["battles"]})
+                             "battles": v["battles"], "sustainLo": v["sustain"],
+                             "sustainHi": v["sustain"], "mons": v["mons"],
+                             "roundTrip": v["roundTrip"], "center": v["center"]})
         out[tg] = [{k: s[k] for k in
-                    ("from", "to", "area", "method", "move", "tplLo", "tplHi", "battles")}
+                    ("from", "to", "area", "method", "move", "tplLo", "tplHi",
+                     "battles", "sustainLo", "sustainHi", "mons", "roundTrip", "center")}
                    for s in segs]
     return out
 
@@ -260,11 +356,21 @@ def _worker(species_list):
     return [(sp, species_itinerary(sp)) for sp in species_list]
 
 
+def _prefill_heals():
+    """Compute each wild area's nearest-Center round-trip once, before forking, so
+    the workers inherit a warm cache instead of each rebuilding the world graph."""
+    for node in _wild_areas(_ENCOUNTERS, P.MAX_STAGE):
+        folder = _folder_of(node)
+        if folder and folder not in _HEAL_CACHE:
+            heal_roundtrip(folder, node.get("stage", 0))
+
+
 def main():
     global _ENCOUNTERS
     import multiprocessing as _mp
     import concurrent.futures as _cf
     _ENCOUNTERS = _json.load(open(f"{_OUT}/encounters.json"))
+    _prefill_heals()
     species = sorted(sp for sp in P.full_availability() if sp in E.SPECIES)
     workers = int(_os.environ.get("LGMAX_WORKERS") or (_os.cpu_count() or 4))
     workers = max(1, min(workers, len(species)))

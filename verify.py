@@ -857,8 +857,11 @@ check("the capture formula matches the ROM at its anchors",
 # itinerary for all three TM policies; and because a broader TM pool can only add
 # clearable areas, the "any" itinerary covers every level "no TMs" does.
 _itin = _pl.get("itineraries", {})
+# segment = [from,to,area,method,move,tplLo,tplHi,battles,sustainLo,sustainHi,mons,roundTrip,center]
 def _seg_ok(s):
-    return (s[0] <= s[1] and s[2] != -1 and s[5] > 0 and s[6] >= s[5] - 1e-9 and s[7] >= 1)
+    return (s[0] <= s[1] and s[2] != -1 and s[5] > 0 and s[6] >= s[5] - 1e-9
+            and s[7] >= 1 and 0 <= s[8] <= s[9] <= 99 and s[11] >= 0
+            and all(len(m) == 4 and m[0] != -1 for m in s[10]))
 _bad_seg = []
 for _nm, _tgs in _itin.items():
     for _tg, _segs in _tgs.items():
