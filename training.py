@@ -330,7 +330,10 @@ def best_grind(species, level, stage, toggle, encounters, badges):
         "encRate": n.get("encounterRate"),
         "turnsPerLevel": round(best["turns_per_level"], 1),
         "turnsPerBattle": round(best["turns_per_battle"], 2),
-        "battles": round(best["turns_per_level"] / best["turns_per_battle"]) if best["turns_per_battle"] else 0,
+        # at least one fight per level: a high-XP spot can over-level an
+        # underleveled mon in a single battle (turns_per_level/turns < 1), but
+        # you still fight once -- rounding that to 0 would misread as "no fight".
+        "battles": max(1, round(best["turns_per_level"] / best["turns_per_battle"])) if best["turns_per_battle"] else 0,
         "move": best["move"],   # perOpponent already carries the display name
         "sustain": best["sustain"], "mons": best["mons"], "effSec": best["eff_sec"],
         "roundTrip": best["round_trip"], "center": best["center"],
@@ -368,13 +371,34 @@ def stage_for_level(level):
 # Set before forking so every worker inherits it (fork start method); the grind
 # math is pure and keyed by (attacker, defender), so workers never contend.
 _ENCOUNTERS = None
+# species const -> its full_availability record; the earliest stage the run could
+# actually hold that species (set in main() before the fork, like _ENCOUNTERS).
+_AVAIL = None
+
+
+def _first_stage(species):
+    """The earliest stage the run could have this species in hand
+    (progression.full_availability). Grinding it before that is impossible, so a
+    late-caught mon's grind spots are floored here -- otherwise a level->stage map
+    alone sends, say, a Super-Rod Staryu (stage 19) back to Route 4 to grind on
+    L9-11 wilds, a place it could never have been at that level."""
+    global _AVAIL
+    if _AVAIL is None:
+        _AVAIL = P.full_availability()
+    rec = _AVAIL.get(species)
+    return rec["stage"] if rec else 0
 
 
 def _clamped(species, level):
     """All three TM policies at one level, clamped so more move freedom never
     yields a slower spot (the engine can over-pick a recharge move like Hyper
     Beam; a broader pool can always fall back to a narrower moveset)."""
-    stage = stage_for_level(level)
+    # Where a mon of this level fits in the run, but never earlier than the stage
+    # you could first own this species: a late-caught mon (Super-Rod Staryu) that
+    # is underleveled is still being grinded at its acquisition stage or later, so
+    # its spots are the areas reachable THEN, not the low routes a naive
+    # level->stage map would suggest.
+    stage = max(stage_for_level(level), _first_stage(species))
     badges = O.badges_for(stage)
     r = {tg: best_grind(species, level, stage, tg, _ENCOUNTERS, badges) for tg in TOGGLES}
     r["renew"] = _faster(r["none"], r["renew"])
@@ -435,12 +459,13 @@ def _prefill_heals():
 
 
 def main():
-    global _ENCOUNTERS
+    global _ENCOUNTERS, _AVAIL
     import multiprocessing as _mp
     import concurrent.futures as _cf
     _ENCOUNTERS = _json.load(open(f"{_OUT}/encounters.json"))
     _prefill_heals()
-    species = sorted(sp for sp in P.full_availability() if sp in E.SPECIES)
+    _AVAIL = P.full_availability()   # shared to the fork workers; floors grind stage
+    species = sorted(sp for sp in _AVAIL if sp in E.SPECIES)
     workers = int(_os.environ.get("LGMAX_WORKERS") or (_os.cpu_count() or 4))
     workers = max(1, min(workers, len(species)))
     # fork so the loaded engine/encounter tables are shared; one species per task
