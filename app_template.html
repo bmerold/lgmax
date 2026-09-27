@@ -630,6 +630,12 @@ button{font:inherit;color:inherit}
 .evo-arrow{color:var(--ink-3);font-size:13px}
 .evo-txt{font-size:12.5px;line-height:1.3}
 .evo-txt .num{color:var(--ink-3);margin-left:3px}
+/* a mutually-exclusive evolution choice (one Eevee -> one of three stones) */
+.evo-choice{border:1px dashed var(--line);padding:6px 8px 8px;background:var(--surface-2, var(--surface))}
+.evo-choice-h{font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--ink-2);margin-bottom:5px}
+.evo-choice-opts{display:flex;flex-wrap:wrap;gap:8px}
+.evo-choice.done .evo-choice-h{color:var(--accent)}
 .pt-role{font-size:9.5px;color:var(--ink-2);white-space:nowrap}
 .pt-mon .pt-mv{display:flex;flex-direction:column;gap:1px;flex:1;min-width:0}
 .pt-mon .pt-m{font-size:10px;color:var(--ink);white-space:nowrap;line-height:1.25;overflow:hidden;
@@ -1128,11 +1134,78 @@ const costColor = p => p < 40 ? "var(--good)" : (p < 100 ? "var(--warn)" : "var(
 const hpColor = p => p > 50 ? "var(--good)" : (p > 15 ? "var(--warn)" : "var(--bad)");
 
 let starter = "Bulbasaur", view = "play";
+/* The top-level views, one <div id="view-*"> each. Kept as one list so every
+   place that shows/hides views agrees — a stale copy that omitted "cat"/"train"
+   left those tabs blank when reached via the Play drawer. */
+const VIEWS = ["enc", "sec", "tm", "cat", "train", "cho", "play", "dex", "money"];
 let selected = null, selectedSec = 18, selectedLeg = 0, tab = "team";
 /* grind-calculator TM policy: none / renewable-only / any single-use */
 let grindTM = "renew";
 /* the Train tab's mon picker (scope B) */
 let pickSpecies = null;
+
+/* ---- evolution forest, for starter-line and mutually-exclusive choices ----
+   Built from each Dex row's evolvesFromName (index 7) and kind (index 5). Two
+   trackers depend on it: the evolution call-outs must show only YOUR starter's
+   line, and a single gifted individual's competing evolutions (one Eevee, three
+   stones) is one choice, not three separate to-dos. */
+const _evoParent = {}, _evoChildren = {}, _dexKind = {};
+DEX.forEach(d => {
+  const nm = str(d[1]);
+  _dexKind[nm] = str(d[5]);
+  if (d[7] !== -1){
+    const f = str(d[7]);
+    _evoParent[nm] = f;
+    (_evoChildren[f] = _evoChildren[f] || []).push(nm);
+  }
+});
+const _lineOf = root => {           // a species + everything it evolves into
+  const out = new Set([root]), stk = [root];
+  while (stk.length){ const p = stk.pop();
+    for (const c of _evoChildren[p] || []) if (!out.has(c)){ out.add(c); stk.push(c); } }
+  return out;
+};
+const STARTER_LINES = {};
+STARTERS.forEach(s => STARTER_LINES[s] = _lineOf(s));
+/* the two starter lines you did NOT pick -- their evolutions aren't yours to make */
+function nonChosenStarterMons(){
+  const bad = new Set();
+  for (const s of STARTERS) if (s !== starter)
+    for (const n of STARTER_LINES[s]) bad.add(n);
+  return bad;
+}
+/* A single gifted individual whose evolutions compete for one Dex slot: there is
+   exactly one Eevee (the Celadon gift), so its stone evolutions are a choose-one,
+   not three separate catches. Derived, not hard-coded -- a base whose own Dex
+   entry is a gift (evolutions.json + the gift source) and that has >=2 evolutions. */
+const EVO_CHOICE_BASES = new Set(Object.keys(_evoChildren)
+  .filter(b => _evoChildren[b].length >= 2 && _dexKind[b] === "gift"));
+const evoChoiceBase = name => {     // the choice-base this species evolves from, or null
+  const b = _evoParent[name];
+  return b && EVO_CHOICE_BASES.has(b) ? b : null;
+};
+/* the Dex "slot" a species fills when counting: mutually-exclusive branches of one
+   gifted individual share a single slot, everything else is its own slot. */
+const evoSlot = name => { const b = evoChoiceBase(name); return b ? b + "\u0000choice" : name; };
+/* The evolution call-outs to show and track for the current run: drop the two
+   starters you didn't pick (their whole lines), and fold one individual's
+   competing branches into a single choose-one item. Each item is {base, options}:
+   base is the choice base (Eevee) or null, options is its 1+ evolution rows. */
+function sectionEvos(d){
+  const bad = nonChosenStarterMons(), items = [], byBase = {};
+  for (const r of (d && d.de) || []){
+    const to = str(r[1]);
+    if (bad.has(to)) continue;
+    const base = evoChoiceBase(to);
+    if (base && byBase[base]){ byBase[base].options.push(r); continue; }
+    const it = {base: base || null, options: [r]};
+    if (base) byBase[base] = it;
+    items.push(it);
+  }
+  return items;
+}
+/* an evolution item is done once ANY of its options is ticked (you make one) */
+const evoItemDone = it => it.options.some(r => DONE.has(evolveKey(str(r[1]))));
 
 /* ---- play-through progress + where-you-were, kept in this browser ---- */
 let DONE = new Set();
@@ -1199,7 +1272,7 @@ try {
     trading = !!u.trading;
     if (typeof u.sec === "number") selectedSec = u.sec;
     if (typeof u.leg === "number") selectedLeg = u.leg;
-    if (["enc","sec","tm","cat","train","cho","play","dex","money"].includes(u.view)) view = u.view;
+    if (VIEWS.includes(u.view)) view = u.view;
     if (typeof u.enc === "string") selected = u.enc;
     if (["none","renew","any"].includes(u.grindTM)) grindTM = u.grindTM;
   }
@@ -1368,7 +1441,7 @@ document.getElementById("nav").addEventListener("click", ev => {
   view = b.dataset.view;
   document.querySelectorAll("[data-view]").forEach(x =>
     x.setAttribute("aria-current", x.dataset.view === view));
-  ["enc","sec","tm","cat","train","cho","play","dex","money"].forEach(v =>
+  VIEWS.forEach(v =>
     document.getElementById("view-" + v).hidden = v !== view);
   if (view === "dex") renderDex();     // reflects whatever you've checked off so far
   if (view === "money") renderMoney();
@@ -1649,11 +1722,10 @@ const legLetter = k => String.fromCharCode(97 + k);
 function totalSections(){
   return STAGES.reduce((a, s) => a + legsOf(secData(s.id)).length, 0);
 }
-/* The "evolve for new entries" call-outs (d.de) are extra items you must tick
-   for a section to read 100%, alongside its stops (fights, pickups, catches).
-   They belong to the whole section, so they're shown and counted on its LAST
-   leg only -- once. Each is keyed evolve|<name>, same as the Dex panel's boxes. */
-const secEvoKeys = d => ((d && d.de) || []).map(r => evolveKey(str(r[1])));
+/* The "evolve for new entries" call-outs (via sectionEvos) are extra items you
+   must tick for a section to read 100%, alongside its stops (fights, pickups,
+   catches). They belong to the whole section, so they're shown and counted on
+   its LAST leg only -- once. A choose-one (Eevee's stones) is a single item. */
 const isLastLeg = (d, k) => k === legsOf(d).length - 1;
 /* Completion for one leg, counted at the granularity you actually tick: every
    catch counts once PER SPECIES, every other stop once, plus the section's
@@ -1670,8 +1742,8 @@ function legProgress(d, k, L){
     total += names.length;
     done += names.filter(n => DONE.has(speciesKey(s, n))).length;
   }
-  for (const key of isLastLeg(d, k) ? secEvoKeys(d) : []){
-    total += 1; if (DONE.has(key)) done += 1;
+  for (const it of isLastLeg(d, k) ? sectionEvos(d) : []){
+    total += 1; if (evoItemDone(it)) done += 1;
   }
   return {done, total};
 }
@@ -1785,21 +1857,29 @@ document.getElementById("secPanel").addEventListener("click", ev => {
 });
 
 function dexEvoHtml(d){
-  const de = (d && d.de) || [];
-  if (!de.length) return "";
+  const items = sectionEvos(d);
+  if (!items.length) return "";
+  const card = r => {
+    const from=str(r[0]), to=str(r[1]), how=str(r[2]), note=str(r[3]||"");
+    const key = evolveKey(to), done = DONE.has(key), fs = SPRITES[from], ts = SPRITES[to];
+    return `<div class="evo-card${done?" done":""}">
+      <span class="chk${done?" on":""}" data-key="${esc(key)}" title="mark evolved — updates the Dex">✓</span>
+      <span class="evo-pair">
+        ${fs?`<img src="data:image/png;base64,${fs}" alt="">`:`<span class="evo-q">?</span>`}
+        <span class="evo-arrow">→</span>
+        ${ts?`<img src="data:image/png;base64,${ts}" alt="">`:`<span class="evo-q">?</span>`}</span>
+      <span class="evo-txt"><b>${esc(to)}</b> <span class="num">${esc(how)}</span>${
+        note?`<span class="dex-note">${esc(note)}</span>`:""}</span></div>`;
+  };
+  // A choose-one group (one Eevee, three stones) is one item, ticked by picking
+  // any single branch -- it counts once toward the section, not once per branch.
+  const block = it => it.base
+    ? `<div class="evo-choice${evoItemDone(it)?" done":""}">
+         <div class="evo-choice-h">Choose one — there's only one ${esc(it.base)}</div>
+         <div class="evo-choice-opts">${it.options.map(card).join("")}</div></div>`
+    : card(it.options[0]);
   return `<div class="dex-evo"><div class="dex-h">✦ Pokédex — evolve for new entries · check when done</div>
-    <div class="evo-cards">${de.map(r => {
-      const from=str(r[0]), to=str(r[1]), how=str(r[2]), note=str(r[3]||"");
-      const key = evolveKey(to), done = DONE.has(key), fs = SPRITES[from], ts = SPRITES[to];
-      return `<div class="evo-card${done?" done":""}">
-        <span class="chk${done?" on":""}" data-key="${esc(key)}" title="mark evolved — updates the Dex">✓</span>
-        <span class="evo-pair">
-          ${fs?`<img src="data:image/png;base64,${fs}" alt="">`:`<span class="evo-q">?</span>`}
-          <span class="evo-arrow">→</span>
-          ${ts?`<img src="data:image/png;base64,${ts}" alt="">`:`<span class="evo-q">?</span>`}</span>
-        <span class="evo-txt"><b>${esc(to)}</b> <span class="num">${esc(how)}</span>${
-          note?`<span class="dex-note">${esc(note)}</span>`:""}</span></div>`;
-    }).join("")}</div></div>`;
+    <div class="evo-cards">${items.map(block).join("")}</div></div>`;
 }
 function wildPlanHtml(d, onlyMap){
   let wp = (d && d.wp) || [];
@@ -1883,7 +1963,7 @@ function renderSecPanel(id, leg){
   const keys = stops.map(stopKey);
   const doneCount = stops.filter(stopDone).length;
   // full section progress at tick granularity (per-species catches + evolutions)
-  const evoKeys = isLastLeg(d, k) ? secEvoKeys(d) : [];
+  const evoItems = isLastLeg(d, k) ? sectionEvos(d) : [];
   const {done: secDone, total: secTotal} = legProgress(d, k, L);
   /* "next" means the stop after the FURTHEST one you've ticked -- a skipped
      stop earlier (an absent renewable, a fight saved for later) must not
@@ -2255,7 +2335,7 @@ function renderSecPanel(id, leg){
     next: nxt ? `next: ${nextIdx + 1}. ${str(nxt[1]) || ""}${
       planByStop[nextIdx + 1] ? " — " + planByStop[nextIdx + 1] : ""}`
       : secDone >= secTotal ? "all done — on to the next section"
-      : evoKeys.length && doneCount >= stops.length ? "clear the evolution call-outs below to finish"
+      : evoItems.length && doneCount >= stops.length ? "clear the evolution call-outs below to finish"
       : "end of the leg — a few skipped stops remain above",
     n: nextIdx >= 0 ? nextIdx + 1 : null
   };
@@ -2599,7 +2679,7 @@ function openEncounter(id, fromN){
   selected = id; view = "enc";
   document.querySelectorAll("[data-view]").forEach(x =>
     x.setAttribute("aria-current", x.dataset.view === "enc"));
-  ["enc","sec","tm","cat","train","cho","play","dex","money"].forEach(v =>
+  VIEWS.forEach(v =>
     document.getElementById("view-" + v).hidden = v !== "enc");
   renderList();
   renderPanel(e);
@@ -2620,7 +2700,7 @@ function backToGuide(){
   view = dest;
   document.querySelectorAll("[data-view]").forEach(x =>
     x.setAttribute("aria-current", x.dataset.view === dest));
-  ["enc","sec","tm","cho","play","dex","money"].forEach(v =>
+  VIEWS.forEach(v =>
     document.getElementById("view-" + v).hidden = v !== dest);
   saveUi();
   if (dest === "play"){ guideReturn = null; renderPlay(); return; }
@@ -3454,10 +3534,13 @@ document.querySelector("#playDrawer .drawer-links").addEventListener("click", ev
   view = b.dataset.view;
   document.querySelectorAll("#nav [data-view]").forEach(x =>
     x.setAttribute("aria-current", x.dataset.view === view));
-  ["enc","sec","tm","cho","play","dex","money"].forEach(v =>
+  VIEWS.forEach(v =>
     document.getElementById("view-" + v).hidden = v !== view);
   if (view === "dex") renderDex();
   if (view === "money") renderMoney();
+  if (view === "cat") renderCatch();
+  if (view === "train") renderTrain();
+  updateSticky();
   saveUi();
 });
 
@@ -3726,8 +3809,11 @@ function dexScan(){
         }
       }
     }
-    // each evolution available at this stage registers when its step is checked
-    for (const e of (d && d.de) || []) mark(str(e[1]), DONE.has(evolveKey(str(e[1]))));
+    // each evolution available at this stage registers when its step is checked;
+    // sectionEvos drops the starters you didn't pick, so their lines aren't
+    // counted as collectable in a run where you can't make them
+    for (const it of sectionEvos(d))
+      for (const r of it.options) mark(str(r[1]), DONE.has(evolveKey(str(r[1]))));
   }
   mark(starter, true);   // you always start holding your starter
   return {registered, collectable};
@@ -3751,10 +3837,17 @@ function renderDex(){
   // manually ticked one it can't (a prize you actually bought)
   const inTotal = d => collectable.has(nm(d)) || reg(d);
   const registered = new Set(shown.filter(reg).map(nm));
-  const total = shown.filter(inTotal).length;
-  const have = shown.filter(d => inTotal(d) && reg(d)).length;
-  const kTot = shown.filter(d => d[0] <= 151 && inTotal(d)).length;
-  const kHave = shown.filter(d => d[0] <= 151 && inTotal(d) && reg(d)).length;
+  // Count by Dex "slot", not by species, so a single individual's competing
+  // evolutions (Eevee's three stones) fill one slot -- there is one Eevee, so
+  // one eeveelution counts, not three. Everything else is its own slot.
+  const slots = new Set(), slotsHave = new Set(), kSlots = new Set(), kSlotsHave = new Set();
+  for (const d of shown){
+    if (!inTotal(d)) continue;
+    const slot = evoSlot(nm(d)), got = reg(d);
+    slots.add(slot); if (got) slotsHave.add(slot);
+    if (d[0] <= 151){ kSlots.add(slot); if (got) kSlotsHave.add(slot); }
+  }
+  const total = slots.size, have = slotsHave.size, kTot = kSlots.size, kHave = kSlotsHave.size;
   const off = shown.filter(d => !collectable.has(nm(d)) && !reg(d)).length;
   document.getElementById("dexCount").innerHTML =
     `<span class="dex-big">${have}<span class="dex-slash">/${total}</span></span> registered`
@@ -3990,7 +4083,7 @@ document.querySelectorAll("[data-trade]").forEach(x =>
   x.setAttribute("aria-pressed", String((x.dataset.trade === "yes") === trading)));
 document.querySelectorAll("#nav [data-view]").forEach(x =>
   x.setAttribute("aria-current", x.dataset.view === view));
-["enc","sec","tm","cat","train","cho","play","dex","money"].forEach(v =>
+VIEWS.forEach(v =>
   document.getElementById("view-" + v).hidden = v !== view);
 const _selRow = document.querySelector(`.sec-row[data-sec="${selectedSec}"][data-leg="${selectedLeg}"]`);
 if (_selRow) _selRow.scrollIntoView({block: "center"});
