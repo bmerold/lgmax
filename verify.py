@@ -200,8 +200,14 @@ check("every Pokemon in a battle log is on that section's team",
       not strangers, str(strangers[:4]))
 
 # A wild route is walked by a LEAD chosen blind against the whole encounter
-# table, not cherry-picked per species. The signature of that is one Pokemon
-# taking most of a map's battles; per-encounter cherry-picking spreads them.
+# table (pick_lead), not cherry-picked per species. A blind lead usually takes
+# most of a map's battles, but on a long batch it can deplete and rotate to a
+# backup -- legitimately, without being a per-species cherry-pick. The two are
+# distinguishable: cherry-picking answers each wild species with its one best
+# counter, so a species never gets two leads; depletion-rotation keeps the same
+# grass spawning while the lead changes, so a species IS answered by more than
+# one mon. So flag scatter (no mon >=50%) only when NO species was shared across
+# leads -- a clean per-species partition, the cherry-pick fingerprint.
 scatter = []
 for starter, per_stage in raw["sections"].items():
     for st, sec in per_stage.items():
@@ -209,10 +215,13 @@ for starter, per_stage in raw["sections"].items():
         for l in sec["log"]:
             if l["kind"] != "wild": continue
             tally = collections.Counter()
+            leads_per_opp = collections.defaultdict(set)
             for s in l["steps"]:
                 tally[s.get("by")] += s.get("n", 1)
+                leads_per_opp[s.get("opp")].add(s.get("by"))
             tot = sum(tally.values())
-            if tot >= 6 and tally.most_common(1)[0][1] < 0.5 * tot:
+            rotated = any(len(v) > 1 for v in leads_per_opp.values())
+            if tot >= 6 and tally.most_common(1)[0][1] < 0.5 * tot and not rotated:
                 scatter.append((starter, int(st), l["enc"], dict(tally)))
 check("wild routes are walked by a lead, not cherry-picked per encounter",
       not scatter, str(scatter[:2]))

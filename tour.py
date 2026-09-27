@@ -1065,6 +1065,20 @@ def solve(max_stage=34, verbose=True):
         for n in picked:
             if n["kind"] == "catch" and "rod" in (n.get("method") or ""):
                 pairs.append((n["method"].title(), n["what"]))
+        # An in-game trade hands over a species, so the catch that provides that
+        # give-away has to come first -- you can't trade a Poliwhirl for Jynx
+        # before you've fished the Poliwhirl. Order the trade after the stop whose
+        # catch list includes its give species (both live in the same stage).
+        for t in picked:
+            w = str(t.get("what", ""))
+            if not w.startswith("Trade for"): continue
+            give = (t.get("species") or [None])[0]
+            if not give: continue
+            give = str(give).split(" (")[0]
+            src = next((n["what"] for n in picked if n.get("kind") == "catch"
+                        and any(str(s).split(" (")[0] == give
+                                for s in (n.get("species") or []))), None)
+            if src: pairs.append((src, w))
         for _ in range(8):
             changed = False
             for a_name, b_name in pairs:
