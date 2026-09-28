@@ -297,6 +297,14 @@ def area_grind(species, level, stage, pool, node, badges, pp_aware=True):
     base = O._weighted_sweep(player, opps, pool, badges)
     if base is None or not base.get("turns"):
         return None
+    # You can't grind where you faint: the max-damage set takes the fewest turns
+    # and so the least damage, so if even it can't clear the average encounter
+    # without going down, no move can -- reject the area outright. Without this a
+    # frail late-caught mon (Venonat, floored to stage 19) gets sent to high-XP
+    # water/cave spots whose Lv 20-30 wilds one-shot it, purely because the
+    # effective-time ranking never checked survival.
+    if not base.get("survives"):
+        return None
     best = _score_sweep(base, species, level, xp_per, node, stage)
     if pp_aware and best["_heal_trips"] > 0 and best["_pp_bound"]:
         for mv in _alt_grind_moves(player, opps, pool, badges):
