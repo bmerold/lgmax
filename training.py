@@ -297,12 +297,8 @@ def area_grind(species, level, stage, pool, node, badges, pp_aware=True):
     base = O._weighted_sweep(player, opps, pool, badges)
     if base is None or not base.get("turns"):
         return None
-    # You can't grind where you faint: the max-damage set takes the fewest turns
-    # and so the least damage, so if even it can't clear the average encounter
-    # without going down, no move can -- reject the area outright. Without this a
-    # frail late-caught mon (Venonat, floored to stage 19) gets sent to high-XP
-    # water/cave spots whose Lv 20-30 wilds one-shot it, purely because the
-    # effective-time ranking never checked survival.
+    # Quick reject: if even the max-damage set (fewest turns, least damage taken)
+    # can't clear the average encounter without going down, no move can.
     if not base.get("survives"):
         return None
     best = _score_sweep(base, species, level, xp_per, node, stage)
@@ -314,6 +310,14 @@ def area_grind(species, level, stage, pool, node, badges, pp_aware=True):
             cand = _score_sweep(alt, species, level, xp_per, node, stage)
             if cand["eff_sec"] < best["eff_sec"]:
                 best = cand
+    # A real grind spot lets you clear at least one full fight -- worst encounter
+    # and PP -- before walking to a Center. sustain 0 means you'd heal after every
+    # single battle, which isn't a place you grind; reject it so a frail late-caught
+    # mon (Venonat, floored to stage 19) is sent to a survivable spot, not a high-XP
+    # Super-Rod hole where its 25 XP/fight comes with a heal every fight. If no area
+    # clears the bar at this level, the level is simply left out of the itinerary.
+    if best["sustain"] < 1:
+        return None
     return best
 
 
