@@ -243,9 +243,26 @@ def build_pool(species, level, stage, toggle):
     return list(moves)
 
 
+def _ungrindable(node):
+    """Wild areas you can't actually grind in, so they're never grind spots:
+      - the Safari Zone is catch-only (Safari Balls + bait/rocks, no battle) -- only
+        the Safari Zone carries "Safari" in its name;
+      - Rock Smash yields a battle only from a smashable rock, and a map holds just a
+        few that don't respawn until you leave and re-enter, so it can't be farmed
+        for XP (it's for finding a specific mon, not grinding)."""
+    tag = " ".join(str(node.get(k) or "") for k in ("map", "locationRaw", "location"))
+    if "SAFARI" in tag.upper():
+        return True
+    if "rock smash" in (node.get("method") or "").lower():
+        return True
+    return False
+
+
 def _wild_areas(encounters, stage):
-    """Every wild area reachable by `stage`, from data/encounters.json."""
-    return [e for e in encounters if e.get("kind") == "wild" and e.get("stage", 99) <= stage]
+    """Every wild area reachable by `stage` where you can actually grind (excludes
+    the catch-only Safari Zone and un-farmable Rock Smash), from encounters.json."""
+    return [e for e in encounters if e.get("kind") == "wild"
+            and e.get("stage", 99) <= stage and not _ungrindable(e)]
 
 
 def _area_opponents(node):
@@ -430,7 +447,10 @@ def _faster(a, b):
 # segment -- so the app can show "L12-18: Route 3, Double Kick" for each mon. A
 # mon's level pins its stage (the run never grinds, so stage levels climb), so
 # the stage is derived from the level.
-ITIN_LEVELS = list(range(5, 56))
+# Cover the whole climb to the level cap, not just the through-story range: a
+# completionist keeps leveling in the post-game. A segment at level L is "grind
+# here to reach L+1", so the last grind level is 99 (99 -> 100); 100 is the cap.
+ITIN_LEVELS = list(range(5, 100))
 
 
 def stage_for_level(level):
@@ -446,34 +466,25 @@ def stage_for_level(level):
 # Set before forking so every worker inherits it (fork start method); the grind
 # math is pure and keyed by (attacker, defender), so workers never contend.
 _ENCOUNTERS = None
-# species const -> its full_availability record; the earliest stage the run could
-# actually hold that species (set in main() before the fork, like _ENCOUNTERS).
+# species const -> full_availability record; used in main() to list the species
+# that have an itinerary (set before the fork, like _ENCOUNTERS).
 _AVAIL = None
-
-
-def _first_stage(species):
-    """The earliest stage the run could have this species in hand
-    (progression.full_availability). Grinding it before that is impossible, so a
-    late-caught mon's grind spots are floored here -- otherwise a level->stage map
-    alone sends, say, a Super-Rod Staryu (stage 19) back to Route 4 to grind on
-    L9-11 wilds, a place it could never have been at that level."""
-    global _AVAIL
-    if _AVAIL is None:
-        _AVAIL = P.full_availability()
-    rec = _AVAIL.get(species)
-    return rec["stage"] if rec else 0
 
 
 def _clamped(species, level):
     """All three TM policies at one level, clamped so more move freedom never
     yields a slower spot (the engine can over-pick a recharge move like Hyper
     Beam; a broader pool can always fall back to a narrower moveset)."""
-    # Where a mon of this level fits in the run, but never earlier than the stage
-    # you could first own this species: a late-caught mon (Super-Rod Staryu) that
-    # is underleveled is still being grinded at its acquisition stage or later, so
-    # its spots are the areas reachable THEN, not the low routes a naive
-    # level->stage map would suggest.
-    stage = max(stage_for_level(level), _first_stage(species))
+    # Don't gate grind areas by the mon's level. A level->stage map assumes this
+    # one mon's level is where the whole run is, which is wrong for a catch-up tool
+    # (your other party members are further along) and needlessly hides the best
+    # spot. Instead every area the run ever unlocks is a candidate, and the
+    # survival + sustain gates in area_grind naturally rule out the ones a mon of
+    # this level can't handle -- a Lv 5 mon can't be sent to Seafoam because it
+    # faints there, not because a stage number forbids it. Assume full progression
+    # (all badges, every TM available under its toggle): the tool shows the most
+    # optimal reachable spot.
+    stage = P.MAX_STAGE
     badges = O.badges_for(stage)
     r = {tg: best_grind(species, level, stage, tg, _ENCOUNTERS, badges) for tg in TOGGLES}
     r["renew"] = _faster(r["none"], r["renew"])
@@ -554,7 +565,9 @@ def main():
     for part in parts:
         for sp, tg_segs in part:
             itin[E.SPECIES[sp]["name"]] = tg_segs
-    out = {"itineraries": itin, "range": [ITIN_LEVELS[0], ITIN_LEVELS[-1]]}
+    # range is the levels the guide covers: from the first grind level to the cap
+    # you can reach (the last grind level, 99, takes you to 100)
+    out = {"itineraries": itin, "range": [ITIN_LEVELS[0], ITIN_LEVELS[-1] + 1]}
     with open(f"{_OUT}/training.json", "w") as f:
         _json.dump(out, f, separators=(",", ":"))
     n_segs = sum(len(t) for s in itin.values() for t in s.values())
