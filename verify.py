@@ -916,41 +916,46 @@ check("the capture formula matches the ROM at its anchors",
       f"cr3poke={CAP.catch_chance(3, 'Poke', 1.0):.4f}")
 
 # ------------------------------------------------------------------ grind calc
-# The training itineraries (training.py): each segment [from,to,area,method,move,
-# tplLo,tplHi,battles] is well-formed and the per-species segments run in strict
-# ascending, non-overlapping level order; every obtainable species has an
-# itinerary for all three TM policies; and because a broader TM pool can only add
-# clearable areas, the "any" itinerary covers every level "no TMs" does.
+# The training itineraries (training.py): per species TWO modes (journey, postgame),
+# each with one segment list per TM policy. Every segment [from,to,area,method,move,
+# tplLo,tplHi,battles] is well-formed and the per-(species,mode,policy) segments run
+# in strict ascending, non-overlapping level order; every obtainable species has both
+# modes and all three TM policies; and because a broader TM pool can only add
+# clearable areas, the "any" itinerary covers every level "no TMs" does, per mode.
 _itin = _pl.get("itineraries", {})
+_MODES = {"journey", "postgame"}
 # segment = [from,to,area,method,move,tplLo,tplHi,battles,sustainLo,sustainHi,mons,roundTrip,center]
 def _seg_ok(s):
     return (s[0] <= s[1] and s[2] != -1 and s[5] > 0 and s[6] >= s[5] - 1e-9
             and s[7] >= 1 and 0 <= s[8] <= s[9] <= 99 and s[11] >= 0
             and all(len(m) == 4 and m[0] != -1 for m in s[10]))
 _bad_seg = []
-for _nm, _tgs in _itin.items():
-    for _tg, _segs in _tgs.items():
-        _prev = -1
-        for _s in _segs:
-            if not _seg_ok(_s) or _s[0] <= _prev:
-                _bad_seg.append((_nm, _tg))
-                break
-            _prev = _s[1]
+for _nm, _modes in _itin.items():
+    for _mode, _tgs in _modes.items():
+        for _tg, _segs in _tgs.items():
+            _prev = -1
+            for _s in _segs:
+                if not _seg_ok(_s) or _s[0] <= _prev:
+                    _bad_seg.append((_nm, _mode, _tg))
+                    break
+                _prev = _s[1]
 check("every grind itinerary segment is well-formed and in order",
       bool(_itin) and not _bad_seg, str(_bad_seg[:4]))
 _it_missing = [E.SPECIES[_sp]["name"] for _sp in av
                if _sp in E.SPECIES
                and (E.SPECIES[_sp]["name"] not in _itin
-                    or set(_itin[E.SPECIES[_sp]["name"]]) != {"none", "renew", "any"})]
-check("every obtainable species has an itinerary for each TM policy",
+                    or set(_itin[E.SPECIES[_sp]["name"]]) != _MODES
+                    or any(set(_m) != {"none", "renew", "any"}
+                           for _m in _itin[E.SPECIES[_sp]["name"]].values()))]
+check("every obtainable species has both grind modes and each TM policy",
       not _it_missing, str(_it_missing[:5]))
-def _levels_covered(nm, tg):
+def _levels_covered(nm, mode, tg):
     out = set()
-    for s in _itin.get(nm, {}).get(tg, []):
+    for s in _itin.get(nm, {}).get(mode, {}).get(tg, []):
         out |= set(range(s[0], s[1] + 1))
     return out
-_bad_cov = [nm for nm in _itin
-            if not _levels_covered(nm, "none") <= _levels_covered(nm, "any")]
+_bad_cov = [(nm, mode) for nm in _itin for mode in _itin[nm]
+            if not _levels_covered(nm, mode, "none") <= _levels_covered(nm, mode, "any")]
 check("the 'any TM' itinerary covers every level 'no TMs' does",
       not _bad_cov, str(_bad_cov[:4]))
 

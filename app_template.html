@@ -1024,15 +1024,19 @@ const PLAYBOOKS = DATA.playbooks || [];
 /* Grind calculator (training.py): fastest wild spot per party mon, keyed
    "name|level|stage|toggle"; value [area, method, turnsPerLevel, battles, move,
    encRate]. The run never grinds -- this is a catch-up tool for falling behind. */
-/* Grind itineraries (training.py): {name: {toggle: [segment...]}}, each segment
-   [fromLv, toLv, area, method, move, tplLo, tplHi, battles]. A catch-up tool --
-   the run itself never grinds. */
+/* Grind itineraries (training.py): {name: {mode: {toggle: [segment...]}}} where
+   mode is "journey" (playing through -- areas gated by where you'd be) or
+   "postgame" (everything unlocked). Each segment [fromLv, toLv, area, method,
+   move, tplLo, tplHi, battles]. A catch-up tool -- the run itself never grinds. */
 const ITIN = DATA.itineraries || {};
-const GRIND_RANGE = DATA.grindRange || [5, 55];
-/* the itinerary segment covering a mon at `level` under `toggle`, or null.
+const GRIND_RANGE = DATA.grindRange || [5, 100];
+const GRIND_MODE_LABEL = {journey: "In journey", postgame: "Post-game"};
+const itinFor = (name, mode) => ((ITIN[name] || {})[mode] || {});
+/* the itinerary segment covering a mon at `level` under `toggle`, or null. The
+   section/play card is the in-playthrough guide, so it reads the journey mode.
    segment = [from,to,area,method,move,tplLo,tplHi,battles,sustainLo,sustainHi,mons] */
 function grindAt(name, level, toggle){
-  for (const s of (ITIN[name] || {})[toggle] || []){
+  for (const s of itinFor(name, "journey")[toggle] || []){
     if (s[0] <= level && level <= s[1]) return s;
   }
   return null;
@@ -1141,6 +1145,8 @@ const VIEWS = ["enc", "sec", "tm", "cat", "train", "cho", "play", "dex", "money"
 let selected = null, selectedSec = 18, selectedLeg = 0, tab = "team";
 /* grind-calculator TM policy: none / renewable-only / any single-use */
 let grindTM = "renew";
+/* Train-tab itinerary: "journey" (playing through) or "postgame" (all unlocked) */
+let grindMode = "journey";
 /* the Train tab's mon picker (scope B) */
 let pickSpecies = null;
 
@@ -1264,7 +1270,7 @@ function toggleChk(c){
 /* the "||"-joined species keys for a catch stop, for a toggle-all checkbox */
 const allSpeciesKeys = s => catchNames(s).map(n => speciesKey(s, n)).join("||");
 const saveUi = () => { try { localStorage.setItem("lgmax-ui",
-  JSON.stringify({view, starter, trading, sec: selectedSec, leg: selectedLeg, enc: selected, grindTM, pickSpecies})); } catch (e) {} };
+  JSON.stringify({view, starter, trading, sec: selectedSec, leg: selectedLeg, enc: selected, grindTM, grindMode, pickSpecies})); } catch (e) {} };
 try {
   const u = JSON.parse(localStorage.getItem("lgmax-ui") || "null");
   if (u){
@@ -1275,6 +1281,7 @@ try {
     if (VIEWS.includes(u.view)) view = u.view;
     if (typeof u.enc === "string") selected = u.enc;
     if (["none","renew","any"].includes(u.grindTM)) grindTM = u.grindTM;
+    if (["journey","postgame"].includes(u.grindMode)) grindMode = u.grindMode;
     // the Train tab's picked mon (validated against the itinerary list at render)
     if (typeof u.pickSpecies === "string") pickSpecies = u.pickSpecies;
   }
@@ -3595,7 +3602,7 @@ function applyBundle(b){
     localStorage.setItem("lgmax-play", JSON.stringify(PLAY));
     localStorage.setItem("lgmax-dex", JSON.stringify(DEXMANUAL));
     localStorage.setItem("lgmax-ui", JSON.stringify(
-      {view, starter, trading, sec: selectedSec, leg: selectedLeg, enc: selected, grindTM, pickSpecies}));
+      {view, starter, trading, sec: selectedSec, leg: selectedLeg, enc: selected, grindTM, grindMode, pickSpecies}));
     localStorage.setItem("lgmax-ts", String(PROGRESS_TS));
   } catch (e) {}
   return changed;
@@ -3951,9 +3958,11 @@ function renderCatch(){
 /* ---------------- train (grind itinerary, scope B) ---------------- */
 const GRIND_TM_LABEL = {none: "No TMs", renew: "Renewable TMs", any: "Any TM"};
 function grindPickNames(){
-  // obtainable species that have any itinerary under some TM policy
+  // obtainable species that have any itinerary under some mode + TM policy
   return [...new Set(DEX.map(d => str(d[1])))].filter(n => {
-    const t = ITIN[n]; return t && Object.values(t).some(segs => segs.length);
+    const modes = ITIN[n];
+    return modes && Object.values(modes).some(tgs =>
+      Object.values(tgs).some(segs => segs.length));
   }).sort();
 }
 function renderTrain(){
@@ -3962,7 +3971,7 @@ function renderTrain(){
   const names = grindPickNames();
   if (!names.length){ el.innerHTML = `<p class="foot">No training data.</p>`; return; }
   if (!pickSpecies || !names.includes(pickSpecies)) pickSpecies = names[0];
-  const segs = (ITIN[pickSpecies] || {})[grindTM] || [];
+  const segs = itinFor(pickSpecies, grindMode)[grindTM] || [];
   const spr = SPRITES[pickSpecies];
   const opt = (v, cur, lbl) => `<option value="${esc(String(v))}"${v === cur ? " selected" : ""}>${esc(lbl)}</option>`;
   // segment = [from,to,area,method,move,tplLo,tplHi,battles,sustainLo,sustainHi,mons,roundTrip,center]
@@ -3983,9 +3992,14 @@ function renderTrain(){
       <span class="note">the fastest wild spot for each stretch of levels, and the move for each Pokémon there — a catch-up tool; the run itself never grinds</span></div>
     <div class="train-pick">
       <label>Pokémon <select id="pickSp">${names.map(n => opt(n, pickSpecies, n)).join("")}</select></label>
+      <div class="grind-toggle" role="group" aria-label="When you're grinding">${["journey", "postgame"].map(v =>
+        `<button class="gtm${grindMode === v ? " on" : ""}" data-grindmode="${v}">${GRIND_MODE_LABEL[v]}</button>`).join("")}</div>
       <div class="grind-toggle" role="group" aria-label="TM policy">${["none", "renew", "any"].map(v =>
         `<button class="gtm${grindTM === v ? " on" : ""}" data-grindtm="${v}">${GRIND_TM_LABEL[v]}</button>`).join("")}</div>
     </div>
+    <p class="note train-mode-note">${grindMode === "postgame"
+      ? "Post-game: everything's unlocked, so this is the fastest spot you can survive anywhere in Kanto and the Sevii Islands — level to 100."
+      : "In journey: only the areas you'd have reached by this point in the story, for grinding mid-playthrough."}</p>
     <div class="train-head">
       ${spr ? `<img src="data:image/png;base64,${spr}" alt="">` : `<span class="pb-ball">◓</span>`}
       <div class="tr-head">${esc(pickSpecies)}</div></div>
@@ -3998,7 +4012,9 @@ function renderTrain(){
 }
 document.getElementById("trainPanel").addEventListener("click", ev => {
   const gt = ev.target.closest("[data-grindtm]");
-  if (gt){ grindTM = gt.dataset.grindtm; renderTrain(); saveUi(); }
+  if (gt){ grindTM = gt.dataset.grindtm; renderTrain(); saveUi(); return; }
+  const gm = ev.target.closest("[data-grindmode]");
+  if (gm){ grindMode = gm.dataset.grindmode; renderTrain(); saveUi(); }
 });
 document.getElementById("trainPanel").addEventListener("change", ev => {
   if (ev.target.id !== "pickSp") return;

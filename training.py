@@ -466,25 +466,45 @@ def stage_for_level(level):
 # Set before forking so every worker inherits it (fork start method); the grind
 # math is pure and keyed by (attacker, defender), so workers never contend.
 _ENCOUNTERS = None
-# species const -> full_availability record; used in main() to list the species
-# that have an itinerary (set before the fork, like _ENCOUNTERS).
+# species const -> full_availability record; the earliest stage the run could hold
+# the species (set in main() before the fork, like _ENCOUNTERS).
 _AVAIL = None
 
+# The two itineraries we build per species (the app shows one at a time):
+#   journey  -- while playing through: assume your progress tracks this mon's level
+#               (party ~ its level), so only the areas unlocked by then are options.
+#               A level->stage map is a rough proxy, but it keeps the mid-run guide
+#               from sending you somewhere you can't reach yet.
+#   postgame -- everything unlocked: every area is a candidate and only the survival
+#               + sustain gates decide where a mon of this level can grind. Assumes
+#               full progression (all badges, every TM per toggle) -> the most
+#               optimal reachable spot, wherever it is.
+GRIND_MODES = ("journey", "postgame")
 
-def _clamped(species, level):
-    """All three TM policies at one level, clamped so more move freedom never
-    yields a slower spot (the engine can over-pick a recharge move like Hyper
+
+def _first_stage(species):
+    """The earliest stage the run could hold this species (full_availability); the
+    journey itinerary is floored here so an underleveled late-catch (Super-Rod
+    Staryu, stage 19) isn't sent to grind somewhere it couldn't have been yet."""
+    global _AVAIL
+    if _AVAIL is None:
+        _AVAIL = P.full_availability()
+    rec = _AVAIL.get(species)
+    return rec["stage"] if rec else 0
+
+
+def _grind_stage(species, level, mode):
+    """The progression stage that gates areas/badges/TMs for this mode at a level."""
+    if mode == "postgame":
+        return P.MAX_STAGE
+    return max(stage_for_level(level), _first_stage(species))
+
+
+def _clamped(species, level, mode):
+    """All three TM policies at one level for one mode, clamped so more move freedom
+    never yields a slower spot (the engine can over-pick a recharge move like Hyper
     Beam; a broader pool can always fall back to a narrower moveset)."""
-    # Don't gate grind areas by the mon's level. A level->stage map assumes this
-    # one mon's level is where the whole run is, which is wrong for a catch-up tool
-    # (your other party members are further along) and needlessly hides the best
-    # spot. Instead every area the run ever unlocks is a candidate, and the
-    # survival + sustain gates in area_grind naturally rule out the ones a mon of
-    # this level can't handle -- a Lv 5 mon can't be sent to Seafoam because it
-    # faints there, not because a stage number forbids it. Assume full progression
-    # (all badges, every TM available under its toggle): the tool shows the most
-    # optimal reachable spot.
-    stage = P.MAX_STAGE
+    stage = _grind_stage(species, level, mode)
     badges = O.badges_for(stage)
     r = {tg: best_grind(species, level, stage, tg, _ENCOUNTERS, badges) for tg in TOGGLES}
     r["renew"] = _faster(r["none"], r["renew"])
@@ -492,12 +512,11 @@ def _clamped(species, level):
     return r
 
 
-def species_itinerary(species):
-    """Per-TM-policy leveling itinerary for one species: an ordered list of
-    segments {from, to, area, method, move, tplLo, tplHi, battles}, one per run
-    of levels that share a best spot and move. Levels with no reachable spot are
-    left out, so the itinerary is exactly the trainable stretch."""
-    per = {lv: _clamped(species, lv) for lv in ITIN_LEVELS}
+def _segments(per):
+    """Merge one mode's per-level results into segments per TM policy: an ordered
+    list {from, to, area, method, move, ...}, one per run of levels that share a
+    best spot and move. Levels with no reachable spot are left out, so the
+    itinerary is exactly the trainable stretch."""
     out = {}
     for tg in TOGGLES:
         segs = []
@@ -529,6 +548,14 @@ def species_itinerary(species):
                      "battles", "sustainLo", "sustainHi", "mons", "roundTrip", "center")}
                    for s in segs]
     return out
+
+
+def species_itinerary(species):
+    """Both leveling itineraries for one species -> {mode: {toggle: [segment...]}}.
+    The journey and post-game modes differ only in how far the run is assumed to
+    have progressed (see GRIND_MODES)."""
+    return {mode: _segments({lv: _clamped(species, lv, mode) for lv in ITIN_LEVELS})
+            for mode in GRIND_MODES}
 
 
 def _worker(species_list):
@@ -570,8 +597,9 @@ def main():
     out = {"itineraries": itin, "range": [ITIN_LEVELS[0], ITIN_LEVELS[-1] + 1]}
     with open(f"{_OUT}/training.json", "w") as f:
         _json.dump(out, f, separators=(",", ":"))
-    n_segs = sum(len(t) for s in itin.values() for t in s.values())
-    print(f"training: {len(itin)} species, {n_segs} itinerary segments")
+    n_segs = sum(len(segs) for sp in itin.values()
+                 for modes in sp.values() for segs in modes.values())
+    print(f"training: {len(itin)} species x {len(GRIND_MODES)} modes, {n_segs} itinerary segments")
 
 
 if __name__ == "__main__":

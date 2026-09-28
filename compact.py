@@ -548,25 +548,27 @@ def main():
     # as-is rather than through the string pool.
     economy = json.load(open(f"{OUT}/economy.json")) if os.path.exists(f"{OUT}/economy.json") else {}
 
-    # ---- grind calculator (training.py): per species, a leveling ITINERARY for
-    # each TM policy -- an ordered list of segments, one per run of levels that
-    # share a best wild spot and move. {name: {toggle: [segment...]}}, each
-    # segment packed [fromLv, toLv, area, method, move, tplLo, tplHi, battles]
+    # ---- grind calculator (training.py): per species, TWO leveling ITINERARIES
+    # ("journey" while playing through, "postgame" fully unlocked), each with one
+    # ordered segment list per TM policy. {name: {mode: {toggle: [segment...]}}},
+    # each segment packed [fromLv, toLv, area, method, move, tplLo, tplHi, battles]
     # (strings pooled). Both the section card and the Train tab read this.
     _train = (json.load(open(f"{OUT}/training.json"))
               if os.path.exists(f"{OUT}/training.json") else {})
     # segment: [from, to, area, method, move, tplLo, tplHi, battles, sustainLo,
     #  sustainHi, mons, roundTrip, center] where mons = [[wildName, wildLevel,
     #  chance%, move]...] and roundTrip/center are the nearest-Center heal walk.
+    def _pack_segs(_segs):
+        return [[s["from"], s["to"], S(s["area"]), S(s["method"]),
+                 S(s.get("move")), s["tplLo"], s["tplHi"], s["battles"],
+                 s["sustainLo"], s["sustainHi"],
+                 [[S(m[0]), m[1], m[2], S(m[3])] for m in s.get("mons", [])],
+                 s.get("roundTrip") or 0, S(s.get("center"))]
+                for s in _segs]
     itineraries = {
-        _nm: {_tg: [[s["from"], s["to"], S(s["area"]), S(s["method"]),
-                     S(s.get("move")), s["tplLo"], s["tplHi"], s["battles"],
-                     s["sustainLo"], s["sustainHi"],
-                     [[S(m[0]), m[1], m[2], S(m[3])] for m in s.get("mons", [])],
-                     s.get("roundTrip") or 0, S(s.get("center"))]
-                    for s in _segs]
-              for _tg, _segs in _tgs.items()}
-        for _nm, _tgs in _train.get("itineraries", {}).items()}
+        _nm: {_mode: {_tg: _pack_segs(_segs) for _tg, _segs in _tgs.items()}
+              for _mode, _tgs in _modes.items()}
+        for _nm, _modes in _train.get("itineraries", {}).items()}
 
     # Level targets: the assumed party level on arrival at each gym (and the
     # League), straight from progression.STAGES. The run never grinds, so a
