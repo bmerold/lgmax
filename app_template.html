@@ -1264,7 +1264,7 @@ function toggleChk(c){
 /* the "||"-joined species keys for a catch stop, for a toggle-all checkbox */
 const allSpeciesKeys = s => catchNames(s).map(n => speciesKey(s, n)).join("||");
 const saveUi = () => { try { localStorage.setItem("lgmax-ui",
-  JSON.stringify({view, starter, trading, sec: selectedSec, leg: selectedLeg, enc: selected, grindTM})); } catch (e) {} };
+  JSON.stringify({view, starter, trading, sec: selectedSec, leg: selectedLeg, enc: selected, grindTM, pickSpecies})); } catch (e) {} };
 try {
   const u = JSON.parse(localStorage.getItem("lgmax-ui") || "null");
   if (u){
@@ -1275,6 +1275,8 @@ try {
     if (VIEWS.includes(u.view)) view = u.view;
     if (typeof u.enc === "string") selected = u.enc;
     if (["none","renew","any"].includes(u.grindTM)) grindTM = u.grindTM;
+    // the Train tab's picked mon (validated against the itinerary list at render)
+    if (typeof u.pickSpecies === "string") pickSpecies = u.pickSpecies;
   }
 } catch (e) {}
 let active = new Set(["boss","rival","trainer","wild"]);
@@ -3591,7 +3593,7 @@ function applyBundle(b){
     localStorage.setItem("lgmax-play", JSON.stringify(PLAY));
     localStorage.setItem("lgmax-dex", JSON.stringify(DEXMANUAL));
     localStorage.setItem("lgmax-ui", JSON.stringify(
-      {view, starter, trading, sec: selectedSec, leg: selectedLeg, enc: selected}));
+      {view, starter, trading, sec: selectedSec, leg: selectedLeg, enc: selected, grindTM, pickSpecies}));
     localStorage.setItem("lgmax-ts", String(PROGRESS_TS));
   } catch (e) {}
   return changed;
@@ -4000,6 +4002,7 @@ document.getElementById("trainPanel").addEventListener("change", ev => {
   if (ev.target.id !== "pickSp") return;
   pickSpecies = ev.target.value;
   renderTrain();
+  saveUi();
 });
 
 /* ---------------- money ---------------- */
