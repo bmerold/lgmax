@@ -1326,10 +1326,12 @@ function renderRunProgress(){
       <text class="ring-pct" x="26" y="26">${rp.pct}%</text></svg>
     <div class="ring-l"><b>${rp.done}/${rp.total}</b><span>run complete</span></div>`;
 }
-/* Rough playtime for pacing, not a stopwatch: running-speed walking + per-turn
-   battle animation + per-fight dialogue overhead. The three constants are the
-   obvious knobs; the estimate excludes grinding (the run never grinds). */
-const SEC_PER_STEP = 0.28, SEC_PER_TURN = 9, SEC_PER_FIGHT = 22;
+/* Rough playtime for pacing, not a stopwatch, assuming the fast way to play --
+   BATTLE SCENE OFF and text speed FAST: running-speed walking + ~5s per battle
+   turn + ~10s fixed per fight (encounter load, faint/XP, exit). Measured against
+   real play; the three constants are the obvious knobs; excludes grinding (the
+   run never grinds). */
+const SEC_PER_STEP = 0.28, SEC_PER_TURN = 5, SEC_PER_FIGHT = 10;
 const estSeconds = (steps, turns, fights) =>
   steps * SEC_PER_STEP + turns * SEC_PER_TURN + fights * SEC_PER_FIGHT;
 function fmtDur(sec){
@@ -1355,7 +1357,7 @@ function renderMast(){
     [totalSections(), "sections"],
     [(ROUTE.total || 0).toLocaleString(), "steps to 100%"],
     [fmtDur(runSeconds()), "est. playtime",
-     `Rough estimate: ${SEC_PER_STEP}s per step (running), ${SEC_PER_TURN}s per battle turn, ${SEC_PER_FIGHT}s per fight for dialogue. No grinding, since the run never grinds.`]
+     `Rough estimate with battle scene OFF and fast text: ${SEC_PER_STEP}s per step (running), ${SEC_PER_TURN}s per battle turn, ${SEC_PER_FIGHT}s fixed per fight. No grinding, since the run never grinds.`]
   ];
   document.getElementById("mastStats").innerHTML = rows
     .map(([v, l, t]) => `<div class="mstat"${t ? ` title="${esc(t)}"` : ""}><b>${v}</b><span>${l}</span></div>`).join("");

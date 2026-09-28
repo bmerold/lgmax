@@ -97,10 +97,71 @@ SUSTAIN_CAP = 99   # fights before healing; above this is effectively "no limit"
 # far longer, and can win on effective time by saving Pokémon Center round-trips.
 GRIND_ALT_MOVES = 3
 
-# Effective grind time = battle time + the walk to a Pokémon Center and back
-# whenever HP/PP runs out. Time constants mirror the app's playtime model
-# (SEC_PER_STEP / SEC_PER_TURN / SEC_PER_FIGHT); HEAL_SEC covers the nurse.
-SEC_PER_STEP, SEC_PER_TURN, SEC_PER_FIGHT, HEAL_SEC = 0.28, 9.0, 22.0, 15.0
+# Effective grind time = time to FIND each wild battle (walk or fish) + the battle
+# itself + the walk to a Pokemon Center and back whenever HP/PP runs out.
+#
+# Battle timing is measured with the battle scene OFF and text speed FAST (the way
+# you grind): a one-turn wild fight -- encounter load, one turn, faint/XP, exit --
+# runs ~15s, and a turn is ~5s, so the fixed per-fight overhead is ~10s. HEAL_SEC
+# covers the nurse. SEC_PER_STEP is running-speed walking.
+SEC_PER_STEP, SEC_PER_TURN, SEC_PER_FIGHT, HEAL_SEC = 0.28, 5.0, 10.0, 15.0
+
+# --- time to find the next wild battle -------------------------------------
+# In grass/cave/water each eligible step rolls `WildEncounterRandom() % 1600 <
+# 16*rate` (src/wild_encounter.c DoWildEncounterRateTest/DiceRoll), so the
+# per-step chance is rate/100; a ramping buff adds `buff*16/200` to the roll and
+# grows by `rate` each dry step (AddToWildEncounterRateBuff), pulling low-rate
+# water in a little sooner. _steps_per_encounter sums that to its expectation.
+_STEPS_CACHE = {}
+def _steps_per_encounter(rate):
+    """Expected steps walked between wild battles for a terrain of this encounter-
+    rate byte, decomp-faithful (rate/100 per step, ramped by the encounter-rate
+    buff). Route 1 (rate 21) ~5 steps, Mt. Moon B1F (rate 5) ~20, surf (rate 1) ~80."""
+    rate = int(rate or 0)
+    if rate <= 0:
+        return 0.0
+    if rate in _STEPS_CACHE:
+        return _STEPS_CACHE[rate]
+    base = rate / 100.0
+    exp_steps, surv = 0.0, 1.0            # surv = P(no battle in the first k-1 steps)
+    for k in range(1, 4001):
+        p = min(1.0, base * (1.0 + (k - 1) / 200.0))   # step k's chance, with buff
+        exp_steps += k * surv * p
+        surv *= (1.0 - p)
+        if surv < 1e-9:
+            break
+    _STEPS_CACHE[rate] = exp_steps
+    return exp_steps
+
+# Fishing (src/field_player_avatar.c Task_Fishing). Each cast is a 50/50 for a bite
+# (Fishing6: `Random() & 1` -> NO_BITE), so it takes ~2 casts to land one fish, on
+# any rod. A cast plays dot-game rounds: `rounds = 1 + Random()%{1,3,6}` for
+# {Old,Good,Super} rod, and each round waits some dots -- first round `rand%10+4`,
+# later rounds `rand%10+1`, capped at 10 -- at 20 frames (SEC_PER_DOT) per dot. So
+# a Super-Rod cast runs much longer than an Old-Rod one, and casts vary in length.
+SEC_PER_DOT = 20 / 60.0
+_ROD_ROUNDS = {"old rod": 1.0, "good rod": 2.0, "super rod": 3.5}
+_FIRST_ROUND_DOTS = 7.9        # E[min(rand%10 + 4, 10)]
+_LATER_ROUND_DOTS = 5.5        # E[rand%10 + 1]
+# Per-cast fixed overhead: rod out/in, the 1s pre-round wait (Fishing3), and the
+# bite/nibble result message at fast text. An estimate (the decomp fixes the dot
+# and round counts, not text-render time); the one knob to tune against a stopwatch.
+FISH_CAST_SEC = 4.0
+def _fish_seconds(method):
+    """Expected real seconds to land ONE wild fish with this rod: ~2 casts (50%
+    bite each) -- one failing after the first round, one playing the rod's rounds
+    -- plus their dot-game time."""
+    rounds = _ROD_ROUNDS.get((method or "").lower().strip(), 2.0)
+    dots_success = _FIRST_ROUND_DOTS + (rounds - 1) * _LATER_ROUND_DOTS
+    return 2 * FISH_CAST_SEC + (_FIRST_ROUND_DOTS + dots_success) * SEC_PER_DOT
+
+def find_seconds(node):
+    """Real time to reach the next wild battle in this area: fishing casts for a
+    rod spot, else the walk between grass/cave/water encounters."""
+    method = (node.get("method") or "")
+    if "rod" in method.lower():
+        return _fish_seconds(method)
+    return _steps_per_encounter(node.get("encounterRate")) * SEC_PER_STEP
 
 # Nearest-Center round-trip steps per map folder, via the world graph. The world
 # BFS is expensive (cold-grid parse + Dijkstra), so we compute ONE round-trip per
@@ -267,7 +328,9 @@ def _score_sweep(res, species, level, xp_per, node, stage):
     # or PP would run dry. This is the ranking key, so a fragile spot near no
     # Center loses to a steady one you can camp -- sustainability, not raw speed.
     battles = turns_per_level / res["turns"]
-    battle_sec = battles * (res["turns"] * SEC_PER_TURN + SEC_PER_FIGHT)
+    # each battle also costs the time to FIND it -- the walk between grass/cave/water
+    # encounters, or the fishing casts for a rod spot -- on top of the fight itself
+    battle_sec = battles * (find_seconds(node) + res["turns"] * SEC_PER_TURN + SEC_PER_FIGHT)
     folder = _folder_of(node)
     rt, cmap = heal_roundtrip(folder, stage) if folder else (None, None)
     heal_trips = max(0, _math.ceil(battles / max(1, sustain)) - 1)
