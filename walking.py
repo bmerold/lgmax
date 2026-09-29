@@ -63,6 +63,28 @@ def layouts():
     data = json.load(open(f"{REPO}/data/layouts/layouts.json"))["layouts"]
     return {l["id"]: l for l in data if l and "id" in l}
 
+@functools.lru_cache(maxsize=None)
+def encounter_tiles(map_name):
+    """The (x,y) tiles on a map that can start a land encounter -- grass, cave
+    floor. Lets a route path be checked tile by tile, instead of assuming the
+    map-wide grass share applies to every step you take on it."""
+    mp = f"{REPO}/data/maps/{map_name}/map.json"
+    if not os.path.exists(mp): return frozenset()
+    lay = layouts().get(json.load(open(mp)).get("layout", ""))
+    if not lay or "blockdata_filepath" not in lay: return frozenset()
+    path = os.path.join(REPO, lay["blockdata_filepath"])
+    if not os.path.exists(path): return frozenset()
+    raw = open(path, "rb").read()
+    grid = struct.unpack(f"<{len(raw)//2}H", raw[:len(raw)//2*2])
+    w = lay.get("width", 0) or 1
+    primary, secondary = lay.get("primary_tileset", ""), lay.get("secondary_tileset", "")
+    out = set()
+    for i, cell in enumerate(grid):
+        if (cell & 0x0C00) >> 10: continue      # collision bits set -> not walkable
+        if encounter_type(cell & 0x03FF, primary, secondary) == TILE_ENCOUNTER_LAND:
+            out.add((i % w, i // w))
+    return frozenset(out)
+
 def tile_profile(layout_id):
     """(walkable tiles, tiles that can start a land encounter) for a layout."""
     lay = layouts().get(layout_id)

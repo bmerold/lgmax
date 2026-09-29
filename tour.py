@@ -187,10 +187,25 @@ INGAME_TRADE_STOPS = [
      "Trade a Ponyta for Seel. Catch a spare Ponyta on Mt. Ember (Sevii "
      "Islands) to give — Seel is also catchable in the Seafoam Islands."),
 ]
+# A trade can't happen before you could actually have a spare of the give species.
+# progression.full_availability has each species' earliest stage and how it's
+# obtained; when the give is an EVOLUTION (Slowbro from a L37 Slowpoke) it isn't in
+# hand the moment its stage opens -- you evolve it first -- so hold the trade one
+# stage past that, or the guide lists "trade a Slowbro" before "evolve one".
+_AVAIL_BY_NAME = {E.SPECIES[c]["name"]: rec
+                  for c, rec in P.full_availability().items() if c in E.SPECIES}
+def _trade_stage(give, location_stage):
+    rec = _AVAIL_BY_NAME.get(give)
+    if not rec:
+        return location_stage
+    give_stage = rec["stage"] + (1 if rec.get("kind") == "evolution" else 0)
+    return max(location_stage, give_stage)
+
 for _got, _give, _st, _map, _note in INGAME_TRADE_STOPS:
     # The give-away species rides along as the stop's catch sub-task: you must
     # obtain a spare to hand over (you keep your own team). It becomes a per-
     # species checkbox on the trade stop, alongside the trade action itself.
+    _st = _trade_stage(_give, _st)
     EVENTS.append((f"Trade for {_got} (give {_give})", _map, _st,
                    INGAME_TRADE_NPC.get(_got), "event", None, [_give]))
 
@@ -210,6 +225,9 @@ EVENT_BEFORE = [
     ("Wake & catch Snorlax (Poké Flute)", "Leftovers"),
     ("Take the Ruby", "Ruby and Sapphire to Celio — trading unlocked"),
     ("The Sapphire from Gideon", "Ruby and Sapphire to Celio — trading unlocked"),
+    # The Warden hands over HM04 Strength only once you return his Gold Teeth
+    # (found in the Safari Zone). No teeth, no Strength -- so the pickup comes first.
+    ("Gold Teeth", "HM04 Strength for the Gold Teeth"),
 ]
 
 # Stages with no boss battle can still have a story finish line: stage 1 is

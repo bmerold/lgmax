@@ -157,6 +157,20 @@ def build_sections(graph):
 
 WILD_LOAD = {}     # stage -> [per-map estimate]; filled from walking.py
 
+def _segment_tiles(a, b):
+    """The tiles ENTERED walking the straight route segment a->b (same map,
+    excludes the start so consecutive segments don't double-count the shared
+    corner). a, b are [map, x, y] waypoints from route.json."""
+    _, x0, y0 = a; _, x1, y1 = b
+    if x0 == x1 and y0 != y1:
+        step = 1 if y1 > y0 else -1
+        for y in range(y0 + step, y1 + step, step): yield (x0, y)
+    elif y0 == y1 and x0 != x1:
+        step = 1 if x1 > x0 else -1
+        for x in range(x0 + step, x1 + step, step): yield (x, y0)
+    elif (x0, y0) != (x1, y1):     # diagonal corner artifact: just the endpoint
+        yield (x1, y1)
+
 def route_wild_load():
     """Wild battles per section, counted from the ACTUAL route walk rather
     than a generic map clear: the tiles the path really covers on each map,
@@ -172,22 +186,29 @@ def route_wild_load():
     out = {}
     for st in rt["stages"]:
         stage = st["stage"]
-        walked = _c.defaultdict(float)
+        # Count the tiles the path actually ENTERS that are encounter ground
+        # (grass/cave), not the whole map's grass share applied to every step --
+        # otherwise a route that skirts the grass (Cycling Road, a road across
+        # Route 13) is charged wild battles it never fights.
+        steps = _c.defaultdict(int)          # map -> tiles entered
+        enc = _c.defaultdict(int)            # map -> tiles entered that are grass/cave
         for s2 in st["steps"]:
             path = s2.get("path") or []
             for a, b in zip(path, path[1:]):
-                if a[0] == b[0]:
-                    walked[a[0]] += abs(a[1]-b[1]) + abs(a[2]-b[2])
+                if a[0] != b[0]: continue
+                et = W.encounter_tiles(a[0])
+                for t in _segment_tiles(a, b):
+                    steps[a[0]] += 1
+                    if t in et: enc[a[0]] += 1
         entries = []
-        for mp, steps in walked.items():
+        for mp, enc_steps in enc.items():
             m = info.get(mp)
             spe = m.get("stepsPerEncounter") if m else None
             if not m or not spe: continue
-            enc_steps = steps * m["encounterShare"]
             battles = enc_steps / spe
             if battles < 0.5: continue
-            e = dict(m); e["stage"] = stage; e["steps"] = int(steps)
-            e["encounterSteps"] = round(enc_steps, 1); e["battles"] = round(battles, 1)
+            e = dict(m); e["stage"] = stage; e["steps"] = steps[mp]
+            e["encounterSteps"] = enc_steps; e["battles"] = round(battles, 1)
             entries.append(e)
         if entries: out[stage] = entries
     return out
