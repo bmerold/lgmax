@@ -641,8 +641,29 @@ button{font:inherit;color:inherit}
 .pt-mon .pt-m{font-size:10px;color:var(--ink);white-space:nowrap;line-height:1.25;overflow:hidden;
   display:flex;align-items:baseline;gap:4px;justify-content:space-between}
 .pt-mon .msrc{font-size:8.5px;color:var(--ink-2);font-weight:600;letter-spacing:.02em}
-#playMap{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;
+/* the map and its docked info rail share the leftover height as a row */
+#playStage{flex:1;min-height:0;display:flex;overflow:hidden}
+#playMap{flex:1;min-width:0;min-height:0;display:flex;align-items:center;justify-content:center;
   overflow:hidden;background:#101014}
+/* docked rail: the route detail for this step sits beside the map (wild grass
+   answers, catch odds, an in-game trade, evolve call-outs). Hidden when empty. */
+#playRail{flex:0 0 248px;min-height:0;overflow-y:auto;background:var(--surface-2);
+  border-left:1px solid var(--line);padding:11px 13px}
+.rail-h{font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--accent-ink);margin-bottom:7px}
+.rail-sec + .rail-sec{margin-top:14px;padding-top:13px;border-top:1px solid var(--line)}
+/* the wild table stacks in the narrow rail: species on one line, move below */
+#playRail .wp-map .wp-h{flex-direction:column;gap:1px;margin-bottom:6px}
+#playRail .wp-tbl,#playRail .wp-tbl tbody,#playRail .wp-tbl tr,#playRail .wp-tbl td{display:block}
+#playRail .wp-tbl tr{padding:6px 0;border-top:1px solid var(--line)}
+#playRail .wp-tbl tr:first-child{padding-top:0;border-top:0}
+#playRail .wp-tbl td{padding:0;border:0;white-space:normal}
+#playRail .wp-sp{font-weight:600}
+#playRail .wp-mv{margin-top:2px}
+@media (max-width:640px){
+  #playStage{flex-direction:column}
+  #playRail{flex:0 0 auto;max-height:42%;border-left:0;border-top:1px solid var(--line)}
+}
 #playFit{position:relative;flex-shrink:0}
 #playFit .mapbox{position:relative}
 .stop-note{font-size:12.5px;color:var(--warn);font-weight:600;margin-top:3px;line-height:1.4}
@@ -903,7 +924,10 @@ details.notes[open] summary::after{content:"−"}
     </div>
     <div id="playDesc" hidden></div>
     <div id="playTeam"></div>
-    <div id="playMap"><div id="playFit"></div></div>
+    <div id="playStage">
+      <div id="playMap"><div id="playFit"></div></div>
+      <aside id="playRail" hidden></aside>
+    </div>
     <div id="playDrawer" hidden>
       <div class="drawer-h"><b>The journey</b>
         <span class="drawer-links">
@@ -3078,6 +3102,10 @@ function playDesc(ctx, row){
   return "";
 }
 
+/* one titled block in the play-mode detail rail (the docked panel beside the map) */
+function railSection(title, html){
+  return html ? `<section class="rail-sec"><div class="rail-h">${esc(title)}</div>${html}</section>` : "";
+}
 function renderPlay(){
   const el = document.getElementById("playObj");
   const ctx = playCtx();
@@ -3114,23 +3142,27 @@ function renderPlay(){
     // its own box in the band below); other stops tick their single key
     const allkeys = node && node.stop && !hasOwnAction(node.stop) && stSpecies.length
       ? allSpeciesKeys(node.stop) : "";
-    let extra = "";
-    if (row) extra = vsBand(row);
+    // topExtra stays with the objective card (the full-width fight plan); railExtra
+    // is the route detail that docks beside the map -- wild grass answers, catch
+    // odds, an in-game trade, evolve call-outs -- so the map keeps the room.
+    let topExtra = "", railHtml = "";
+    if (row) topExtra = vsBand(row);
     else if (node && node.stop && str(node.stop[0]) === "event")
       // an in-game trade shows GIVE→GET; a static-mon catch shows the mon + odds
-      extra = hasOwnAction(node.stop) ? tradeBand(node.stop) : wildBand(node.stop);
+      railHtml = railSection(hasOwnAction(node.stop) ? "The trade" : "Catch it",
+                             hasOwnAction(node.stop) ? tradeBand(node.stop) : wildBand(node.stop));
     else if (node && node.stop && str(node.stop[0]) === "heal"){
       // the evolve call-outs belong to the section's last leg (where they count)
-      extra = isLastLeg(ctx.d, PLAY.leg) ? dexEvoHtml(ctx.d) : "";
+      const evo = isLastLeg(ctx.d, PLAY.leg) ? dexEvoHtml(ctx.d) : "";
+      railHtml = evo ? railSection("Evolve for the Dex", evo) : "";
     }
     else if (node){
-      // walking a leg: show what the point Pokémon uses on THIS map's grass,
-      // plus the catch odds when the stop is a catch
+      // walking a leg: what the point Pokémon uses on THIS map's grass, plus the
+      // catch odds when the stop is a catch
       const wpHere = node.map ? wildPlanHtml(ctx.d, node.map) : "";
       const catchHere = (node.stop && str(node.stop[0]) === "catch") ? wildBand(node.stop) : "";
-      extra = catchHere + (wpHere
-        ? `<div class="wp-inline"><div class="wp-inline-h">Wild grass here — your point Pokémon's answers</div>${wpHere}</div>`
-        : "");
+      railHtml = (catchHere ? railSection("Catch it", catchHere) : "")
+               + (wpHere ? railSection("Wild grass here", wpHere) : "");
     }
     const stopNote = node && node.stop ? str(node.stop[12] || "") : "";
     // the big box reflects the state of the key it actually toggles (a catch
@@ -3140,10 +3172,15 @@ function renderPlay(){
                           : (key ? DONE.has(key) : false);
     descHtml = `<div class="po-desc">
       ${key ? `<span class="chk big${bigOn ? " on" : ""}" ${allkeys ? `data-allkeys="${esc(allkeys)}"` : `data-key="${esc(key)}"`} title="${allkeys ? "mark every species here caught" : "mark this step done"}">✓</span>` : ""}
-      <div class="po-body">${desc}${stopNote ? `<div class="stop-note">⚠ ${esc(stopNote)}</div>` : ""}${extra}</div></div>`;
+      <div class="po-body">${desc}${stopNote ? `<div class="stop-note">⚠ ${esc(stopNote)}</div>` : ""}${topExtra}</div></div>`;
+    ctx._railHtml = railHtml;
   }
   dEl.hidden = !descHtml;
   dEl.innerHTML = descHtml;
+  const railEl = document.getElementById("playRail");
+  const railOut = ctx._railHtml || "";
+  railEl.hidden = !railOut;
+  railEl.innerHTML = railOut;
 
   ctx._fightLead = ""; ctx._wildLead = ""; ctx._wildMap = "";
   if (row){
