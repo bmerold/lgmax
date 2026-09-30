@@ -652,14 +652,13 @@ button{font:inherit;color:inherit}
 .rail-h{font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:.06em;
   text-transform:uppercase;color:var(--accent-ink);margin-bottom:7px}
 .rail-sec + .rail-sec{margin-top:14px;padding-top:13px;border-top:1px solid var(--line)}
-/* the wild table stacks in the narrow rail: species on one line, move below */
-#playRail .wp-map .wp-h{flex-direction:column;gap:1px;margin-bottom:6px}
-#playRail .wp-tbl,#playRail .wp-tbl tbody,#playRail .wp-tbl tr,#playRail .wp-tbl td{display:block}
-#playRail .wp-tbl tr{padding:6px 0;border-top:1px solid var(--line)}
-#playRail .wp-tbl tr:first-child{padding-top:0;border-top:0}
-#playRail .wp-tbl td{padding:0;border:0;white-space:normal}
-#playRail .wp-sp{font-weight:600}
-#playRail .wp-mv{margin-top:2px}
+/* in the narrow rail the wild cards stack full-width, one per row */
+#playRail .wp-map .wp-h{flex-direction:column;gap:1px;margin-bottom:7px}
+#playRail .foes{gap:7px}
+#playRail .foe{width:auto;flex:1 1 100%}
+/* a Safari (catch-only) card has no battle answer, so its body is just the header */
+.foe.wild.catchonly{border-top-color:var(--accent)}
+.ans-mv.bad{color:var(--bad);white-space:normal}
 @media (max-width:640px){
   #playStage{flex-direction:column}
   #playRail{flex:0 0 auto;max-height:42%;border-left:0;border-top:1px solid var(--line)}
@@ -1922,17 +1921,28 @@ function wildPlanHtml(d, onlyMap){
   if (!wp.length) return "";
   return wp.map(w => {
     const mp = str(w[0]), lead = str(w[1]), battles = w[2], rows = w[3] || [];
-    return `<div class="wp-map"><div class="wp-h"><b>${esc(prettyMap(mp))}</b>
-        <span class="note">point: <b>${esc(lead)}</b> · ~${battles} wild battles</span></div>
-      <table class="wp-tbl"><tbody>${rows.map(r => {
-        const nm=str(r[0]), lv=r[1], share=r[2], by=str(r[3]), turns=r[4],
-              dmg=r[5], hp=r[6], faster=r[7], walled=r[8];
-        return `<tr class="${walled?"wp-wall":""}">
-          <td class="wp-sp">${esc(nm)} <span class="num">L${lv} · ${Math.round(share*100)}%</span></td>
-          <td class="wp-mv">${walled?`<span class="bad">can't touch it — switch in a partner</span>`
-            :`<b>${esc(by)}</b> <span class="num">${turns}t · ${dmg}/${hp} dmg${faster?" · faster":""}</span>`}</td>
-        </tr>`;
-      }).join("")}</tbody></table></div>`;
+    // The Safari Zone is catch-only -- you throw Safari Balls and never battle, so
+    // there's no point Pokémon, move or turn count, just which wild Pokémon live here.
+    const safari = /safari/i.test(mp);
+    const cards = rows.map(r => {
+      const nm=str(r[0]), lv=r[1], share=r[2], by=str(r[3]), turns=r[4],
+            dmg=r[5], hp=r[6], faster=r[7], walled=r[8], spr=SPRITES[nm];
+      const pct = hp ? Math.min(100, dmg / hp * 100) : 0;
+      const ans = safari ? ""
+        : walled ? `<div class="ans"><span class="ans-mv bad">can't touch it — switch a partner in</span></div>`
+        : `<div class="ans" title="${esc(by)} — ${dmg} of ${hp} HP per hit">
+            <span class="ans-mv">${esc(by)}</span>
+            <span class="ans-t">${turns}t${faster?" · fast":""}</span>
+            <span class="ans-bar"><i class="${pct>=100?"ko":""}" style="width:${Math.max(4,Math.round(pct))}%"></i></span></div>`;
+      return `<div class="foe wild${safari?" catchonly":""}">
+        <div class="foe-h">${spr?`<img src="data:image/png;base64,${spr}" alt="">`:""}
+          <span class="foe-n">${esc(nm)}<span class="num"> L${lv} · ${Math.round(share*100)}%</span></span></div>
+        ${ans}</div>`;
+    }).join("");
+    const head = safari
+      ? `<div class="wp-h"><b>${esc(prettyMap(mp))}</b> <span class="note">catch-only — Safari Balls, no battles</span></div>`
+      : `<div class="wp-h"><b>${esc(prettyMap(mp))}</b> <span class="note">point: <b>${esc(lead)}</b> · ~${battles} wild battles</span></div>`;
+    return `<div class="wp-map">${head}<div class="foes">${cards}</div></div>`;
   }).join("");
 }
 function wildPlanCard(d){
