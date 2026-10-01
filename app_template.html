@@ -1,4 +1,5 @@
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>LeafGreen Encounter Atlas</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -52,8 +53,10 @@
 }
 
 *{box-sizing:border-box}
+html,body{margin:0}
 body{background:var(--bg);color:var(--ink);font-family:var(--sans);
-     font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+     font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;
+     text-size-adjust:100%;-webkit-text-size-adjust:100%}
 h1,h2,h3,h4{font-family:var(--display);margin:0;text-wrap:balance;letter-spacing:-.015em}
 button{font:inherit;color:inherit}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:0}
@@ -119,6 +122,15 @@ button{font:inherit;color:inherit}
       font-weight:600;color:var(--ink-3);cursor:pointer;border-bottom:2px solid transparent;
       margin-bottom:-1px}
 .navb[aria-current="true"]{color:var(--ink);border-bottom-color:var(--accent)}
+@media (max-width:760px){
+  .wrap{padding-inline:14px}
+  /* the tab bar scrolls sideways instead of overflowing the page width */
+  .nav{gap:18px;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;
+       margin-top:12px;scrollbar-width:none}
+  .nav::-webkit-scrollbar{display:none}
+  .navb{flex:0 0 auto;white-space:nowrap}
+  .money-stats{flex-wrap:wrap;gap:14px}
+}
 
 /* ---------- shell ---------- */
 .shell{display:grid;grid-template-columns:328px minmax(0,1fr);gap:22px;align-items:start}
@@ -491,8 +503,8 @@ button{font:inherit;color:inherit}
 
 /* ---------- sticky orientation bar ---------- */
 #stickyBar{position:fixed;top:0;left:0;right:0;z-index:40;display:flex;gap:14px;
-  align-items:center;padding:8px 18px;background:var(--surface);
-  border-bottom:1px solid var(--line);box-shadow:none;
+  align-items:center;padding:8px 18px;padding-top:calc(8px + env(safe-area-inset-top, 0px));
+  background:var(--surface);border-bottom:1px solid var(--line);box-shadow:none;
   font-size:12.5px}
 #stickyTitle{font-weight:700}
 #stickyNext{color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
@@ -547,9 +559,12 @@ button{font:inherit;color:inherit}
 
 /* ================= play mode: one screen, the map in charge ============= */
 #view-play{position:fixed;inset:0;z-index:60;display:flex;flex-direction:column;
-  background:var(--bg)}
-#playTop{display:flex;gap:10px;align-items:center;padding:7px 14px;
-  background:var(--surface);border-bottom:1px solid var(--line);flex-shrink:0}
+  background:var(--bg);padding-bottom:env(safe-area-inset-bottom, 0px)}
+#playTop{display:flex;gap:10px;align-items:center;flex-shrink:0;
+  padding:7px 14px;padding-top:calc(7px + env(safe-area-inset-top, 0px));
+  padding-left:calc(14px + env(safe-area-inset-left, 0px));
+  padding-right:calc(14px + env(safe-area-inset-right, 0px));
+  background:var(--surface);border-bottom:1px solid var(--line)}
 #playObj{flex:1;min-width:0;line-height:1.3}
 #playObj .po-leg{font-size:10.5px;color:var(--ink-3);letter-spacing:.05em;text-transform:uppercase}
 #playObj .po-what{font-weight:700;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
