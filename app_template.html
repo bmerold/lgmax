@@ -3181,9 +3181,7 @@ function renderPlay(){
       railHtml += railSection(hasOwnAction(node.stop) ? "The trade" : "Catch it",
                               hasOwnAction(node.stop) ? tradeBand(node.stop) : wildBand(node.stop));
     else if (node && node.stop && str(node.stop[0]) === "heal"){
-      // the evolve call-outs belong to the section's last leg (where they count)
-      const evo = isLastLeg(ctx.d, PLAY.leg) ? dexEvoHtml(ctx.d) : "";
-      if (evo) railHtml += railSection("Evolve for the Dex", evo);
+      // a heal stop: the evolve call-outs are shown at the section's end below
     }
     else if (node){
       // walking a leg: what the point Pokémon uses on THIS map's grass, plus the
@@ -3193,6 +3191,14 @@ function renderPlay(){
       if (catchHere) railHtml += railSection("Catch it", catchHere);
       if (wpHere) railHtml += railSection("Wild grass here", wpHere);
     }
+  }
+  // The section's "evolve for new entries" call-outs belong at its end -- the
+  // Slowpoke->Slowbro the Lickitung trade needs, Doduo->Dodrio, etc. Show them on
+  // the last node of the last leg regardless of a Pokémon Center: Fuchsia & the
+  // Safari Zone has no Center stop, so a heal-only trigger hid them entirely.
+  if (node && isLastLeg(ctx.d, PLAY.leg) && PLAY.node === ctx.nodes.length - 1){
+    const evo = dexEvoHtml(ctx.d);
+    if (evo) railHtml += railSection("Evolve for the Dex", evo);
   }
   const railEl = document.getElementById("playRail");
   railEl.hidden = !railHtml;
