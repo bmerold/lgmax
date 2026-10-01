@@ -729,6 +729,9 @@ button{font:inherit;color:inherit}
 .dr-sec:hover{background:var(--surface-2)}
 .dr-sec.cur{box-shadow:inset 3px 0 0 var(--accent)}
 .dr-sec .num{margin-left:auto}
+.dr-sec::after{content:"\203A";color:var(--ink-3);font-size:14px;line-height:1;
+  transition:transform .15s ease;flex-shrink:0}
+.dr-sec.open::after{transform:rotate(90deg)}
 .dr-node{width:100%;text-align:left;border:0;background:var(--surface-2);font:inherit;
   font-size:12px;cursor:pointer;padding:5px 14px 5px 30px;display:flex;gap:8px}
 .dr-node:hover{background:var(--surface-3)}
@@ -1185,6 +1188,9 @@ let grindTM = "renew";
 let grindMode = "journey";
 /* the Train tab's mon picker (scope B) */
 let pickSpecies = null;
+/* which section ("sec:leg") is expanded in the Journey drawer, or null -- an
+   accordion you can open and close to browse the route without moving your place */
+let drawerSec = null;
 
 /* ---- evolution forest, for starter-line and mutually-exclusive choices ----
    Built from each Dex row's evolvesFromName (index 7) and kind (index 5). Two
@@ -3547,18 +3553,21 @@ function renderDrawer(){
   STAGES.forEach(sg => {
     const legs = legsOf(secData(sg.id));
     legs.forEach((L, k) => {
+      const key = sg.id + ":" + k;
       const {done: dn, total: tt} = legProgress(secData(sg.id), k, L);
-      const cur = sg.id === PLAY.sec && k === PLAY.leg;
+      const cur = sg.id === PLAY.sec && k === PLAY.leg;   // where you actually are
+      const open = key === drawerSec;                     // which section is expanded
       const label = legs.length > 1 && L && str(L.ti)
         ? `${sg.id}${legLetter(k)}. ${str(L.ti)}` : `${sg.id}. ${sg.name}`;
-      html += `<button class="dr-sec${cur ? " cur" : ""}" data-dsec="${sg.id}" data-dleg="${k}">
+      html += `<button class="dr-sec${cur ? " cur" : ""}${open ? " open" : ""}"
+        data-dsec="${sg.id}" data-dleg="${k}" aria-expanded="${open}">
         <b>${esc(label)}</b>
         <span class="num">${tt ? `${dn}/${tt}` : ""}</span></button>`;
-      if (cur){
-        const ctx = playCtx();
-        (ctx ? ctx.nodes : []).forEach((nd, ni) => {
+      if (open && L){
+        playNodes(L).forEach((nd, ni) => {
           const done = nd.stop && stopDone(nd.stop);
-          html += `<button class="dr-node${done ? " done" : ""}${ni === PLAY.node ? " cur" : ""}"
+          const atCur = cur && ni === PLAY.node;
+          html += `<button class="dr-node${done ? " done" : ""}${atCur ? " cur" : ""}"
             data-dnode="${ni}">${nd.stop ? (nd.stopIdx + 1) + ". " : "· "}${esc(nd.label)}</button>`;
         });
       }
@@ -3569,19 +3578,26 @@ function renderDrawer(){
   if (curEl) curEl.scrollIntoView({block: "center"});
 }
 document.getElementById("playOutlineBtn").addEventListener("click", () => {
+  drawerSec = PLAY.sec + ":" + PLAY.leg;   // open with the section you're on expanded
   renderDrawer();
   document.getElementById("playDrawer").hidden = false;
 });
 document.getElementById("drawerClose").addEventListener("click", () =>
   document.getElementById("playDrawer").hidden = true);
 document.getElementById("drawerBody").addEventListener("click", ev => {
+  // a step jumps there -- to whichever section is open in the accordion
   const n = ev.target.closest("[data-dnode]");
-  if (n){ PLAY.node = +n.dataset.dnode;
-    document.getElementById("playDrawer").hidden = true; renderPlay(); return; }
+  if (n){
+    if (drawerSec){ const [s, l] = drawerSec.split(":").map(Number);
+      PLAY.sec = s; PLAY.leg = l; selectedSec = s; selectedLeg = l; }
+    PLAY.node = +n.dataset.dnode;
+    document.getElementById("playDrawer").hidden = true; renderPlay(); return;
+  }
+  // a section header expands it -- or collapses it if it was already open
   const sc = ev.target.closest("[data-dsec]");
   if (sc){
-    PLAY.sec = +sc.dataset.dsec; PLAY.leg = +sc.dataset.dleg; PLAY.node = 0;
-    selectedSec = PLAY.sec; selectedLeg = PLAY.leg;
+    const key = sc.dataset.dsec + ":" + sc.dataset.dleg;
+    drawerSec = drawerSec === key ? null : key;
     renderDrawer();
   }
 });
