@@ -157,6 +157,12 @@ def build_sections(graph):
 
 WILD_LOAD = {}     # stage -> [per-map estimate]; filled from walking.py
 
+def _catch_only_map(name):
+    """The Safari Zone is catch-only: you throw Safari Balls and bait/rocks and
+    never battle. Its encounters still field an HM-carrying party for the walk-
+    through, but they cost no PP, HP or turns -- run_section skips them."""
+    return "safari" in str(name or "").lower()
+
 def _segment_tiles(a, b):
     """The tiles ENTERED walking the straight route segment a->b (same map,
     excludes the start so consecutive segments don't double-count the shared
@@ -209,6 +215,7 @@ def route_wild_load():
             if battles < 0.5: continue
             e = dict(m); e["stage"] = stage; e["steps"] = steps[mp]
             e["encounterSteps"] = enc_steps; e["battles"] = round(battles, 1)
+            e["catchOnly"] = _catch_only_map(mp)
             entries.append(e)
         if entries: out[stage] = entries
     return out
@@ -239,6 +246,9 @@ def wild_battles_for(stage):
                 "id": f"wild:{m['map']}", "kind": "wild", "name": f"Wild on {m['map']}",
                 "location": m["map"], "locationRaw": m["map"], "group": m["map"],
                 "items": [], "_mons": [mon], "_dist": dist,
+                # Safari Zone encounters keep the section non-empty (so it still
+                # fields HM carriers for the walk-through) but are never fought.
+                "catchOnly": bool(m.get("catchOnly")),
             })
     return out
 
@@ -1305,6 +1315,19 @@ def run_section(team, battles, badges, heal_after_idx, tm_value=None,
         if MOVE_JOIN:
             MOVE_LOCKED.clear()
             MOVE_LOCKED.update(mv for mv, j in MOVE_JOIN.items() if j > trainers_seen)
+        if enc.get("catchOnly"):
+            # The Safari Zone: you throw Safari Balls, you never battle, so this
+            # encounter costs no turns, no PP and no HP. It stays in the section only
+            # so the walk-through still fields an HM-carrying party; it isn't fought.
+            log.append({"enc": enc["name"], "id": enc["id"], "kind": enc["kind"],
+                        "location": enc["location"], "steps": [], "catchOnly": True,
+                        "group": enc.get("group")})
+            if bi in heal_after_idx:
+                why = (heal_after_idx[bi] if isinstance(heal_after_idx, dict) else True)
+                mark(bi, why)
+                for m in team: m.restore(); m.leg_mark()
+                log[-1]["healedAfter"] = why
+            continue
         if enc["kind"] == "wild":
             # You cannot pick your lead against something you have not seen yet.
             # One Pokemon walks the route and meets whatever the grass sends;

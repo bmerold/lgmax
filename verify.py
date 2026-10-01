@@ -226,6 +226,21 @@ for starter, per_stage in raw["sections"].items():
 check("wild routes are walked by a lead, not cherry-picked per encounter",
       not scatter, str(scatter[:2]))
 
+# The Safari Zone is catch-only: you throw Safari Balls and never battle, so its
+# encounters must cost nothing in the section sim -- they keep the section non-empty
+# (so it still fields HM carriers for the walk) but are never fought. Any battle
+# steps logged against a catch-only encounter would be spent PP/turns that don't
+# happen.
+fought_safari = []
+for starter, per_stage in raw["sections"].items():
+    for st, sec in per_stage.items():
+        if not sec: continue
+        for l in sec["log"]:
+            if l.get("catchOnly") and l.get("steps"):
+                fought_safari.append((starter, int(st), l["enc"]))
+check("the Safari Zone's catch-only encounters are never fought",
+      not fought_safari, str(fought_safari[:4]))
+
 # ------------------------------------------------------------------ starter forms
 # The starter is force-added to every section's candidate pool; it must be the
 # form you would be holding by then, never a base form left behind by evolution.
