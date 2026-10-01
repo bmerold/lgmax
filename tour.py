@@ -228,6 +228,11 @@ EVENT_BEFORE = [
     # The Warden hands over HM04 Strength only once you return his Gold Teeth
     # (found in the Safari Zone). No teeth, no Strength -- so the pickup comes first.
     ("Gold Teeth", "HM04 Strength for the Gold Teeth"),
+    # A Strength boulder (FuchsiaCity_WardensHouse, pushable rock at 11,6) walls off
+    # the Rare Candy at 11,5 -- its only neighbour -- so you can't grab it until the
+    # Warden in that same room has handed you Strength. Stage 21's only Rare Candy is
+    # this one, so the plain label is safe here.
+    ("HM04 Strength for the Gold Teeth", "Rare Candy"),
 ]
 
 # Stages with no boss battle can still have a story finish line: stage 1 is
