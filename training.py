@@ -571,10 +571,56 @@ def _prefill_heals():
             heal_roundtrip(folder, node.get("stage", 0))
 
 
+# Build avoidance: the grind itineraries are the heaviest stage, but they only
+# depend on the wild tables, the engine/XP data, this grind code, and the pinned
+# decomp (world.py walks its maps for the heal round-trips) -- NOT on the route,
+# the party solve, the payload packer, the app or the guards. So hash exactly those
+# inputs; if data/training.json carries the same hash, reuse it and skip the rebuild.
+# LGMAX_FORCE_TRAINING=1 forces a fresh run.
+def _inputs_hash():
+    import hashlib, subprocess
+    h = hashlib.sha256()
+    here = _os.path.dirname(_os.path.abspath(__file__))
+    for mod in ("training.py", "optimize.py", "engine.py", "abilities.py",
+                "progression.py", "build_graph.py", "constraints.py", "hms.py",
+                "tms.py", "world.py", "walking.py"):
+        p = _os.path.join(here, mod)
+        if _os.path.exists(p):
+            h.update(mod.encode()); h.update(open(p, "rb").read())
+    for d in ("encounters.json", "species.json", "moves.json", "levelUpLearnsets.json",
+              "tmhmLearnsets.json", "tmhmMoves.json", "tutorLearnsets.json",
+              "evolutions.json", "typeChart.json", "expTables.json", "items.json",
+              "itemStages.json"):
+        p = f"{_OUT}/{d}"
+        if _os.path.exists(p):
+            h.update(d.encode()); h.update(open(p, "rb").read())
+    # world.py reads the decomp maps directly for the Center round-trips; pin them
+    # cheaply by the decomp's git revision rather than hashing every blockdata file.
+    try:
+        rev = subprocess.run(["git", "-C", _os.environ.get("LGMAX_POKEFIRERED", ""),
+                              "rev-parse", "HEAD"], capture_output=True, text=True,
+                             timeout=5).stdout.strip()
+        h.update(rev.encode())
+    except Exception:
+        pass
+    h.update(repr((TOGGLES, ITIN_LEVELS[0], ITIN_LEVELS[-1], GRIND_MODES)).encode())
+    return h.hexdigest()
+
+
 def main():
     global _ENCOUNTERS, _AVAIL
     import multiprocessing as _mp
     import concurrent.futures as _cf
+    want = _inputs_hash()
+    out_path = f"{_OUT}/training.json"
+    if not _os.environ.get("LGMAX_FORCE_TRAINING") and _os.path.exists(out_path):
+        try:
+            if _json.load(open(out_path)).get("inputsHash") == want:
+                print("training: inputs unchanged, reusing data/training.json "
+                      "(set LGMAX_FORCE_TRAINING=1 to rebuild)")
+                return
+        except Exception:
+            pass
     _ENCOUNTERS = _json.load(open(f"{_OUT}/encounters.json"))
     _prefill_heals()
     _AVAIL = P.full_availability()   # shared to the fork workers; floors grind stage
@@ -594,7 +640,8 @@ def main():
             itin[E.SPECIES[sp]["name"]] = tg_segs
     # range is the levels the guide covers: from the first grind level to the cap
     # you can reach (the last grind level, 99, takes you to 100)
-    out = {"itineraries": itin, "range": [ITIN_LEVELS[0], ITIN_LEVELS[-1] + 1]}
+    out = {"itineraries": itin, "range": [ITIN_LEVELS[0], ITIN_LEVELS[-1] + 1],
+           "inputsHash": want}
     with open(f"{_OUT}/training.json", "w") as f:
         _json.dump(out, f, separators=(",", ":"))
     n_segs = sum(len(segs) for sp in itin.values()
