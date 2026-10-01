@@ -548,24 +548,23 @@ button{font:inherit;color:inherit}
 /* ================= play mode: one screen, the map in charge ============= */
 #view-play{position:fixed;inset:0;z-index:60;display:flex;flex-direction:column;
   background:var(--bg)}
-#playTop{display:flex;gap:10px;align-items:center;padding:10px 14px;min-height:78px;
+#playTop{display:flex;gap:10px;align-items:center;padding:7px 14px;
   background:var(--surface);border-bottom:1px solid var(--line);flex-shrink:0}
-#playObj{flex:1;min-width:0;line-height:1.35}
-#playObj .po-leg{font-size:11px;color:var(--ink-3);letter-spacing:.05em;text-transform:uppercase}
-#playObj .po-what{font-weight:700;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#playObj .po-plan{font-size:13px;color:var(--accent);font-weight:600;margin-top:3px}
-#playDesc{display:flex;justify-content:center;align-items:center;flex-shrink:0;
-  height:216px;padding:8px 14px;
-  background:var(--surface);border-bottom:1px solid var(--line)}
-#playDesc .po-desc{max-height:100%;overflow-y:auto}
-#playDesc .po-desc{font-size:15.5px;color:var(--ink);font-weight:500;line-height:1.5;
-  max-width:1060px;padding:2px 0 2px 16px;display:flex;gap:12px;align-items:flex-start;
-  border-left:3px solid var(--accent);background:transparent}
-#playDesc .po-body{min-width:0}
-#playDesc .chk.big{width:24px;height:24px;flex-shrink:0;margin-top:3px;font-size:14px;line-height:22px}
-#playDesc .log-steps{margin-top:6px}
-#playDesc .po-desc b{color:var(--ink);font-weight:700}
-#playDesc .po-desc .fightlink{color:var(--accent);font-weight:700;text-decoration:underline dotted}
+#playObj{flex:1;min-width:0;line-height:1.3}
+#playObj .po-leg{font-size:10.5px;color:var(--ink-3);letter-spacing:.05em;text-transform:uppercase}
+#playObj .po-what{font-weight:700;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* the step's "what to do" card, now the first block in the rail */
+#playRail .rail-step{margin-bottom:12px}
+#playRail .po-desc{font-size:13px;color:var(--ink);font-weight:500;line-height:1.45;
+  display:flex;gap:9px;align-items:flex-start;padding-left:9px;border-left:3px solid var(--accent)}
+#playRail .po-body{min-width:0}
+#playRail .po-desc b{color:var(--ink);font-weight:700}
+#playRail .po-desc .fightlink{color:var(--accent);font-weight:700;text-decoration:underline dotted}
+#playRail .chk.big{width:22px;height:22px;flex-shrink:0;margin-top:1px;font-size:13px;line-height:20px}
+/* the fight plan stacks in the narrow rail: trainer header, then opponent cards */
+#playRail .vsband{flex-direction:column;gap:9px}
+#playRail .vs-tr{flex-direction:row;align-items:center;width:auto;gap:8px}
+#playRail .vs-timg{width:44px;height:44px}
 /* One family, matching the app's utility buttons (zoom / hide-done / drawer
    links): square, hairline border, quiet by default, accent on hover. `next` is
    the primary action, so it carries the restrained soft-accent emphasis used by
@@ -921,7 +920,6 @@ details.notes[open] summary::after{content:"−"}
       <button id="playNext" title="next step (→) — tick the checkbox to mark it done">Next ›</button>
       <button id="playOutlineBtn" title="the whole journey">Journey</button>
     </div>
-    <div id="playDesc" hidden></div>
     <div id="playTeam"></div>
     <div id="playStage">
       <div id="playMap"><div id="playFit"></div></div>
@@ -3094,11 +3092,17 @@ function playDesc(ctx, row){
          only the Itemfinder digs it up. Stand there and use it.${nextBit}`
       : `<b>${esc(what)}</b> is hidden at the pin — no sprite marks it. Walk over
          (${walk} steps), face the tile and press A.${nextBit}`;
-  if (kind === "catch")
-    return `New wild Pokémon live here: hunt this spot until you've caught
-      ${species.join(", ") || "them"}${hunt > 3 ? ` — about ${hunt} encounters on
-      average for the rarest, up to ~${node.stop[13] || hunt} on an unlucky run` : ""}.
-      The party plan already budgets the wild damage.`;
+  if (kind === "catch"){
+    const catchOnly = /safari/i.test(str(st[2]));
+    const huntBit = hunt > 3 ? ` — about ${hunt} encounters on average for the
+      rarest, up to ~${node.stop[13] || hunt} on an unlucky run` : "";
+    return catchOnly
+      ? `Throw Safari Balls to catch ${species.join(", ") || "them"}${huntBit}. You
+         can't battle in the Safari Zone, so no HP or PP is spent here.`
+      : `New wild Pokémon live here: hunt this spot until you've caught
+         ${species.join(", ") || "them"}${huntBit}. The party plan already budgets
+         the wild damage.`;
+  }
   if (kind === "heal")
     return `Step inside and heal at the counter — HP and PP fully restore, and
       every fight plan after this point budgets from full bars.${nextBit}`;
@@ -3125,26 +3129,18 @@ function renderPlay(){
   const keys2 = (L.rt || []).map(stopKey);
   const {done: doneCount, total: totalCount} = legProgress(ctx.d, PLAY.leg, L);
 
-  // objective
+  // objective — a thin line; the description and the plan live in the rail now
   const row = playFightRow(L, node);
-  let planLine = "";
-  if (row){
-    const segs2 = [];
-    for (const st2 of row[4]){
-      const lbl = (str(st2[2]) || "?") + " · " + (str(st2[3]) || "?");
-      if (segs2.length && segs2[segs2.length-1][0] === lbl) segs2[segs2.length-1][1]++;
-      else segs2.push([lbl, 1]);
-    }
-    planLine = segs2.slice(0, 3).map(([l2, n2]) => l2 + (n2 > 1 ? " ×" + n2 : "")).join(", ");
-  }
   const kindLbl = node && node.stop ? (RKIND[str(node.stop[0])] || {}).label || "" : "travel";
   const desc = playDesc(ctx, row);
   el.innerHTML = `<div class="po-leg">${esc(label)} · step ${PLAY.node + 1}/${nodes.length}
       · ${doneCount}/${totalCount} done · ${esc(kindLbl)}</div>
-    <div class="po-what">${node && node.stop ? `${node.stopIdx + 1}. ` : ""}${esc(node ? node.label : "")}</div>
-    ${planLine ? `<div class="po-plan">${esc(planLine)}</div>` : ""}`;
-  const dEl = document.getElementById("playDesc");
-  let descHtml = "";
+    <div class="po-what">${node && node.stop ? `${node.stopIdx + 1}. ` : ""}${esc(node ? node.label : "")}</div>`;
+  // The whole step lives in the rail beside the map: the "what to do" description
+  // with its mark-done box first, then the detail for this step (the fight plan,
+  // wild-grass cards, catch odds, an in-game trade, evolve call-outs). The map
+  // stays the focus and the top bar is just the objective line.
+  let railHtml = "";
   if (desc){
     const key = node && node.stop ? stopKey(node.stop) : null;
     const stSpecies = node && node.stop ? (node.stop[8] || []) : [];
@@ -3152,45 +3148,34 @@ function renderPlay(){
     // its own box in the band below); other stops tick their single key
     const allkeys = node && node.stop && !hasOwnAction(node.stop) && stSpecies.length
       ? allSpeciesKeys(node.stop) : "";
-    // topExtra stays with the objective card (the full-width fight plan); railExtra
-    // is the route detail that docks beside the map -- wild grass answers, catch
-    // odds, an in-game trade, evolve call-outs -- so the map keeps the room.
-    let topExtra = "", railHtml = "";
-    if (row) topExtra = vsBand(row);
+    const stopNote = node && node.stop ? str(node.stop[12] || "") : "";
+    const bigOn = allkeys ? allkeys.split("||").filter(Boolean).every(k => DONE.has(k))
+                          : (key ? DONE.has(key) : false);
+    railHtml = `<section class="rail-sec rail-step"><div class="po-desc">
+      ${key ? `<span class="chk big${bigOn ? " on" : ""}" ${allkeys ? `data-allkeys="${esc(allkeys)}"` : `data-key="${esc(key)}"`} title="${allkeys ? "mark every species here caught" : "mark this step done"}">✓</span>` : ""}
+      <div class="po-body">${desc}${stopNote ? `<div class="stop-note">⚠ ${esc(stopNote)}</div>` : ""}</div></div></section>`;
+    if (row) railHtml += railSection("The fight", vsBand(row));
     else if (node && node.stop && str(node.stop[0]) === "event")
       // an in-game trade shows GIVE→GET; a static-mon catch shows the mon + odds
-      railHtml = railSection(hasOwnAction(node.stop) ? "The trade" : "Catch it",
-                             hasOwnAction(node.stop) ? tradeBand(node.stop) : wildBand(node.stop));
+      railHtml += railSection(hasOwnAction(node.stop) ? "The trade" : "Catch it",
+                              hasOwnAction(node.stop) ? tradeBand(node.stop) : wildBand(node.stop));
     else if (node && node.stop && str(node.stop[0]) === "heal"){
       // the evolve call-outs belong to the section's last leg (where they count)
       const evo = isLastLeg(ctx.d, PLAY.leg) ? dexEvoHtml(ctx.d) : "";
-      railHtml = evo ? railSection("Evolve for the Dex", evo) : "";
+      if (evo) railHtml += railSection("Evolve for the Dex", evo);
     }
     else if (node){
       // walking a leg: what the point Pokémon uses on THIS map's grass, plus the
       // catch odds when the stop is a catch
       const wpHere = node.map ? wildPlanHtml(ctx.d, node.map) : "";
       const catchHere = (node.stop && str(node.stop[0]) === "catch") ? wildBand(node.stop) : "";
-      railHtml = (catchHere ? railSection("Catch it", catchHere) : "")
-               + (wpHere ? railSection("Wild grass here", wpHere) : "");
+      if (catchHere) railHtml += railSection("Catch it", catchHere);
+      if (wpHere) railHtml += railSection("Wild grass here", wpHere);
     }
-    const stopNote = node && node.stop ? str(node.stop[12] || "") : "";
-    // the big box reflects the state of the key it actually toggles (a catch
-    // stop's whole species set, else the stop's own action) -- an in-game trade
-    // carries its give-away species as a separate box on the GIVE card below.
-    const bigOn = allkeys ? allkeys.split("||").filter(Boolean).every(k => DONE.has(k))
-                          : (key ? DONE.has(key) : false);
-    descHtml = `<div class="po-desc">
-      ${key ? `<span class="chk big${bigOn ? " on" : ""}" ${allkeys ? `data-allkeys="${esc(allkeys)}"` : `data-key="${esc(key)}"`} title="${allkeys ? "mark every species here caught" : "mark this step done"}">✓</span>` : ""}
-      <div class="po-body">${desc}${stopNote ? `<div class="stop-note">⚠ ${esc(stopNote)}</div>` : ""}${topExtra}</div></div>`;
-    ctx._railHtml = railHtml;
   }
-  dEl.hidden = !descHtml;
-  dEl.innerHTML = descHtml;
   const railEl = document.getElementById("playRail");
-  const railOut = ctx._railHtml || "";
-  railEl.hidden = !railOut;
-  railEl.innerHTML = railOut;
+  railEl.hidden = !railHtml;
+  railEl.innerHTML = railHtml;
 
   ctx._fightLead = ""; ctx._wildLead = ""; ctx._wildMap = "";
   if (row){
@@ -3510,7 +3495,7 @@ document.getElementById("playModal").addEventListener("click", ev => {
 document.getElementById("playNext").addEventListener("click", () => playAdvance(1));
 document.getElementById("playPrev").addEventListener("click", () => playAdvance(-1));
 /* links inside the objective description: fight matchups and node jumps */
-for (const holder of ["playTop", "playDesc"])
+for (const holder of ["playTop", "playRail"])
   document.getElementById(holder).addEventListener("click", ev => {
     const c = ev.target.closest(".chk");
     if (c){
