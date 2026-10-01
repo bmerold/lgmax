@@ -101,11 +101,14 @@ export LGMAX_POKEFIRERED=~/pokefirered      # optional; this is the default
 ```
 
 Python 3.10+, no third-party packages. `build.sh` runs the whole pipeline and finishes with
-`verify.py`, which must print **86 OKs**. The output is `app.html` — one self-contained file,
+`verify.py`, which must print **87 OKs**. The output is `app.html` — one self-contained file,
 no server needed. The per-starter solves run in parallel (one process each) and the build pins
-`PYTHONHASHSEED=0`, so it's byte-reproducible; the map-geometry TSP (`route.json`) is the one
-slow stage, so `LGMAX_REUSE_ROUTE=1 ./build.sh` reuses it — set it only when
-`tour.py`/`world.py`/routing inputs are unchanged.
+`PYTHONHASHSEED=0`, so it's byte-reproducible. Two slow stages reuse prior work when their
+inputs are unchanged: the map-geometry TSP skips with `LGMAX_REUSE_ROUTE=1` (set it only when
+`tour.py`/`world.py`/routing inputs are unchanged), and the grind itineraries auto-skip via an
+input hash (reused unless the grind code or its data changed; `LGMAX_FORCE_TRAINING=1` forces a
+rebuild). An edit to the app, guards or section solver reuses both, turning a rebuild into the
+~2-minute path.
 
 `./deploy.sh` publishes the current `app.html` to
 **https://lgmax.arcane-collectibles.com/** (GitHub Pages, `gh-pages` branch, kept at a single
