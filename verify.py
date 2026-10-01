@@ -412,15 +412,18 @@ for st in routej["stages"]:
     prev_end = st["endsAt"]
 check("the route is one continuous walk", not disc, str(disc[:5]))
 
-# Fly and Teleport only work in the open air -- you can't use either to leave a
-# cave or a building (there the route Digs or Escape-Ropes out). A hop departs
-# from where you were standing, i.e. the previous stop's tile.
+# Fly and Teleport only work in the open air. You may launch from a building that
+# opens straight onto it -- step out the door, then fly (WORLD.fly_origin, e.g. the
+# Safari Zone's Secret House onto the outdoor West area) -- but never from a
+# multi-floor interior or an escapable dungeon, where the route Digs or Escape-Ropes
+# out instead. A hop departs from where you were standing, i.e. the previous stop's
+# tile.
 import world as WORLD
 _indoor_hop, _bad_dig = [], []
 for st in routej["stages"]:
     _pe = st["startsAt"]
     for s in st["steps"]:
-        if (s.get("fly") or s.get("teleport")) and _pe and not WORLD.is_outdoors(_pe[0]):
+        if (s.get("fly") or s.get("teleport")) and _pe and not WORLD.fly_origin(_pe[0]):
             _indoor_hop.append((st["stage"], _pe[0], s["what"]))
         # Dig / Escape Rope is the inverse: it only works INSIDE an escapable
         # cave (allow_escaping), and only from one with a single mouth (else you

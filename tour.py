@@ -188,18 +188,22 @@ INGAME_TRADE_STOPS = [
      "Islands) to give — Seel is also catchable in the Seafoam Islands."),
 ]
 # A trade can't happen before you could actually have a spare of the give species.
-# progression.full_availability has each species' earliest stage and how it's
-# obtained; when the give is an EVOLUTION (Slowbro from a L37 Slowpoke) it isn't in
-# hand the moment its stage opens -- you evolve it first -- so hold the trade one
-# stage past that, or the guide lists "trade a Slowbro" before "evolve one".
+# progression.full_availability already gives each species the earliest stage it
+# could be IN HAND: for an evolution (Slowbro from a L37 Slowpoke) that stage comes
+# from _stage_reaching_level, which walks the natural level curve to the evolution
+# level -- so the leveling time is already counted. Don't add a buffer stage on top,
+# or you double-count it: that pushed the Lickitung trade from stage 21 (where the
+# route is standing at Route 18) to 22 (deep in the Safari Zone), forcing a ~370-step
+# backtrack out of the Safari just to reach Route 18. The "evolve a Slowpoke first"
+# prompt is surfaced by the section's Dex-evolution call-out, not by delaying the
+# trade a geographic stage.
 _AVAIL_BY_NAME = {E.SPECIES[c]["name"]: rec
                   for c, rec in P.full_availability().items() if c in E.SPECIES}
 def _trade_stage(give, location_stage):
     rec = _AVAIL_BY_NAME.get(give)
     if not rec:
         return location_stage
-    give_stage = rec["stage"] + (1 if rec.get("kind") == "evolution" else 0)
-    return max(location_stage, give_stage)
+    return max(location_stage, rec["stage"])
 
 for _got, _give, _st, _map, _note in INGAME_TRADE_STOPS:
     # The give-away species rides along as the stop's catch sub-task: you must
@@ -1033,12 +1037,21 @@ def solve(max_stage=34, verbose=True):
         tele_land, dig_land = {}, {}    # departure index -> Center / cave mouth it lands at
         tset = set(pts)
         if fly:
+            # Fly lands at the Center nearest the destination. You can launch from
+            # open air for free, or step out of a building that opens onto it first
+            # (WD.fly_origin / fly_launch_cost) -- the Safari Zone's Secret House is
+            # the case that matters: you step out to the outdoor West area and fly to
+            # the Fuchsia Center, instead of retracing the whole Safari on foot.
+            launch = [WD.fly_launch_cost(p, stage) if WD.fly_origin(p[0]) else INF
+                      for p in pts]
             for j, q in enumerate(pts):
                 if j == 0: continue
                 f = FLY_COST + cdist.get(q, INF)
                 for i in range(len(pts)):
-                    if i != j and WD.is_outdoors(pts[i][0]) and f < mat[i][j]:
-                        mat[i][j] = f; hop_kind[i][j] = "fly"
+                    if i == j or launch[i] >= INF: continue
+                    fi = f + launch[i]
+                    if fi < mat[i][j]:
+                        mat[i][j] = fi; hop_kind[i][j] = "fly"
         elif teleport:
             land_from = {}                 # nearest Center -> departures that use it
             for i, p in enumerate(pts):

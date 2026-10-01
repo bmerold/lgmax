@@ -654,6 +654,53 @@ def is_outdoors(name):
     mj = R.maps().get(name)
     return bool(mj) and mj.get("map_type") in _OUTDOOR_TYPES
 
+@functools.lru_cache(maxsize=None)
+def fly_origin(name):
+    """Can you launch Fly from this map? Fly needs open air
+    (Overworld_MapTypeAllowsTeleportAndFly: ROUTE/TOWN/CITY/OCEAN_ROUTE). An indoor
+    map still qualifies when its every door opens straight onto an outdoor one --
+    you step out and fly. That covers the Safari Zone's Secret House (all its exits
+    land in the outdoor SafariZone_West -- the Safari areas are MAP_TYPE_ROUTE) and
+    single-room town buildings (gyms, houses), but not a multi-floor interior whose
+    stairs lead to more indoors (SilphCo, Victory Road), nor an escapable dungeon
+    (allow_escaping: Power Plant, the Sevii caves) -- there you Dig or Escape-Rope
+    out, which the Dig model already owns, not step to a door and fly."""
+    if is_outdoors(name):
+        return True
+    mj = R.maps().get(name) or {}
+    if mj.get("allow_escaping"):
+        return False
+    folder = _const_to_folder()
+    dests = {folder.get(w.get("dest_map", ""))
+             for w in mj.get("warp_events", [])
+             if w.get("dest_map") not in ("", "MAP_DYNAMIC")}
+    dests.discard(None)
+    return bool(dests) and all(is_outdoors(d) for d in dests)
+
+@functools.lru_cache(maxsize=None)
+def fly_launch_cost(node, stage):
+    """Steps from `node` out to the open air Fly needs (0 when already outside).
+    From inside a fly_origin building it's the walk to the door plus the step onto
+    the route; INF when no outdoor tile is reachable. Only meaningful for a
+    fly_origin map -- a deep interior would wander far before finding open air."""
+    if is_outdoors(node[0]):
+        return 0
+    import heapq
+    dist = {node: 0}
+    pq = [(0, node)]
+    while pq:
+        d, nd = heapq.heappop(pq)
+        if d > dist.get(nd, 1 << 30):
+            continue
+        if is_outdoors(nd[0]):
+            return d
+        for nxt, cost in neighbours(nd, stage):
+            v = d + cost
+            if v < dist.get(nxt, 1 << 30):
+                dist[nxt] = v
+                heapq.heappush(pq, (v, nxt))
+    return 1 << 30
+
 # Dig / Escape Rope (CanUseEscapeRopeOnCurrMap: gMapHeader.allowEscaping) warp
 # you to the mouth you entered by. That mouth is only unambiguous when the
 # escapable region has exactly ONE way out -- Power Plant, the Mansion, Cerulean
