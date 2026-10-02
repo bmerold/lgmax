@@ -737,6 +737,10 @@ button{font:inherit;color:inherit}
 .dr-node:hover{background:var(--surface-3)}
 .dr-node.done{opacity:.5;text-decoration:line-through}
 .dr-node.cur{box-shadow:inset 3px 0 0 var(--accent);font-weight:700}
+/* train-to-evolve steps stand out from the walking stops so a missing one is
+   easy to find when a section's progress is short */
+.dr-evo{color:var(--accent);font-weight:600;background:var(--surface-1)}
+.dr-evo.done{color:var(--ink-3);font-weight:400}
 #playModal{position:fixed;inset:0;z-index:80;background:rgba(0,0,0,.45);
   display:flex;align-items:center;justify-content:center}
 #playModalBox{max-width:min(430px,92vw);max-height:84vh;overflow-y:auto;
@@ -3575,6 +3579,18 @@ function renderDrawer(){
         <b>${esc(label)}</b>
         <span class="num">${tt ? `${dn}/${tt}` : ""}</span></button>`;
       if (open && L){
+        // the stage's train-to-evolve steps (the rail's Prep block) listed first
+        // and called out distinctly -- they're not walking stops, so without this
+        // they're invisible in the outline and a missing evolution is hard to find.
+        // Each jumps to the stage's first stop, where the Prep block lives.
+        if (k === 0) sectionEvos(secData(sg.id)).forEach(it => {
+          const done = evoItemDone(it);
+          const lbl = it.base
+            ? `Evolve the ${str(it.base)} line — choose one`
+            : `Evolve to ${str(it.options[0][1])} — ${str(it.options[0][2])}`;
+          html += `<button class="dr-node dr-evo${done ? " done" : ""}"
+            data-dnode="0">✦ ${esc(lbl)}</button>`;
+        });
         playNodes(L).forEach((nd, ni) => {
           const done = nd.stop && stopDone(nd.stop);
           const atCur = cur && ni === PLAY.node;
