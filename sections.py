@@ -1021,6 +1021,30 @@ def lead_cost(m, dist, badges):
              max(0.0, p["turns"] - (1.0 if faster else 0.0))
     return t, d
 
+_ROUTE_CATCH = None
+def route_catch_stages():
+    """species name -> the earliest stage the ROUTE actually catches it. The route
+    is reachability-aware (tour.py holds a catch until you can stand where it's
+    made), so for the few species gated by map geometry this is later than
+    progression.full_availability's method-based stage -- e.g. the Celadon Super-Rod
+    Grimer needs Surf to reach its fishing tile, so the route catches it at the Surf
+    stage, not when the Super Rod is first in hand. dex_evolutions keys the pre-evo's
+    obtainment off this so an 'evolve it' prompt never precedes catching one."""
+    global _ROUTE_CATCH
+    if _ROUTE_CATCH is not None: return _ROUTE_CATCH
+    out = {}
+    path = f"{OUT}/route.json"
+    if os.path.exists(path):
+        for st in json.load(open(path))["stages"]:
+            for s in st["steps"]:
+                if s.get("kind") != "catch": continue
+                for sp in (s.get("species") or []):
+                    nm = str(sp).split(" (")[0]
+                    if nm not in out or st["stage"] < out[nm]:
+                        out[nm] = st["stage"]
+    _ROUTE_CATCH = out
+    return out
+
 _DEX_EVOS = None
 def dex_evolutions(avail):
     """stage -> [rows] of caught Pokémon that first fill a new Pokédex entry by
@@ -1091,7 +1115,14 @@ def dex_evolutions(avail):
         # the Super Rod you only pick up mid-section) would already list its
         # evolution, before you've caught -- or could catch -- the thing.
         disp = rec["stage"]
+        # the pre-evo's obtainment stage is the later of its method-based
+        # availability and the stage the ROUTE actually catches it: a geometry-gated
+        # catch (the Celadon Grimer needs Surf to reach its fishing tile) lands
+        # stages after availability suggests, and "evolve it" must not precede it.
         bs = avail.get(frm, {}).get("stage") if frm else None
+        rc = route_catch_stages().get(fname) if frm else None
+        if rc is not None:
+            bs = rc if bs is None else max(bs, rc)
         if bs is not None and bs >= disp and bs + 1 <= _MAX_STAGE:
             disp = bs + 1
         out[disp].append({"from": fname, "to": tname, "how": how, "note": note})
