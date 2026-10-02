@@ -1795,7 +1795,9 @@ function legProgress(d, k, L){
     total += names.length;
     done += names.filter(n => DONE.has(speciesKey(s, n))).length;
   }
-  for (const it of isLastLeg(d, k) ? sectionEvos(d) : []){
+  // the stage's train-to-evolve steps are counted on its FIRST leg, where the Prep
+  // block shows them -- you clear them before the walking stops, not after
+  for (const it of k === 0 ? sectionEvos(d) : []){
     total += 1; if (evoItemDone(it)) done += 1;
   }
   return {done, total};
@@ -2027,7 +2029,7 @@ function renderSecPanel(id, leg){
   const keys = stops.map(stopKey);
   const doneCount = stops.filter(stopDone).length;
   // full section progress at tick granularity (per-species catches + evolutions)
-  const evoItems = isLastLeg(d, k) ? sectionEvos(d) : [];
+  const evoItems = k === 0 ? sectionEvos(d) : [];
   const {done: secDone, total: secTotal} = legProgress(d, k, L);
   /* "next" means the stop after the FURTHEST one you've ticked -- a skipped
      stop earlier (an absent renewable, a fight saved for later) must not
@@ -2367,8 +2369,9 @@ function renderSecPanel(id, leg){
     ${listHtml}</section>`;
   html += wildPlanCard(d);
   html += grindCard(d, L, id);
-  // shown on the section's LAST leg only, where they're also counted toward 100%
-  { const de = isLastLeg(d, k) ? dexEvoHtml(d) : "";
+  // shown on the section's FIRST leg, where they're also counted toward 100% -- the
+  // train-to-evolve prep you do before the stage's walking stops
+  { const de = k === 0 ? dexEvoHtml(d) : "";
     if (de) html += `<section class="card"><div class="card-h"><h2>Pokédex progress</h2>
       <span class="note">evolutions that fill a new entry — tick each one; they count toward this section's 100%</span></div>
       <div style="padding:6px 16px 14px">${de}</div></section>`; }
@@ -3192,17 +3195,19 @@ function renderPlay(){
       if (wpHere) railHtml += railSection("Wild grass here", wpHere);
     }
   }
-  // The section's "evolve for new entries" call-outs belong at its end -- the
-  // Slowpoke->Slowbro the Lickitung trade needs, Doduo->Dodrio, etc. Show them on
-  // the last node of the last leg regardless of a Pokémon Center: Fuchsia & the
-  // Safari Zone has no Center stop, so a heal-only trigger hid them entirely.
-  if (node && isLastLeg(ctx.d, PLAY.leg) && PLAY.node === ctx.nodes.length - 1){
+  // Prep -- the stage's train-to-evolve steps, grouped at its START so you clear
+  // them before the walking stops, and so a trade's required evolution (e.g. the
+  // Slowpoke->Slowbro the Lickitung trade gives away) is listed BEFORE the trade,
+  // never after it. Shown on the stage's first stop; each card ticks into the Dex
+  // and the whole-run progress ring.
+  let prepHtml = "";
+  if (PLAY.leg === 0 && PLAY.node === 0){
     const evo = dexEvoHtml(ctx.d);
-    if (evo) railHtml += railSection("Evolve for the Dex", evo);
+    if (evo) prepHtml = railSection("Prep — train to evolve first", evo);
   }
   const railEl = document.getElementById("playRail");
-  railEl.hidden = !railHtml;
-  railEl.innerHTML = railHtml;
+  railEl.hidden = !(prepHtml || railHtml);
+  railEl.innerHTML = prepHtml + railHtml;
 
   ctx._fightLead = ""; ctx._wildLead = ""; ctx._wildMap = "";
   if (row){
