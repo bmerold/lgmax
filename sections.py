@@ -263,6 +263,13 @@ def interleave_wild(stage, battles, wild):
     it.
     """
     if not wild: return battles
+    # The Elite Four is a locked gauntlet: five trainer fights with no grass and no
+    # walking between them. Any wild load on this stage is the climb UP to the
+    # Plateau (Victory Road's last floors), walked once before the first fight --
+    # never between Lorelei and Bruno. Keep the fights contiguous with the walk-in
+    # wilds ahead of them, instead of spreading the wilds across the rooms.
+    if any(b.get("kind") == "elite4" for b in battles):
+        return wild + battles
     by_map_w = collections.defaultdict(list)
     for w in wild:
         by_map_w[w.get("group") or w.get("location") or ""].append(w)
