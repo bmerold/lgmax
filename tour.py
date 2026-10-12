@@ -308,6 +308,16 @@ def harvest():
             if b.get("type") != "hidden_item": continue
             if b.get("flag", "") in renew:
                 continue     # renewable: absent by default, never a stop
+            # The S.S. Anne departs for the year the moment you leave it (stage 10 --
+            # data/maps/VermilionCity/scripts.inc, VermilionCity_Text_SSAnneHasDeparted-
+            # ForYear). Its only exterior hidden item (the Lava Cookie at 58,28) sits
+            # on a tile reachable only by Surf, off the hull in the water; boarding at
+            # stage 10 reaches the whole interior but not that tile, and Surf doesn't
+            # exist until stage 21+ -- long after the ship is gone. So it is genuinely
+            # missable: no run can collect it. Drop it rather than route a phantom
+            # return trip to a ship that has sailed.
+            if name == "SSAnne_Exterior":
+                continue
             nodes.append({"kind": "hidden",
                           "what": pretty_item(b.get("item", "?")),
                           "map": name, "x": b.get("x", 0), "y": b.get("y", 0),
