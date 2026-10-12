@@ -26,19 +26,34 @@ def check(name, ok, detail=""):
     if not ok: fails.append(name)
 
 # ------------------------------------------------------------------ availability
-FIRERED_ONLY = ["EKANS","ARBOK","ODDISH","GLOOM","VILEPLUME","BELLOSSOM","PSYDUCK",
-                "GOLDUCK","GROWLITHE","ARCANINE","SHELLDER","CLOYSTER","SCYTHER",
-                "SCIZOR","ELECTABUZZ","ELEKID","WOOPER","QUAGSIRE","MURKROW",
-                "QWILFISH","DELIBIRD","SKARMORY"]
+# The build targets one version (E.VERSION) and must not leak the OTHER version's
+# exclusives. Derive them from the ROM rather than a hand list: a species that only
+# ever appears in wild tables tagged with the excluded version -- never in a shared
+# ("Both") or this-version table, and not a static/gift/prize source -- is a true
+# exclusive of the other game and must be absent from availability.
 av = P.full_availability()
-leaks = [s for s in FIRERED_ONLY if f"SPECIES_{s}" in av]
-check("no FireRed exclusives are obtainable", not leaks, str(leaks))
+_excl_tbl, _incl_tbl = set(), set()
+for _enc in E.WILD["encounters"]:
+    for _tbl in (_enc.get("tables") or {}).values():
+        for _slot in _tbl.get("slots", []):
+            (_excl_tbl if _enc["version"] == E.EXCLUDE_VERSION else _incl_tbl).add(_slot["species"])
+_static_sp = {s[0] for s in P.STATIC_SOURCES}
+# A species that appears only in the excluded version's wild slots can still be
+# legitimately obtainable here by EVOLUTION from a pre-evo this version does have
+# (e.g. FireRed has no wild Kingler slot but gets it from a shared Krabby) -- so
+# anything reachable by evolving something already in availability is not a leak.
+_evo_targets = {ev["to"] for src in av for ev in E.EVOS.get(src, [])}
+other_only = {sp for sp in _excl_tbl
+              if sp not in _incl_tbl and sp not in _static_sp and sp not in _evo_targets}
+leaks = [E.SPECIES[sp]["name"] for sp in sorted(other_only) if sp in av]
+check(f"no {E.EXCLUDE_VERSION} exclusives are obtainable in this {E.VERSION_NAME} build",
+      not leaks, str(leaks))
 
 traded = [s for s, r in av.items() if r.get("requiresTrade")]
 recs = json.load(open(f"{OUT}/recommendations.json"))
 rec_species = {t["species"] for r in recs.values() for t in r["team"]}
 rec_species |= {b["species"] for r in recs.values() for c in r["counters"] for b in c["best"]}
-check("every recommended species is obtainable in LeafGreen",
+check(f"every recommended species is obtainable in {E.VERSION_NAME}",
       rec_species <= set(av), str(sorted(rec_species - set(av))[:6]))
 # The encounter rankings are built WITH trading and each entry tagged, so the
 # page can hide the trade evolutions. Assert the tagging is honest rather than

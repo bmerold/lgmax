@@ -303,7 +303,7 @@ def build_trainer_encounters():
 def build_wild_encounters():
     encs = []
     for enc in E.WILD["encounters"]:
-        if enc["version"] == "FireRed": continue
+        if enc["version"] == E.EXCLUDE_VERSION: continue
         ms = P.map_stage(enc["map"])
         pretty = pretty_location(enc["map"].replace("MAP_", ""))
         for method, tbl in enc["tables"].items():

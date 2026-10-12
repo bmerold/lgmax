@@ -86,7 +86,7 @@ class Grid:
     """One map's tiles: walkability, behavior, and the events standing on it."""
     __slots__ = ("name", "w", "h", "beh", "coll", "enc", "elev", "warps",
                  "warp_tiles", "obstacles", "scripted_open", "blockers",
-                 "barrier_gates", "bodies")
+                 "barrier_gates", "bodies", "card_doors")
     def __init__(self, name):
         mj = R.maps()[name]
         lay = _layouts()[ALT_LAYOUT.get(name) or mj["layout"]]
@@ -156,6 +156,8 @@ class Grid:
                 self.barrier_gates[t] = gates
         if self.barrier_gates:
             self.scripted_open = frozenset(self.scripted_open) - self.barrier_gates.keys()
+        # Silph Co's locked doors: impassable until the Card Key is in hand.
+        self.card_doors = _silph_card_doors().get(name, frozenset())
         if name.startswith("PokemonLeague_"):
             # entering a chamber, the game force-walks you up through the
             # sealed entry door (Common_Movement_WalkUp5) -- scripted moves
@@ -254,7 +256,38 @@ _MAROWAK_STAIRS = ("PokemonTower_6F", 11, 16)   # 6F -> 7F warp tile
 # won't let you climb until beaten -- so 3F and up are sealed behind that fight.
 RIVAL_TOWER_GATE = "TOWER_RIVAL"
 _RIVAL_STAIRS = ("PokemonTower_2F", 4, 10)      # 2F -> 3F warp tile
+# Silph Co's floors each start with their doors CLOSED: the on-load script calls
+# Close<n>FDoor<m> while the door's flag is unset, overlaying impassable barrier
+# metatiles. The Card Key (SilphCo_5F) is what opens them, so until the walk picks
+# it up every Silph door is a wall. The base layout has those tiles as open floor,
+# so without this gate the route strolls through a locked door pre-key (the same
+# gap the Rocket Hideout lift had).
+CARD_KEY_GATE = "SILPH_CARD_KEY"
 _OPEN_GATES = None
+
+@functools.lru_cache(maxsize=1)
+def _silph_card_doors():
+    """{SilphCo_<n>F: frozenset((x,y),...)} of the collision-1 barrier tiles each
+    floor's Close<n>FDoor<m> script lays down (data/scripts/silphco_doors.inc:
+    `setmetatile x, y, METATILE_..._Barrier_*, 1`). The trailing 1 is the closed
+    door's collision; the `, 0` floor tile in each script is skipped."""
+    out = collections.defaultdict(set)
+    path = f"{REPO}/data/scripts/silphco_doors.inc"
+    if not os.path.exists(path):
+        return {}
+    cur = None
+    for line in open(path):
+        m = _re.match(r"\s*EventScript_Close(\d+)FDoor\d*::", line)
+        if m:
+            cur = f"SilphCo_{m.group(1)}F"; continue
+        if cur is None:
+            continue
+        if line.strip() == "return":
+            cur = None; continue
+        sm = _re.match(r"\s*setmetatile\s+(\d+),\s*(\d+),\s*\S+,\s*1\s*$", line)
+        if sm:
+            out[cur].add((int(sm.group(1)), int(sm.group(2))))
+    return {k: frozenset(v) for k, v in out.items()}
 
 @functools.lru_cache(maxsize=1)
 def _gate_tokens():
@@ -263,7 +296,7 @@ def _gate_tokens():
     whole set of trainers fought so far, but pathing checks only these -- so the
     draw cache keys on _OPEN_GATES ∩ this, not the full set. That turns the
     aggro-reorder loop (which only churns non-gate consts) from misses to hits."""
-    toks = {LIFT_GATE, MAROWAK_GATE, RIVAL_TOWER_GATE}
+    toks = {LIFT_GATE, MAROWAK_GATE, RIVAL_TOWER_GATE, CARD_KEY_GATE}
     for entries in gated_barriers().values():
         for _tiles, gates in entries:
             toks |= set(gates)
@@ -447,6 +480,10 @@ def _tile_open(g, x, y, stage, surf_ok):
         # layout, so decide it here outright: open once every gate trainer is
         # beaten (or when gates aren't being tracked), a wall until then.
         return _OPEN_GATES is None or gates <= _OPEN_GATES
+    if (x, y) in g.card_doors:
+        # a Silph Co locked door: a wall until the Card Key is picked up (tour.py
+        # opens CARD_KEY_GATE at the 5F ball). Untracked gates mean open.
+        return _OPEN_GATES is None or CARD_KEY_GATE in _OPEN_GATES
     if (x, y) in g.warp_tiles: return True
     if (x, y) in g.scripted_open: return True
     beh = g.b(x, y)

@@ -25,12 +25,14 @@ OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 COIN_YEN = 20                       # Game Corner counter: 50 coins per ¥1000
 GC_STAGE = 15                       # Celadon City opens the Game Corner + Dept. Store
 
-# Porygon is the only Game-Corner-exclusive Pokémon a run has to buy. Abra and
-# Clefairy are wild (Route 24 / Mt. Moon), and — the correction — Pinsir and
-# Dratini are wild too (Safari Zone grass / super rod), so a completionist catches
-# them free rather than paying their prize coins. (LeafGreen coin cost from
-# data/maps/CeladonCity_GameCorner_PrizeRoom/scripts.inc.)
-GC_MON_COINS = {"SPECIES_PORYGON": 6500}
+# Game-Corner-exclusive Pokémon a run has to BUY (not obtainable any other way).
+# Abra/Clefairy are wild earlier (Route 24 / Mt. Moon) and Dratini is wild (Safari
+# super rod), so those are caught free. Porygon is prize-only in both games. The
+# version split: LeafGreen's other exclusive (Pinsir) is wild in the Safari Zone,
+# but FireRed's (Scyther) is prize-only, so a FireRed run must also buy Scyther.
+# Coin costs from data/maps/CeladonCity_GameCorner_PrizeRoom/scripts.inc per #ifdef.
+GC_MON_COINS = ({"SPECIES_PORYGON": 9999, "SPECIES_SCYTHER": 5500} if E.VERSION == "fr"
+                else {"SPECIES_PORYGON": 6500})
 STORE_STONES = {"ITEM_FIRE_STONE", "ITEM_WATER_STONE", "ITEM_THUNDER_STONE", "ITEM_LEAF_STONE"}
 
 

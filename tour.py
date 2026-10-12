@@ -153,7 +153,10 @@ INGAME_TRADE_NPC = {
     "Mr. Mime": "Reyley", "Jynx": "Dontae", "Farfetch'd": "Elyssa",
     "Nidorino": "Turner", "Lickitung": "Haden", "Nidoran♂": "Saige",
     "Electrode": "Clifton", "Tangela": "Norma", "Seel": "Garett",
+    # FireRed hands back the other half of the Nidoran pair from the same NPCs.
+    "Nidoran♀": "Saige", "Nidorina": "Turner",
 }
+_FR = E.VERSION == "fr"
 INGAME_TRADE_STOPS = [
     ("Mr. Mime", "Abra",       13, "Route2_House",
      "Trade an Abra for Mr. Mime — the ONLY Mr. Mime in LeafGreen. Catch a "
@@ -161,22 +164,32 @@ INGAME_TRADE_STOPS = [
     ("Farfetch'd", "Spearow",  10, "VermilionCity_House2",
      "Trade a Spearow for Farfetch'd — the only one in the game. Catch a "
      "spare Spearow back on Route 22."),
-    # LeafGreen reverses these two vs FireRed: you GIVE the female line and
-    # RECEIVE the male (ingame_trades.h, INGAME_TRADE_NIDORAN / _NIDORINOA
-    # `#elif defined(LEAFGREEN)` blocks). progression.INGAME_TRADES has the same.
-    ("Nidoran♂", "Nidoran♀", 9, "UndergroundPath_NorthEntrance",
-     "Trade a Nidoran♀ for a Nidoran♂ (fills the other gender's dex "
-     "slot). Both are on Route 3 — catch a spare Nidoran♀ to give; no leveling needed."),
-    ("Nidorino", "Nidorina",   12, "Route11_EastEntrance_2F",
-     "Trade a Nidorina for a Nidorino. LEVEL a Nidoran♀ to 16 to evolve "
-     "it first — catch a spare on Route 3 to raise, don't give your team's."),
+    # These three reverse/differ by version (ingame_trades.h INGAME_TRADE_NIDORAN /
+    # _NIDORINOA / _LICKITUNG `#ifdef` blocks): FireRed gives the male Nidoran line
+    # and asks for a Golduck, LeafGreen gives the female line and asks for a Slowbro.
+    (("Nidoran♀", "Nidoran♂", 9, "UndergroundPath_NorthEntrance",
+      "Trade a Nidoran♂ for a Nidoran♀ (fills the other gender's dex slot). Both "
+      "are on Route 3 — catch a spare Nidoran♂ to give; no leveling needed.") if _FR else
+     ("Nidoran♂", "Nidoran♀", 9, "UndergroundPath_NorthEntrance",
+      "Trade a Nidoran♀ for a Nidoran♂ (fills the other gender's dex slot). Both "
+      "are on Route 3 — catch a spare Nidoran♀ to give; no leveling needed.")),
+    (("Nidorina", "Nidorino",   12, "Route11_EastEntrance_2F",
+      "Trade a Nidorino for a Nidorina. LEVEL a Nidoran♂ to 16 to evolve it first — "
+      "catch a spare on Route 3 to raise, don't give your team's.") if _FR else
+     ("Nidorino", "Nidorina",   12, "Route11_EastEntrance_2F",
+      "Trade a Nidorina for a Nidorino. LEVEL a Nidoran♀ to 16 to evolve it first — "
+      "catch a spare on Route 3 to raise, don't give your team's.")),
     ("Jynx", "Poliwhirl",      19, "CeruleanCity_House3",
      "Trade a Poliwhirl for Jynx. Super-Rod a Poliwag on Route 6 and LEVEL it "
      "to 25 to evolve — or Super-Rod a Poliwhirl straight out of the water."),
-    ("Lickitung", "Slowbro",   21, "Route18_EastEntrance_2F",
-     "Trade a Slowbro for Lickitung — the only Lickitung in the game. "
-     "LeafGreen has no Psyduck, so you must LEVEL a Slowpoke to 37 (Slowpoke "
-     "is on Route 10 / Seafoam)."),
+    (("Lickitung", "Golduck",   21, "Route18_EastEntrance_2F",
+      "Trade a Golduck for Lickitung — the only Lickitung in the game. Catch a "
+      "Psyduck (Routes near water) and LEVEL it to 33 to evolve, or Super-Rod a "
+      "Golduck straight out of the water.") if _FR else
+     ("Lickitung", "Slowbro",   21, "Route18_EastEntrance_2F",
+      "Trade a Slowbro for Lickitung — the only Lickitung in the game. LeafGreen "
+      "has no Psyduck, so you must LEVEL a Slowpoke to 37 (Slowpoke is on "
+      "Route 10 / Seafoam).")),
     ("Electrode", "Raichu",    26, "CinnabarIsland_PokemonLab_Lounge",
      "Trade a Raichu for Electrode. No wild Raichu exists — catch a Pikachu "
      "(Power Plant or Viridian Forest) and use a Thunder Stone on it."),
@@ -389,7 +402,7 @@ def harvest():
             if old is None or share > old[0]:
                 cands[sp][(name, label)] = (share, spe)
     for enc in E.WILD["encounters"]:
-        if enc["version"] == "FireRed": continue
+        if enc["version"] == E.EXCLUDE_VERSION: continue
         name = WD._const_to_folder().get(enc["map"])
         if not name or WD._map_stage(name) is None: continue
         ms = WD._map_stage(name)
@@ -763,11 +776,14 @@ def center_doors():
 
 # B4F's Lift Key ball: reaching it opens the elevator (world.LIFT_GATE).
 LIFT_KEY_TILE = ("RocketHideout_B4F", 3, 2)
+# SilphCo_5F's Card Key ball: reaching it unlocks every Silph door (world.CARD_KEY_GATE).
+CARD_KEY_TILE = ("SilphCo_5F", 22, 21)
 
 def gate_token(node):
     """The gate a stop opens when the walk reaches it: a trainer opens its own
-    barrier (its const), the Lift Key ball opens the Rocket Hideout elevator,
-    the Ghost Marowak fight unseals Pokémon Tower's 6F -> 7F stairs."""
+    barrier (its const), the Lift Key ball opens the Rocket Hideout elevator, the
+    Card Key ball unlocks Silph Co's doors, the Ghost Marowak fight unseals
+    Pokémon Tower's 6F -> 7F stairs."""
     if node["kind"] == "trainer":
         # the tower rival (2F's only trainer) unseals the climb above 2F
         if node["map"] == "PokemonTower_2F":
@@ -775,6 +791,8 @@ def gate_token(node):
         return (node.get("enc") or "").split(":")[-1] or None
     if (node["map"], node["x"], node["y"]) == LIFT_KEY_TILE:
         return WD.LIFT_GATE
+    if (node["map"], node["x"], node["y"]) == CARD_KEY_TILE:
+        return WD.CARD_KEY_GATE
     if node["kind"] == "scripted" and node["map"].startswith("PokemonTower"):
         return WD.MAROWAK_GATE
     return None
@@ -1159,6 +1177,11 @@ def solve(max_stage=34, verbose=True):
         rival_here = any(gate_token(picked[oi - 1]) == WD.RIVAL_TOWER_GATE for oi in order)
         if rival_here:
             gate_consts.add(WD.RIVAL_TOWER_GATE)
+        # the Card Key (SilphCo_5F) unlocks every Silph Co door; stops shut behind
+        # one are ordered after the key, not before it
+        card_here = any(gate_token(picked[oi - 1]) == WD.CARD_KEY_GATE for oi in order)
+        if card_here:
+            gate_consts.add(WD.CARD_KEY_GATE)
         if gate_consts:
             reach_open = set(dist0)
             for m in {picked[oi - 1]["map"] for oi in order}:
@@ -1191,6 +1214,13 @@ def solve(max_stage=34, verbose=True):
                 behind = reach_open - set(WD.bfs(pos, stage))
                 if behind:
                     stage_barriers.append(({WD.RIVAL_TOWER_GATE}, behind))
+            if card_here:
+                # everything behind a still-locked Silph door drops out when only
+                # the Card Key gate is shut -- those stops get pushed after the key
+                WD._OPEN_GATES = frozenset(gate_consts - {WD.CARD_KEY_GATE})
+                behind = reach_open - set(WD.bfs(pos, stage))
+                if behind:
+                    stage_barriers.append(({WD.CARD_KEY_GATE}, behind))
             WD._OPEN_GATES = None
         for _ in range(len(order) + 4):
             changed = False

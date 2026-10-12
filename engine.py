@@ -16,6 +16,14 @@ DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 REPO = os.environ.get("LGMAX_POKEFIRERED",
                       os.path.expanduser("~/pokefirered"))
 
+# Which game this build is for. The decomp carries both FireRed and LeafGreen,
+# gated by #ifdef; a build picks one with LGMAX_VERSION (lg|fr, default lg) and
+# drops the OTHER version's version-exclusive wild tables, keeping every table the
+# two share (tagged "Both"). EXCLUDE_VERSION is the label the wild filters skip.
+VERSION = "fr" if os.environ.get("LGMAX_VERSION", "lg").lower().startswith("fr") else "lg"
+VERSION_NAME = "FireRed" if VERSION == "fr" else "LeafGreen"
+EXCLUDE_VERSION = "LeafGreen" if VERSION == "fr" else "FireRed"
+
 def _load(name):
     with open(os.path.join(DATA, f"{name}.json")) as f:
         return json.load(f)

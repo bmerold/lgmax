@@ -185,7 +185,7 @@ def section_wild_load():
     by_stage = {}
     land_rate, slots = {}, {}
     for enc in E.WILD["encounters"]:
-        if enc["version"] == "FireRed": continue
+        if enc["version"] == E.EXCLUDE_VERSION: continue
         tbl = enc["tables"].get("land_mons")
         if not tbl or not tbl["slots"]: continue
         raw = enc["map"].replace("MAP_", "")

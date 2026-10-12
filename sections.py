@@ -2152,7 +2152,8 @@ CHOICE_GROUPS = [
     {"id": "gamecorner", "label": "Game Corner prize", "stage": 15,
      "where": "Celadon Game Corner",
      "options": ["SPECIES_ABRA", "SPECIES_CLEFAIRY", "SPECIES_DRATINI",
-                 "SPECIES_PORYGON", "SPECIES_PINSIR"],
+                 "SPECIES_PORYGON",
+                 "SPECIES_SCYTHER" if E.VERSION == "fr" else "SPECIES_PINSIR"],
      "note": "Coins are finite in practice, so treat this as one pick."},
 ]
 

@@ -163,6 +163,10 @@ STATIC_SOURCES = [
     ("SPECIES_ABRA",      15, "prize",    "Celadon Game Corner prize"),
     ("SPECIES_CLEFAIRY",  15, "prize",    "Celadon Game Corner prize"),
     ("SPECIES_PORYGON",   15, "prize",    "Celadon Game Corner prize"),
+    # FireRed's version-exclusive Scyther is Game-Corner-only (LeafGreen's Pinsir is
+    # wild in the Safari Zone, so it rides the wild filter instead of a prize entry).
+    *(((("SPECIES_SCYTHER", 15, "prize", "Celadon Game Corner prize (FireRed)"),))
+      if E.VERSION == "fr" else ()),
     ("SPECIES_EEVEE",     15, "gift",     "Celadon Condominiums roof, L25"),
     ("SPECIES_HYPNO",     18, "static",   "Pokemon Tower, L30"),
     ("SPECIES_MAROWAK",   18, "static",   "Ghost Marowak, Pokemon Tower (uncatchable)"),
@@ -181,14 +185,21 @@ STATIC_SOURCES = [
     ("SPECIES_TOGEPI",    33, "gift",     "Water Labyrinth egg, Five Island"),
 ]
 
-# In-game trades (src/data/ingame_trades.h). LeafGreen variants where they differ.
+# In-game trades (src/data/ingame_trades.h). Three differ by version (received,
+# given): the Nidoran gender trade and the Nidorino/Nidorina trade reverse between
+# games, and the Lickitung trade asks for a Golduck in FireRed but a Slowbro in
+# LeafGreen (INGAME_TRADE_NIDORAN / _NIDORINOA / _LICKITUNG `#ifdef` blocks).
+_FR = E.VERSION == "fr"
 INGAME_TRADES = [
     ("SPECIES_MR_MIME",   "SPECIES_ABRA",       14, "Route 2 house"),
     ("SPECIES_JYNX",      "SPECIES_POLIWHIRL",  14, "Cerulean City house"),
-    ("SPECIES_NIDORAN_M", "SPECIES_NIDORAN_F",  20, "Route 11 gate (LeafGreen)"),
+    (("SPECIES_NIDORAN_F", "SPECIES_NIDORAN_M", 20, "Route 11 gate") if _FR
+     else ("SPECIES_NIDORAN_M", "SPECIES_NIDORAN_F", 20, "Route 11 gate")),
     ("SPECIES_FARFETCHD", "SPECIES_SPEAROW",    19, "Route 18 gate"),
-    ("SPECIES_NIDORINO",  "SPECIES_NIDORINA",   23, "Route 5 gate"),
-    ("SPECIES_LICKITUNG", "SPECIES_SLOWBRO",    23, "Route 18 gate (LeafGreen)"),
+    (("SPECIES_NIDORINA", "SPECIES_NIDORINO",   23, "Route 5 gate") if _FR
+     else ("SPECIES_NIDORINO", "SPECIES_NIDORINA", 23, "Route 5 gate")),
+    ("SPECIES_LICKITUNG", "SPECIES_GOLDUCK" if _FR else "SPECIES_SLOWBRO",
+                          23, "Route 18 gate"),
     ("SPECIES_ELECTRODE", "SPECIES_RAICHU",     28, "Cinnabar Island house"),
     ("SPECIES_TANGELA",   "SPECIES_VENONAT",    28, "Cinnabar Island house"),
     ("SPECIES_SEEL",      "SPECIES_PONYTA",     28, "Cinnabar Island house"),
@@ -232,7 +243,7 @@ def wild_availability():
     """species -> earliest stage obtainable in the wild in LeafGreen, with source."""
     best = {}
     for enc in E.WILD["encounters"]:
-        if enc["version"] == "FireRed":
+        if enc["version"] == E.EXCLUDE_VERSION:
             continue
         ms = map_stage(enc["map"])
         pretty = _pretty_map(enc["map"])
