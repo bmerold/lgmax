@@ -616,6 +616,10 @@ def choose_moveset(pm, pool, opponents, badges):
     scored.sort(reverse=True)
     shortlist = [m for _, m in scored[:14]]
     if not shortlist: return []
+    # each move's own damage output, to break near-ties in the greedy below toward
+    # the stronger attack rather than the higher-PP one
+    base = {m: t for t, m in scored}
+    n_opp = max(1, len(opponents))
 
     chosen, best_dpt = [], {id(o): 0.0 for o in opponents}
     while len(chosen) < 4 and shortlist:
@@ -629,8 +633,12 @@ def choose_moveset(pm, pool, opponents, badges):
                 cur = best_dpt[id(o)]
                 cand[id(o)] = max(cur, d)
                 gain += max(0.0, d - cur)
-            # a little credit for PP, so a 4th slot prefers a usable filler
-            gain += E.MOVES[mv]["pp"] * 0.01
+            # Once coverage is saturated the marginal gains go to ~0, so the slot
+            # is decided by the tie-breaks: prefer the stronger standalone attack
+            # (its own average damage), then a little PP so a genuine filler is
+            # spammable. Without the damage term a weak high-PP move (Lick's 30 PP)
+            # would beat a real attack (Ice Punch) for the last Jynx slot.
+            gain += base.get(mv, 0.0) / n_opp * 0.01 + E.MOVES[mv]["pp"] * 1e-4
             if gain > gain_best:
                 gain_best, pick, newbest = gain, mv, cand
         if pick is None or gain_best <= 0.02: break
