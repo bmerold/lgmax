@@ -1721,9 +1721,12 @@ def moon_ok(species, stage, moon_used):
         return True
     return species in moon_used or len(moon_used) < moon_budget(stage)
 
-def solve_section(stage, encs, starter, avail, tm_value=None, carry=None, moon_used=None):
+def solve_section(stage, encs, starter, avail, tm_value=None, carry=None, moon_used=None,
+                  level_override=None, heal_override=None):
     st = P.STAGE_BY_ID[stage]
-    level, badges = st["level"], O.badges_for(stage)
+    # level_override lets the recommended-level calculator try a candidate level
+    # without touching the progression curve; badges stay stage-based.
+    level, badges = (level_override if level_override is not None else st["level"]), O.badges_for(stage)
     encs = encs or []
     set_join_at(stage, avail)   # mid-stage catches sit out the fights before their grass
     # In the order you actually meet them: by where each trainer stands on the
@@ -1786,6 +1789,17 @@ def solve_section(stage, encs, starter, avail, tm_value=None, carry=None, moon_u
         for i, e in enumerate(battles):
             if e["id"] in path_heals and i < len(battles) - 1:
                 heal_idx.setdefault(i, path_heals[e["id"]])
+    # heal_override models a player who heals from the bag at set boundaries -- used
+    # to ask "what level clears the Elite Four if you Full Restore between fights?"
+    if heal_override is not None:
+        heal_idx = dict(heal_override)
+    # The Elite Four is the one gauntlet with no Pokemon Center: five fights the
+    # game expects you to revive + full restore between from the bag. Model that
+    # (items only at the League, by design) so each fight is fought with a fresh
+    # team and the recommended level tracks the hardest single fight, not the sum.
+    elif any(e.get("kind") == "elite4" for e in battles):
+        heal_idx = {i: "Full Restore — revive + heal from the bag"
+                    for i in range(len(battles) - 1)}
 
     # candidate pool: everything obtainable by now, minus the other two starters'
     # entire evolution lines -- excluding only the base forms let Ivysaur and
@@ -1833,6 +1847,13 @@ def solve_section(stage, encs, starter, avail, tm_value=None, carry=None, moon_u
         for sp, (pm, mvs, pool, ob) in members.items():
             if sp in chosen: continue
             if C.conflicts(sp, held_roots, held_groups): continue
+            # a stone is spent per Moon-Stone evolution fielded; the candidate filter
+            # only vetted each against the moon_used carried IN, so re-check here
+            # against the ones already on THIS team, or the greedy build can stack
+            # more Moon-Stone evos in one section than the run holds stones by then
+            if not moon_ok(sp, stage, (moon_used or set())
+                           | {m.species for m in team if m.species in MOON_EVOS}):
+                continue
             trial = team + [Member(pm, mvs, pool, ob)]
             res = run_section(trial, battles, badges, heal_idx, carry=carry)
             k = pick_key(res, sp)

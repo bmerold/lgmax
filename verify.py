@@ -887,6 +887,18 @@ check("every level target matches its stage's progression level",
 check("level targets rise monotonically toward the League",
       all(b[1] >= a[1] for a, b in zip(_lt, _lt[1:])))
 
+# The recommended level is the LOWEST at which the run still clears a stage without
+# a full party wipe -- faints are fine, an "unanswered" opponent (one no living
+# member could beat) is not. Every starter, in both trade modes, must clear every
+# stage at its recommended level. This is the invariant the survivable-level curve
+# is built on; if a data change makes a stage wipe, its level must rise.
+_wipes = [(sk, int(st), sec["unanswered"])
+          for sk, per in raw["sections"].items()
+          for st, sec in per.items()
+          if sec and sec.get("unanswered", 0) > 0]
+check("every stage clears without a full party wipe at its recommended level",
+      not _wipes, str(sorted(_wipes, key=lambda x: -x[2])[:6]))
+
 # ------------------------------------------------------------------ in-game trades
 # Each in-game-trade stop carries a checkbox for the species you must obtain to
 # hand over. That give-away species must be the ROM's requestedSpecies, not the
