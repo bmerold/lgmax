@@ -58,6 +58,7 @@ function merge(stored, incoming) {
     play: newer.play || s.play || null,
     starter: newer.starter || s.starter || null,
     trading: typeof newer.trading === "boolean" ? newer.trading : !!s.trading,
+    version: newer.version || s.version || null,
     // Dex overrides: union of species keys, the newer device winning a conflict.
     dex: { ...(older.dex || {}), ...(newer.dex || {}) },
     ts: Math.max(s.ts || 0, incoming.ts || 0),

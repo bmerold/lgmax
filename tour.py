@@ -232,6 +232,10 @@ EVENT_BEFORE = [
     ("Bike Voucher from the Fan Club", "Bicycle from the Bike Shop"),
     ("Trash-can switches (open Surge's door)", "Leader Lt. Surge"),
     ("Super Nerd Miguel", "Helix or Dome Fossil (pick one)"),
+    # The Fighting Dojo's master (Black Belt Koichi, LOCALID_KARATE_MASTER) blocks
+    # the Hitmonlee/Hitmonchan balls at the back of the dojo and only steps aside
+    # once beaten (SaffronCity_Dojo scripts.inc), so the gift comes after his fight.
+    ("Black Belt Koichi", "Hitmonlee or Hitmonchan (pick one)"),
     ("Oak's Parcel from the Mart clerk", "Deliver the Parcel — Pokédex from Oak"),
     ("Deliver the Parcel — Pokédex from Oak", "Town Map from Daisy"),
     ("Poké Flute from Mr. Fuji", "Wake & catch Snorlax (Poké Flute)"),
@@ -1238,6 +1242,20 @@ def solve(max_stage=34, verbose=True):
                         break
                 if changed: break
             if not changed: break
+
+        # The Card Key opens EVERY Silph Co door and reaching the key itself needs
+        # none, so collect it before any other Silph stop rather than trusting the
+        # per-door "behind" sets -- a room reached only via another already-open
+        # gate can slip those, leaving a stop walked through a still-locked door.
+        if card_here:
+            key_k = next((k for k, oi in enumerate(order)
+                          if gate_token(picked[oi - 1]) == WD.CARD_KEY_GATE), None)
+            if key_k is not None:
+                first = next((k for k, oi in enumerate(order)
+                              if k != key_k and picked[oi - 1]["map"].startswith("SilphCo")),
+                             None)
+                if first is not None and first < key_k:
+                    order.insert(first, order.pop(key_k))
 
         # Pokémon Tower is a strict vertical shaft -- each floor reached only
         # through the one below -- so the walk should climb it once, not zig-zag

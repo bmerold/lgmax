@@ -19,30 +19,43 @@ export LGMAX_POKEFIRERED
 }
 
 mkdir -p data
-[ -f data/species.json ] || python3 extract.py      # decomp -> data/*.json
-[ -f data/encounters.json ] || python3 build_graph.py
+[ -f data/species.json ] || python3 extract.py      # decomp -> data/*.json (version-agnostic)
 
-# tour.py is the slow stage (minutes, dominated by the post-game route) and its
-# output depends only on map geometry + gating, never on the damage/party model.
-# LGMAX_REUSE_ROUTE=1 reuses an existing data/route.json to skip it while iterating
-# on the engine; leave it unset (the default) whenever tour.py, world.py or any
-# routing input changed, so the route is recomputed.
-if [ -n "${LGMAX_REUSE_ROUTE:-}" ] && [ -f data/route.json ]; then
-  echo "reusing existing data/route.json (LGMAX_REUSE_ROUTE set)"
-else
-  python3 tour.py       # the completionist route: every item, trainer, catch
-fi
-python3 sections.py     # solves every section, battles in ROUTE order
-python3 training.py     # grind calculator: fewest turns/level per party mon
-python3 optimize.py     # per-encounter rankings (reads commitments.json)
-python3 economy.py      # money: prize income vs Game Corner / stone costs
-python3 render_maps.py  # map PNGs from the decomp's tilesets (incremental)
-python3 compact.py      # array-encoded payload
+# One game, two versions. extract.py tags every wild table FireRed/LeafGreen/Both;
+# the rest of the pipeline picks a version with LGMAX_VERSION (lg|fr) and drops the
+# other's exclusives, so the route, teams, trades, Game Corner and Dex all differ.
+# Build each version through compact.py, snapshot its payload, then merge_versions.py
+# folds the two into one payload (shared map art kept single-copy). LGMAX_VERSIONS
+# overrides the set to build (e.g. "lg" to rebuild LeafGreen alone).
+: "${LGMAX_VERSIONS:=lg fr}"
+for V in $LGMAX_VERSIONS; do
+  echo "===================== building $V ====================="
+  export LGMAX_VERSION="$V"
+  python3 build_graph.py  # wild graph for this version (filters the other's tables)
+  # tour.py is the slow stage; its route is version-specific (catch stops differ).
+  # LGMAX_REUSE_ROUTE=1 reuses data/route_<v>.json when iterating on the engine only.
+  if [ -n "${LGMAX_REUSE_ROUTE:-}" ] && [ -f "data/route_${V}.json" ]; then
+    cp "data/route_${V}.json" data/route.json
+    echo "reusing data/route_${V}.json (LGMAX_REUSE_ROUTE set)"
+  else
+    python3 tour.py
+    cp data/route.json "data/route_${V}.json"
+  fi
+  python3 sections.py     # solves every section, battles in ROUTE order
+  python3 training.py     # grind calculator (version-keyed input hash)
+  python3 optimize.py     # per-encounter rankings
+  python3 economy.py      # money: prize income vs Game Corner / stone costs
+  python3 render_maps.py  # map PNGs (incremental; this version's used maps)
+  python3 compact.py      # array-encoded payload for this version
+  cp data/payload.json "data/payload_${V}.json"
+  python3 verify.py       # guard rails for this version; all must print OK
+done
+unset LGMAX_VERSION
+
+python3 merge_versions.py  # data/payload_*.json -> one data/payload.json
 
 python3 - <<'PY'
 tpl = open("app_template.html").read()
 open("app.html", "w").write(tpl.replace("__PAYLOAD__", open("data/payload.json").read()))
 print("app.html written")
 PY
-
-python3 verify.py       # guard rails; all must pass

@@ -870,6 +870,13 @@ details.notes[open] summary::after{content:"−"}
           recommended party for each stretch of the game, with PP and HP counted across it.</p>
       </div>
       <div class="mast-right">
+        <div class="starter" id="versionPick" hidden>
+          <span class="starter-l">Version</span>
+          <div class="starter-btns" id="versionBtns">
+            <button class="sbtn" data-version="lg">LeafGreen</button>
+            <button class="sbtn" data-version="fr">FireRed</button>
+          </div>
+        </div>
         <div class="starter">
           <span class="starter-l">Your starter</span>
           <div class="starter-btns" id="starterBtns"></div>
@@ -1041,29 +1048,47 @@ details.notes[open] summary::after{content:"−"}
 (() => {
 "use strict";
 const DATA = JSON.parse(document.getElementById("payload").textContent);
-const S = DATA.pool, STAGES = DATA.stages, ENC = DATA.encounters;
+// Game version (FireRed / LeafGreen). The payload nests every solve-derived,
+// pool-indexed table under byVersion[ver]; shared map art/sprites stay at the top.
+const VERSIONS = DATA.versions || ["lg"];
+let VER = (DATA.defaultVersion && VERSIONS.includes(DATA.defaultVersion)) ? DATA.defaultVersion : VERSIONS[0];
+// read the saved version BEFORE the data bindings below bind through _vd(). A
+// version switch reloads the page (setVersion) rather than re-pointing every
+// derived table, so everything re-derives from the chosen version at load.
+try { const _u = JSON.parse(localStorage.getItem("lgmax-ui") || "{}");
+      if (VERSIONS.includes(_u.version)) VER = _u.version; } catch (_e) {}
+const VER_NAME = {lg: "LeafGreen", fr: "FireRed"};
+const _vd = () => (DATA.byVersion && DATA.byVersion[VER]) || DATA;
+function setVersion(v){
+  if (!VERSIONS.includes(v) || v === VER) return;
+  try { const u = JSON.parse(localStorage.getItem("lgmax-ui") || "{}");
+        u.version = v; localStorage.setItem("lgmax-ui", JSON.stringify(u)); } catch (e) {}
+  try { localStorage.setItem("lgmax-ver-ts", String(Date.now())); } catch (e) {}
+  location.reload();
+}
+let S = _vd().pool, STAGES = _vd().stages, ENC = _vd().encounters;
 /* Two whole solves: one for a run that never trades, one for a run that will.
    Trading is not a small tweak -- it adds Alakazam, Machamp, Golem and Gengar,
    so the commitments, the TM plan and every party are re-derived for each. */
 let trading = false;
 const tradeKey = () => trading ? "yes" : "no";
-const SECTIONS_BY = DATA.sections, CHOICES_BY = DATA.choices;
+let SECTIONS_BY = _vd().sections, CHOICES_BY = _vd().choices;
 /* Map images rendered straight from the decomp's tilesets and layouts,
    keyed by map folder name: [width px, height px, base64 png, pretty name]. */
 const MAPART = DATA.mapart || {};
 /* The completionist route: per stage, ordered stops with real tile paths. */
-const ROUTE = DATA.route || {total: 0, stages: []};
+let ROUTE = _vd().route || {total: 0, stages: []};
 /* The game's own front sprites, keyed by display name. */
 const SPRITES = DATA.sprites || {};
 /* The Pokédex: every species obtainable in a run. Field map matches compact.py:
    [natNo, name, types, firstStage, source, kind, tradeOnly, evolvesFromName,
     catchRate]. */
-const DEX = DATA.dex || [];
+let DEX = _vd().dex || [];
 /* Catch odds keyed by catch rate (capture.py's ROM formula, computed in the
    pipeline), plus the legendary/one-off playbooks. A species' catch rate rides
    on its Dex row (index 8), so name -> rate -> odds without a JS formula. */
-const CATCH_BY_RATE = DATA.catchByRate || {};
-const PLAYBOOKS = DATA.playbooks || [];
+let CATCH_BY_RATE = _vd().catchByRate || {};
+let PLAYBOOKS = _vd().playbooks || [];
 /* Grind calculator (training.py): fastest wild spot per party mon, keyed
    "name|level|stage|toggle"; value [area, method, turnsPerLevel, battles, move,
    encRate]. The run never grinds -- this is a catch-up tool for falling behind. */
@@ -1071,8 +1096,8 @@ const PLAYBOOKS = DATA.playbooks || [];
    mode is "journey" (playing through -- areas gated by where you'd be) or
    "postgame" (everything unlocked). Each segment [fromLv, toLv, area, method,
    move, tplLo, tplHi, battles]. A catch-up tool -- the run itself never grinds. */
-const ITIN = DATA.itineraries || {};
-const GRIND_RANGE = DATA.grindRange || [5, 100];
+let ITIN = _vd().itineraries || {};
+let GRIND_RANGE = _vd().grindRange || [5, 100];
 const GRIND_MODE_LABEL = {journey: "In journey", postgame: "Post-game"};
 const itinFor = (name, mode) => ((ITIN[name] || {})[mode] || {});
 /* the itinerary segment covering a mon at `level` under `toggle`, or null. The
@@ -1123,10 +1148,10 @@ function catchLine(name){
   return `catch ~${oddsPct(p)}/throw (${oddsBalls(p)} balls) using ${b} Balls at 1 HP + asleep`;
 }
 /* The money model: prize-money income by stage vs the run's real purchases. */
-const ECON = DATA.economy || {};
+let ECON = _vd().economy || {};
 /* Level targets: [leaderName idx, assumed level, stage] per gym + the League,
    in stage order. The run never grinds, so each is "be at least this by here". */
-const LVLTGT = DATA.levelTargets || [];
+let LVLTGT = _vd().levelTargets || [];
 /* The next gym at or after a section's stage: what level you should be by then. */
 function nextGym(stage){
   for (const t of LVLTGT){ if (t[2] >= stage) return {leader: str(t[0]), level: t[1], stage: t[2]}; }
@@ -1140,10 +1165,10 @@ const OWBYMAP = DATA.owByMap || {};
 /* Choices the run makes once and keeps; the section parties are solved with
    these locked, so a single Eevee can't become a Vaporeon in one town and a
    Jolteon in the next. */
-const COMMITTED_BY = DATA.commitments || {};
+let COMMITTED_BY = _vd().commitments || {};
 /* TMs are consumed when taught (HMs are not), so most are a one-shot decision
    for the whole playthrough. TM_PLANS says where each one should go. */
-const TM_PLANS_BY = DATA.tmPlans || {}, TM_SUPPLY = DATA.tmSupply || {};
+let TM_PLANS_BY = _vd().tmPlans || {}, TM_SUPPLY = _vd().tmSupply || {};
 const SECTIONS = () => SECTIONS_BY[tradeKey()] || {};
 const CHOICES  = () => CHOICES_BY[tradeKey()] || [];
 const COMMITTED = () => COMMITTED_BY[tradeKey()] || {};
@@ -1316,7 +1341,7 @@ function toggleChk(c){
 /* the "||"-joined species keys for a catch stop, for a toggle-all checkbox */
 const allSpeciesKeys = s => catchNames(s).map(n => speciesKey(s, n)).join("||");
 const saveUi = () => { try { localStorage.setItem("lgmax-ui",
-  JSON.stringify({view, starter, trading, sec: selectedSec, leg: selectedLeg, enc: selected, grindTM, grindMode, pickSpecies})); } catch (e) {} };
+  JSON.stringify({view, starter, trading, version: VER, sec: selectedSec, leg: selectedLeg, enc: selected, grindTM, grindMode, pickSpecies})); } catch (e) {} };
 try {
   const u = JSON.parse(localStorage.getItem("lgmax-ui") || "null");
   if (u){
@@ -1445,6 +1470,19 @@ document.getElementById("starterBtns").addEventListener("click", ev => {
   if (view === "money") renderMoney();
   saveUi(); syncTouch();
 });
+
+// Version (FireRed / LeafGreen): only offered when the payload carries both.
+// Switching reloads the page so every version-keyed table re-derives cleanly.
+if (VERSIONS.length > 1){
+  const vp = document.getElementById("versionPick");
+  if (vp) vp.hidden = false;
+  document.querySelectorAll("[data-version]").forEach(x =>
+    x.setAttribute("aria-pressed", String(x.dataset.version === VER)));
+  document.getElementById("versionBtns").addEventListener("click", ev => {
+    const b = ev.target.closest("[data-version]"); if (!b) return;
+    setVersion(b.dataset.version);
+  });
+}
 
 document.getElementById("tradeBtns").addEventListener("click", ev => {
   const b = ev.target.closest("[data-trade]"); if (!b) return;
@@ -2790,7 +2828,7 @@ window.addEventListener("popstate", () => {
 
 function prettyMap(mp){
   const art = MAPART[mp];
-  return art && str(art[3]) ? str(art[3]) : mp;
+  return art && art[3] ? art[3] : mp;   // pretty name is inline, not pooled
 }
 
 /* ---------------- TM plan ---------------- */
@@ -3658,7 +3696,7 @@ const validKey = k => /^[A-Za-z0-9_-]{8,64}$/.test(k);
 /* The whole of a device's progress, as one portable bundle. */
 const syncBundle = () => ({
   v: 1, done: [...DONE], play: {sec: PLAY.sec, leg: PLAY.leg, node: PLAY.node},
-  starter, trading, dex: DEXMANUAL, ts: PROGRESS_TS,
+  starter, trading, version: VER, dex: DEXMANUAL, ts: PROGRESS_TS,
 });
 
 /* Fold a bundle (from the server or a pasted code) into this device: never drop
@@ -3683,6 +3721,12 @@ function applyBundle(b){
     }
     if (STARTERS.includes(b.starter)) starter = b.starter;
     if (typeof b.trading === "boolean") trading = b.trading;
+    // version switching needs a reload, so don't flip it under the user mid-session:
+    // just remember a newer device's choice so the next load honours it.
+    if (VERSIONS.includes(b.version) && b.version !== VER){
+      try { const u = JSON.parse(localStorage.getItem("lgmax-ui") || "{}");
+            u.version = b.version; localStorage.setItem("lgmax-ui", JSON.stringify(u)); } catch (e) {}
+    }
     PROGRESS_TS = b.ts; changed = true;
   } else if (changed){
     PROGRESS_TS = Date.now();  /* we hold stops the bundle lacked -> we're newest */
@@ -3692,7 +3736,7 @@ function applyBundle(b){
     localStorage.setItem("lgmax-play", JSON.stringify(PLAY));
     localStorage.setItem("lgmax-dex", JSON.stringify(DEXMANUAL));
     localStorage.setItem("lgmax-ui", JSON.stringify(
-      {view, starter, trading, sec: selectedSec, leg: selectedLeg, enc: selected, grindTM, grindMode, pickSpecies}));
+      {view, starter, trading, version: VER, sec: selectedSec, leg: selectedLeg, enc: selected, grindTM, grindMode, pickSpecies}));
     localStorage.setItem("lgmax-ts", String(PROGRESS_TS));
   } catch (e) {}
   return changed;

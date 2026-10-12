@@ -459,7 +459,10 @@ def main():
         meta = mapart["maps"][mp]
         b64 = base64.b64encode(
             open(f"{OUT}/mapart/{mp}.png", "rb").read()).decode()
-        art[mp] = [meta["w"], meta["h"], b64, S(_G.pretty_location(mp))]
+        # pretty name kept INLINE (not pooled): map art is identical across game
+        # versions, so the two-version payload shares one copy of it -- which only
+        # works if it carries no index into a per-version string pool.
+        art[mp] = [meta["w"], meta["h"], b64, _G.pretty_location(mp)]
 
     sprites = {}
     for _nm, _rel in (mapart.get("sprites") or {}).items():

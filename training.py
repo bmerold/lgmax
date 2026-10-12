@@ -603,6 +603,8 @@ def _inputs_hash():
         h.update(rev.encode())
     except Exception:
         pass
+    # the game version changes the catchable pool (and thus every grind spot)
+    h.update(_os.environ.get("LGMAX_VERSION", "lg").encode())
     h.update(repr((TOGGLES, ITIN_LEVELS[0], ITIN_LEVELS[-1], GRIND_MODES)).encode())
     return h.hexdigest()
 
