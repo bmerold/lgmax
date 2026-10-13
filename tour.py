@@ -765,6 +765,15 @@ def _escaping(m):
 # round trip through the Center runs 40-ish steps even for a door en route).
 HEAL_DETOUR_MAX = 60
 
+# A long dungeon with no in-dungeon Center (Silph Co, the Rocket Hideout) ends on a
+# boss the party meets only after a marathon of fights -- enough that no moveset's PP
+# survives to it. A no-item player can't top up inside, so before such a boss they
+# duck out to the nearest Center and climb back through the now-cleared, door-open
+# building (the grunts are gone, so it's a walk, not a re-fight). Model that whenever
+# at least this many fights separate a "Boss " stop from the last heal; short gyms,
+# where the leader is a handful of trainers in, never trip it.
+HEAL_FIGHT_RUN = 10
+
 _CENTER_DOORS = None
 def center_doors():
     """Outdoor door tile of every Pokémon Center, per map."""
@@ -972,6 +981,66 @@ def insert_heal(steps, stage, start_pos, fought_in):
     s["path"] = [[m, x, y] for m, x, y in corners(p2)]
     s["walk"] = len(p2) - 1
     return detour
+
+def insert_boss_heal(steps, stage, start_pos):
+    """Before a boss deep inside a Center-less dungeon, splice in a heal: walk out to
+    the nearest open Center and back to the boss through the now-cleared building.
+    Fires only when at least HEAL_FIGHT_RUN fights separate the boss from the last
+    heal -- the Silph Co / Rocket Hideout climbs to Giovanni, never a short gym. The
+    round trip is a plain walk (you can't Fly out of a multi-floor interior, and the
+    grunts are already beaten so nothing re-fights), drawn with every gate open since
+    the whole climb is won by now. Returns the added step count (0 if none qualify)."""
+    bi = next((k for k, s in enumerate(steps)
+               if str(s.get("what", "")).startswith("Boss ")), None)
+    if bi is None:
+        return 0
+    run = 0
+    for s in steps[:bi]:
+        if _passes_heal(s): run = 0
+        elif s["kind"] in ("trainer", "catch"): run += 1
+    if run < HEAL_FIGHT_RUN:
+        return 0
+    boss = steps[bi]
+    btile = (boss["map"], boss["at"][0], boss["at"][1])
+    here = start_pos if bi == 0 else tuple(steps[bi - 1]["path"][-1])
+    door_tiles = [(m, x, y) for m, xys in center_doors().items()
+                  if WD._open_map(m, stage) for x, y in xys]
+    if not door_tiles:
+        return 0
+    saved = WD._OPEN_GATES
+    WD._OPEN_GATES = None                       # the climb is won: every door is open
+    try:
+        # nearest open Center, round-tripped: walk out from where the climb left off,
+        # then back up to the boss. Pick the door with the cheapest out+back.
+        a = WD.reach_tile(here, stage)
+        da = WD.bfs(a, stage, targets=set(door_tiles))
+        best = None                             # (out+back, door)
+        for d in door_tiles:
+            if d not in da: continue
+            db = WD.bfs(d, stage, targets={WD.reach_tile(btile, stage)})
+            t = WD.reach_tile(btile, stage)
+            if t in db and (best is None or da[d] + db[t] < best[0]):
+                best = (da[d] + db[t], d)
+        if best is None:
+            return 0
+        trip, door = best
+        p1 = WD.draw_path(here, door, stage)
+        p2 = WD.draw_path(door, btile, stage)
+        if not p1 or not p2:
+            return 0
+        p2 = stop_short(p2, boss["map"], boss["at"][0], boss["at"][1])
+    finally:
+        WD._OPEN_GATES = saved
+    added = (len(p1) - 1) + (len(p2) - 1) - boss["walk"]
+    steps.insert(bi, {
+        "kind": "heal",
+        "what": (f"Heal before the boss — head back to the {G.pretty_location(door[0])} "
+                 f"Pokémon Center, then climb back up to {boss['what']}"),
+        "map": door[0], "at": [door[1], door[2]],
+        "walk": len(p1) - 1, "path": [[m, x, y] for m, x, y in corners(p1)]})
+    boss["path"] = [[m, x, y] for m, x, y in corners(p2)]
+    boss["walk"] = len(p2) - 1
+    return added
 
 # ------------------------------------------------------------------ the run
 INF = 1 << 30
@@ -1277,6 +1346,39 @@ def solve(max_stage=34, verbose=True):
                 return (_tower_floor(oi), last)
             order.sort(key=_floor_key)
 
+        # Silph Co is a self-contained dungeon with a boss at the top: you climb to
+        # 11F, beat Giovanni, and only once he flees does the freed Silph president
+        # hand over the Master Ball (SilphCo_11F scripts.inc) -- so the ball cannot
+        # be taken before the fight. The TSP, costing only travel, is otherwise happy
+        # to clear the building, fly off to the Cerulean/Route cluster that shares
+        # this stage, and ride back up for Giovanni -- a nonsensical "clear the tower,
+        # fly away, come back for the boss, grab the reward you somehow already had".
+        # Keep every Silph Co stop in one contiguous block, anchored where the walk
+        # first enters the building, and close it with Giovanni then his Master Ball.
+        # The sort is stable, so the Card-Key-first and locked-door ordering above is
+        # preserved within the block.
+        silph = [oi for oi in order if picked[oi - 1]["map"].startswith("SilphCo")]
+        if len(silph) > 1:
+            def _silph_last(oi):
+                w = picked[oi - 1].get("what", "")
+                return (2 if w == "Master Ball from the President"
+                        else 1 if w == "Boss Giovanni" else 0)
+            block = sorted(silph, key=_silph_last)
+            sset = set(silph)
+            anchor = min(k for k, oi in enumerate(order) if oi in sset)
+            order = order[:anchor] + block + [oi for oi in order[anchor:] if oi not in sset]
+            # Mr. Psychic's TM29 (Psychic) sits in a Saffron house open the moment you
+            # can enter the city -- before the climb. The moveset planner is stage-
+            # granular: it hands this stage's team any TM the stage collects, so a mon
+            # walks into Silph Co already "carrying" Psychic. Grab the TM on the way in
+            # (just before the block) so that's legal, not deep in a later leg after
+            # half the climb has already leaned on it.
+            tm = next((oi for oi in order
+                       if picked[oi - 1].get("what") == "TM29 Psychic from Mr. Psychic"), None)
+            if tm is not None and order.index(tm) > order.index(block[0]):
+                order.remove(tm)
+                order.insert(order.index(block[0]), tm)
+
         def build_steps(ordr):
             stps, cur2, prev_idx, cst = [], pos, 0, 0
             # trainer-gated doors open only for fights already won, so each walked
@@ -1386,6 +1488,7 @@ def solve(max_stage=34, verbose=True):
             order.remove(tj); order.insert(si, tj)
         steps, cost, cur = build_steps(order)
         cost += insert_heal(steps, stage, pos, fought_since_heal)
+        cost += insert_boss_heal(steps, stage, pos)
         # Dig / Escape Rope is priced into the distance matrix above (a hop from
         # inside a single-entrance cave to its mouth), so it needs no post-pass.
         # order is now final and aggro-clean; straighten stand tiles where it's

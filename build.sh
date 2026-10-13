@@ -42,7 +42,20 @@ for V in $LGMAX_VERSIONS; do
     cp data/route.json "data/route_${V}.json"
   fi
   python3 sections.py     # solves every section, battles in ROUTE order
-  python3 training.py     # grind calculator (version-keyed input hash)
+  # Grind calculator. Its inputs are the species/exp/encounter data, NOT the route or
+  # the section solve, so a routing-only change never needs it rebuilt. The two
+  # versions share one data/training.json, though, so snapshot per version and restore
+  # before the run -- otherwise each version busts the other's reuse hash and both
+  # rebuild every time. training.py then reuses the restored snapshot when its inputs
+  # are unchanged. LGMAX_SKIP_TRAINING=1 reuses the snapshot outright (iterating on
+  # routing/sections, which the grind model ignores); it still runs if none exists.
+  [ -f "data/training_${V}.json" ] && cp "data/training_${V}.json" data/training.json
+  if [ -n "${LGMAX_SKIP_TRAINING:-}" ] && [ -f "data/training_${V}.json" ]; then
+    echo "reusing data/training_${V}.json (LGMAX_SKIP_TRAINING set)"
+  else
+    python3 training.py   # grind calculator (version-keyed input hash)
+  fi
+  cp data/training.json "data/training_${V}.json"
   python3 optimize.py     # per-encounter rankings
   python3 economy.py      # money: prize income vs Game Corner / stone costs
   python3 render_maps.py  # map PNGs (incremental; this version's used maps)

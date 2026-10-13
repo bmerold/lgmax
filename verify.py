@@ -420,6 +420,42 @@ for st in routej["stages"]:
 check("the Leftovers is collected after the Snorlax that blocks it",
       not _bad_snorlax, f"stages {_bad_snorlax}")
 
+# Silph Co is one climb to a boss: you take the tower floor by floor, beat Giovanni
+# on 11F, and only once he flees does the freed Silph president hand over the Master
+# Ball (SilphCo_11F scripts.inc) -- so the ball can't be taken before the fight. The
+# walk must not clear the building, fly off to this stage's far Cerulean/Route
+# cluster, and ride back up for the boss. Between the first and last Silph Co stop
+# nothing foreign may be done -- only Silph stops and a pre-boss heal -- and the
+# Master Ball comes after Giovanni, never before. Mr. Psychic's TM29 (Psychic) is a
+# Saffron house open on arrival; it must be grabbed before the climb so this stage's
+# team can legally carry the move it hands out (the moveset planner is stage-granular).
+_silph_detour, _ball_early, _tm_late = [], [], []
+for st in routej["stages"]:
+    steps = st["steps"]
+    sidx = [i for i, s in enumerate(steps) if str(s.get("map", "")).startswith("SilphCo")]
+    if not sidx:
+        continue
+    lo, hi = sidx[0], sidx[-1]
+    for i in range(lo, hi + 1):
+        s = steps[i]
+        if not str(s.get("map", "")).startswith("SilphCo") and s["kind"] != "heal":
+            _silph_detour.append((st["stage"], s.get("what")))
+    gio = next((i for i, s in enumerate(steps) if str(s.get("what", "")) == "Boss Giovanni"), None)
+    ball = next((i for i, s in enumerate(steps)
+                 if str(s.get("what", "")) == "Master Ball from the President"), None)
+    if gio is not None and ball is not None and ball < gio:
+        _ball_early.append(st["stage"])
+    tm = next((i for i, s in enumerate(steps)
+               if str(s.get("what", "")) == "TM29 Psychic from Mr. Psychic"), None)
+    if tm is not None and tm > lo:
+        _tm_late.append(st["stage"])
+check("Silph Co is cleared in one visit, no detour mid-climb",
+      not _silph_detour, str(_silph_detour[:4]))
+check("the Silph Co Master Ball is taken only after Giovanni is beaten",
+      not _ball_early, f"stages {_ball_early}")
+check("Mr. Psychic's TM29 is grabbed before the Silph Co climb that uses it",
+      not _tm_late, f"stages {_tm_late}")
+
 prev_end, disc = None, []
 for st in routej["stages"]:
     if prev_end is not None and st["startsAt"] != prev_end:
