@@ -488,7 +488,11 @@ def _tile_open(g, x, y, stage, surf_ok):
     if (x, y) in g.scripted_open: return True
     beh = g.b(x, y)
     if beh in SURFABLE:
-        return surf_ok
+        # Surfable water, but a rock (or tree stump) sitting on it keeps collision 1
+        # while its behavior still reads as water -- e.g. the rocks dotting Route 20
+        # at y=15. That tile is a wall you surf AROUND, not through, so it needs clear
+        # collision as well as Surf; without this the path cut straight through them.
+        return surf_ok and g.c(x, y) == 0
     return g.c(x, y) == 0
 
 def _edge_ok(src_beh, dst_beh, dx, dy):

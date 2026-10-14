@@ -227,17 +227,26 @@ scatter = []
 for starter, per_stage in raw["sections"].items():
     for st, sec in per_stage.items():
         if not sec: continue
+        # Aggregate a map's wild battles across ALL its log entries before judging.
+        # A long map is split into several batches (a heal or a second pass cuts the
+        # log), and a lead that cleared the first batch is depleted for the next, so
+        # a backup takes its stragglers -- legitimate depletion-rotation. Judged one
+        # batch at a time that looks like a clean per-species cherry-pick; judged over
+        # the whole walk the depleted species shows up under two leads, which is the
+        # rotation fingerprint the guard means to allow.
+        by_enc = collections.defaultdict(lambda: (collections.Counter(),
+                                                   collections.defaultdict(set)))
         for l in sec["log"]:
             if l["kind"] != "wild": continue
-            tally = collections.Counter()
-            leads_per_opp = collections.defaultdict(set)
+            tally, leads_per_opp = by_enc[l["enc"]]
             for s in l["steps"]:
                 tally[s.get("by")] += s.get("n", 1)
                 leads_per_opp[s.get("opp")].add(s.get("by"))
+        for enc, (tally, leads_per_opp) in by_enc.items():
             tot = sum(tally.values())
             rotated = any(len(v) > 1 for v in leads_per_opp.values())
             if tot >= 6 and tally.most_common(1)[0][1] < 0.5 * tot and not rotated:
-                scatter.append((starter, int(st), l["enc"], dict(tally)))
+                scatter.append((starter, int(st), enc, dict(tally)))
 check("wild routes are walked by a lead, not cherry-picked per encounter",
       not scatter, str(scatter[:2]))
 
@@ -508,6 +517,37 @@ for sk, per_stage in secs.items():
                 _legend_early.append((sk, int(stg), L))
 check("no stage fields a legendary caught after that stage's first battle",
       not _legend_early, str(_legend_early[:4]))
+
+# A rock or stump sitting on surfable water keeps collision 1 while its behavior still
+# reads as water; the walk must surf AROUND it, never through. Replay every drawn path
+# and flag any tile it crosses that is collision-1 AND a surfable behavior (the exact
+# rock-on-water class -- surf-mount/dive transitions are collision-1 but not surfable,
+# so they're excluded and don't false-flag).
+_rock_cross = []
+_grid_cache = {}
+def _gridc(m):
+    if m not in _grid_cache:
+        try: _grid_cache[m] = WORLD.grid(m)
+        except Exception: _grid_cache[m] = None
+    return _grid_cache[m]
+for st in routej["stages"]:
+    for s in st["steps"]:
+        path = s.get("path") or []
+        for j in range(len(path) - 1):
+            (m0, x0, y0), (m1, x1, y1) = path[j], path[j + 1]
+            if m0 != m1:
+                continue
+            g = _gridc(m0)
+            if g is None:
+                continue
+            n = max(abs(x1 - x0), abs(y1 - y0), 1)
+            for t in range(n + 1):
+                x = round(x0 + (x1 - x0) * t / n); y = round(y0 + (y1 - y0) * t / n)
+                if g.inb(x, y) and g.c(x, y) == 1 and g.b(x, y) in WORLD.SURFABLE:
+                    _rock_cross.append((st["stage"], m0, x, y))
+                    break
+check("the walk never surfs through a rock (collision-1 water tile)",
+      not _rock_cross, str(_rock_cross[:4]))
 
 prev_end, disc = None, []
 for st in routej["stages"]:
