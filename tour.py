@@ -124,6 +124,15 @@ EVENTS = [
     ("Master Ball from the President", "SilphCo_11F", 23, "President"),
     ("TM29 Psychic from Mr. Psychic", "SaffronCity_MrPsychicsHouse", 23, "MrPsychic"),
     ("Hitmonlee or Hitmonchan (pick one)", "SaffronCity_Dojo", 23),
+    # Seafoam Islands is impassable until its currents are stilled: push the Strength
+    # boulders on B1F/B2F down the holes so they plug B3F's two current slots
+    # (SeafoamIslands_B3F stops its current at NUM_BOULDERS_PRESENT == 2 ->
+    # FLAG_STOPPED_SEAFOAM_B3F_CURRENT, scripts.inc). Until then the current rides you
+    # straight back and Articuno on B4F is unreachable. world.ALT_LAYOUT routes the
+    # stilled layout, so the walk itself is drawable -- this stop is the instruction to
+    # do the puzzle first. Strength (HM04, stage 21) is in hand well before this.
+    ("Still the Seafoam currents: push the boulders down the holes (Strength)",
+     "SeafoamIslands_B1F", 25),
     ("Revive your fossils", "CinnabarIsland_PokemonLab_ExperimentRoom", 26, "FossilScientist"),
     ("Help Celio at the Network Center", "OneIsland_PokemonCenter_1F", 28, "Celio"),
     ("HM06 Rock Smash in the Ember Spa", "OneIsland_KindleRoad_EmberSpa", 28, "RockSmashMan"),
@@ -1402,6 +1411,19 @@ def solve(max_stage=34, verbose=True):
                     break
             if not moved:
                 break
+
+        # Seafoam Islands is one-directional until its currents are stilled: the
+        # boulder-push has to happen before the walk rides down to B3F/B4F (Articuno),
+        # or the current sweeps you back. Pull the push stop ahead of every Seafoam
+        # stop on those lower floors.
+        bz = next((k for k, oi in enumerate(order)
+                   if str(picked[oi - 1].get("what", "")).startswith("Still the Seafoam")), None)
+        if bz is not None:
+            deep = next((k for k, oi in enumerate(order)
+                         if k != bz and picked[oi - 1]["map"] in
+                         ("SeafoamIslands_B3F", "SeafoamIslands_B4F")), None)
+            if deep is not None and deep < bz:
+                order.insert(deep, order.pop(bz))
 
         def build_steps(ordr):
             stps, cur2, prev_idx, cst = [], pos, 0, 0
