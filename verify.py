@@ -475,6 +475,40 @@ for st in routej["stages"]:
 check("every gym leader is fought last in its gym", not _gym_leader_early,
       str(_gym_leader_early[:3]))
 
+# A one-off legendary (Zapdos, Articuno, Moltres, Mewtwo) may only sit on a stage's
+# recommended team if the route has already caught it when that stage's fighting
+# starts -- otherwise the guide fields a Pokémon not yet in the bag. The route catches
+# each at a fixed spot; require that spot to precede the stage's first battle wherever
+# the stage also fields the legendary. (The catch stays reachability-gated by tour; this
+# only pins its order within the stage.)
+_LEGENDS = {"Zapdos", "Articuno", "Moltres", "Mewtwo"}
+# route step index where each legendary is caught, by stage
+_caught_at = {}
+for st in routej["stages"]:
+    for i, s in enumerate(st["steps"]):
+        w = str(s.get("what", ""))
+        for L in _LEGENDS:
+            if f"Catch {L}" in w:
+                _caught_at[(L, st["stage"])] = i
+_legend_early = []
+for sk, per_stage in secs.items():
+    for stg, sec in per_stage.items():
+        if not sec:
+            continue
+        team = {t["name"] for t in sec.get("team", [])}
+        st = next((x for x in routej["stages"] if x["stage"] == int(stg)), None)
+        if not st:
+            continue
+        ft = next((i for i, s in enumerate(st["steps"]) if s["kind"] == "trainer"), None)
+        if ft is None:
+            continue
+        for L in _LEGENDS & team:
+            cp = _caught_at.get((L, int(stg)))
+            if cp is not None and cp > ft:
+                _legend_early.append((sk, int(stg), L))
+check("no stage fields a legendary caught after that stage's first battle",
+      not _legend_early, str(_legend_early[:4]))
+
 prev_end, disc = None, []
 for st in routej["stages"]:
     if prev_end is not None and st["startsAt"] != prev_end:

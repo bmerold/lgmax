@@ -349,6 +349,14 @@ except Exception:
     pass
 AVAIL = P.full_availability()
 UNCATCHABLE = {"SPECIES_MAROWAK"}   # the Pokemon Tower ghost is not obtainable there
+# The legendary birds are one-off catches sunk deep in a dungeon the route only
+# reaches partway through their stage (Zapdos past the Power Plant's sea-route
+# gauntlet, Articuno at the bottom of Seafoam, Moltres atop Mt. Ember). The team is
+# one fixed six per stage, so a bird can't help in the stage you catch it -- it isn't
+# in the bag when that stage's fights begin. Treat it as a candidate only from the
+# NEXT stage, so the guide never fields a bird you haven't caught yet. (Mewtwo is
+# post-game with no battles after it, so it needs no deferral.)
+LATE_LEGENDS = {"SPECIES_ARTICUNO", "SPECIES_ZAPDOS", "SPECIES_MOLTRES"}
 
 ALLOW_TRADE = False
 def set_allow_trade(on):
@@ -367,7 +375,8 @@ def candidates(stage, allow_trade=None):
     if allow_trade is None: allow_trade = ALLOW_TRADE
     out = []
     for sp, rec in AVAIL.items():
-        if rec["stage"] > stage: continue
+        gate = rec["stage"] + 1 if sp in LATE_LEGENDS else rec["stage"]
+        if gate > stage: continue
         if sp not in E.SPECIES: continue
         if not allow_trade and rec.get("requiresTrade"): continue
         if not C.allowed(sp): continue        # contradicts a one-time choice
