@@ -456,6 +456,25 @@ check("the Silph Co Master Ball is taken only after Giovanni is beaten",
 check("Mr. Psychic's TM29 is grabbed before the Silph Co climb that uses it",
       not _tm_late, f"stages {_tm_late}")
 
+# Beating a gym leader flags every other trainer in that gym as defeated
+# (set_gym_trainers -> settrainerflag for each, data/scripts/set_gym_trainers.inc),
+# so a junior skipped before the leader can never be fought. To battle everyone, the
+# leader must be the LAST trainer in its gym. (Silph Co's Giovanni removeobjects only
+# the two grunts beside him and is fought last anyway; the Rocket Hideout grunts
+# survive until the Viridian Gym sets FLAG_HIDE_MISC_KANTO_ROCKETS, long after it.)
+_gym_leader_early = []
+for st in routej["stages"]:
+    bymap = {}
+    for s in st["steps"]:
+        if s["kind"] == "trainer" and str(s.get("map", "")).endswith("_Gym"):
+            bymap.setdefault(s["map"], []).append(str(s.get("what", "")))
+    for gym, ws in bymap.items():
+        lead = [j for j, w in enumerate(ws) if w.startswith(("Leader ", "Boss "))]
+        if lead and max(lead) != len(ws) - 1:
+            _gym_leader_early.append((st["stage"], gym, ws[max(lead) + 1:]))
+check("every gym leader is fought last in its gym", not _gym_leader_early,
+      str(_gym_leader_early[:3]))
+
 prev_end, disc = None, []
 for st in routej["stages"]:
     if prev_end is not None and st["startsAt"] != prev_end:

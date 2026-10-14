@@ -705,12 +705,24 @@ def fly_origin(name):
     if is_outdoors(name):
         return True
     mj = R.maps().get(name) or {}
-    if mj.get("allow_escaping"):
+    # allow_escaping marks a cave you Dig / Escape-Rope out of (Power Plant, the Sevii
+    # caves) rather than walk to a door and fly from. The lone exception is the Saffron
+    # Gym: the flag is there for its teleporter maze (step on a panel and Escape Rope
+    # bails you out), but it is still a town building whose doors open onto Saffron
+    # City -- you walk out and fly like any other gym. Only the Saffron Gym is both a
+    # gym and allow_escaping, so the carve-out touches nothing else.
+    if mj.get("allow_escaping") and not name.endswith("_Gym"):
         return False
     folder = _const_to_folder()
+    # Only warps that LEAVE this map count: a warp whose destination is the map
+    # itself is an in-room teleporter, not an exit. The Saffron Gym is 30 such
+    # teleporter panels (the warp maze) plus 3 doors to Saffron City -- without this
+    # the self-warps make it look like it doesn't open onto open air, and the walk
+    # can't Fly out of it (it would trek on foot all the way to the next area).
     dests = {folder.get(w.get("dest_map", ""))
              for w in mj.get("warp_events", [])
-             if w.get("dest_map") not in ("", "MAP_DYNAMIC")}
+             if w.get("dest_map") not in ("", "MAP_DYNAMIC")
+             and folder.get(w.get("dest_map", "")) != name}
     dests.discard(None)
     return bool(dests) and all(is_outdoors(d) for d in dests)
 

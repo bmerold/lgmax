@@ -1379,6 +1379,30 @@ def solve(max_stage=34, verbose=True):
                 order.remove(tm)
                 order.insert(order.index(block[0]), tm)
 
+        # A gym leader, on defeat, flags EVERY trainer in the gym as beaten
+        # (set_gym_trainers in each leader's DefeatedX script -> settrainerflag for all
+        # of them, data/scripts/set_gym_trainers.inc), so any junior skipped before the
+        # leader can never be battled. We fight everyone, so the leader is ordered LAST
+        # among its gym's trainers. (Silph Co's Giovanni, whose defeat only removeobjects
+        # the two grunts beside him, is already last from the block above; the Rocket
+        # Hideout grunts don't vanish until the Viridian Gym, long after the hideout.)
+        for _ in range(len(order) + 4):
+            moved = False
+            for k, oi in enumerate(order):
+                n = picked[oi - 1]
+                if not (n["kind"] == "trainer" and n["map"].endswith("_Gym")
+                        and str(n.get("what", "")).startswith(("Leader ", "Boss "))):
+                    continue
+                last = max((j for j, o in enumerate(order)
+                            if picked[o - 1]["kind"] == "trainer"
+                            and picked[o - 1]["map"] == n["map"]), default=k)
+                if last > k:
+                    order.insert(last, order.pop(k))
+                    moved = True
+                    break
+            if not moved:
+                break
+
         def build_steps(ordr):
             stps, cur2, prev_idx, cst = [], pos, 0, 0
             # trainer-gated doors open only for fights already won, so each walked
