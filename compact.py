@@ -3,7 +3,7 @@
 single self-contained page. Same information, far fewer bytes: repeated object
 keys become positional arrays, and shared strings become indices into pools.
 """
-import base64, json, os
+import base64, json, os, re
 import engine, progression, capture
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
@@ -370,8 +370,25 @@ def main():
                         if not s[16] and not s[15] and 0 < s[8] < CLOSE_HP_PCT)
             u, f = leg["unanswered"], leg["faints"]
             dg = 3 if (u or f) else 2 if ohko else 1 if close else 0
+            # The sim names a leg after its battles, so a leg that also threads a
+            # multi-floor dungeon with no trainers (Seafoam Islands) gets titled after
+            # the routes its trainers sit on, hiding the dungeon. Append the dungeon
+            # name so the subsection is findable. (A fully separate dungeon leg needs
+            # the route de-fragmentation; this at least labels where Seafoam lives.)
+            import build_graph as _BGt
+            _floors = _c.defaultdict(set)
+            for _m in seq:
+                _b = re.sub(r"_(B?\d+F)$", "", _m)
+                if _b != _m:
+                    _floors[_b].add(_m)
+            _ti = str(leg["title"] or "")
+            for _b, _fs in _floors.items():
+                if len(_fs) >= 3:
+                    _dn = _BGt.pretty_location(_b)
+                    if _dn and _dn not in _ti:
+                        _ti = (_ti + " · " + _dn) if _ti else _dn
             out.append({
-                "ti": S(leg["title"]), "hz": S(leg.get("endsAt")),
+                "ti": S(_ti), "hz": S(leg.get("endsAt")),
                 "cold": 1 if leg.get("cold") else 0,
                 "b": leg["battles"], "om": leg["opposingMons"],
                 "wb": leg["wildBattles"], "t": leg["turns"],

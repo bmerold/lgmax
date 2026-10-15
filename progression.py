@@ -169,7 +169,10 @@ STATIC_SOURCES = [
       if E.VERSION == "fr" else ()),
     ("SPECIES_EEVEE",     15, "gift",     "Celadon Condominiums roof, L25"),
     ("SPECIES_HYPNO",     18, "static",   "Pokemon Tower, L30"),
-    ("SPECIES_MAROWAK",   18, "static",   "Ghost Marowak, Pokemon Tower (uncatchable)"),
+    # The Ghost Marowak on Pokemon Tower 6F can't be caught (a scripted fight, kept as
+    # a tour event), so it is NOT how you obtain Marowak -- you evolve a Cubone at L28.
+    # Listing it here as a static masked that evolution, leaving the Dex/guide with no
+    # "evolve at L28" note; drop it so Marowak flows from the Cubone -> Marowak evo.
     ("SPECIES_SNORLAX",   19, "static",   "Route 12 / Route 16, L30"),
     ("SPECIES_HITMONLEE", 23, "gift",     "Saffron Fighting Dojo (choose one)"),
     ("SPECIES_HITMONCHAN",23, "gift",     "Saffron Fighting Dojo (choose one)"),
