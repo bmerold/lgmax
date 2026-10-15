@@ -3967,12 +3967,50 @@ function dexScan(){
 const DEX_FILTERS = [["all", "All"], ["caught", "Registered"], ["missing", "Still to get"],
                      ["offroute", "Off-route"], ["trade", "Trade-only"]];
 
-let DEX_DERIVED = new Set();    // route-derived registration, for the toggle handler
-function dexRegistered(name){    // effective status: manual override wins over derived
+let DEX_DERIVED = new Set();      // route-derived registration (from the journey's DONE)
+let DEX_COLLECTABLE = new Set();  // species the route can register (on-route)
+function dexRegistered(name){
+  // An on-route species shares ONE truth with the journey: its catch/evolve boxes
+  // (DONE), so the Dex reads that straight and a stale manual flag can never mask it.
+  // Only a species the route can't register (an off-route prize) falls back to the
+  // manual override.
+  if (DEX_COLLECTABLE.has(name)) return DEX_DERIVED.has(name);
   return name in DEXMANUAL ? DEXMANUAL[name] : DEX_DERIVED.has(name);
 }
+/* Every journey DONE key that registers this species -- the per-species catch boxes,
+   the gift/event stop, and the evolve call-out -- so ticking it in the Dex ticks the
+   same boxes the journey does (mirrors dexScan). */
+function speciesDoneKeys(name){
+  const keys = new Set();
+  for (const sg of STAGES){
+    const d = secData(sg.id);
+    for (const L of legsOf(d)){
+      for (const st of (L && L.rt) || []){
+        const kind = str(st[0]);
+        if (kind === "catch" && catchNames(st).includes(name)) keys.add(speciesKey(st, name));
+        else if (kind === "event" && (str(st[1]) || "").includes(name)) keys.add(stopKey(st));
+      }
+    }
+    for (const it of sectionEvos(d))
+      for (const r of it.options) if (str(r[1]) === name) keys.add(evolveKey(name));
+  }
+  return [...keys];
+}
 function renderDex(){
-  const scan = dexScan();
+  let scan = dexScan();
+  DEX_COLLECTABLE = scan.collectable;
+  // Non-destructive migration of pre-mirror Dex marks: older builds stored a Dex tick
+  // only in DEXMANUAL, never in the journey's DONE, so an on-route mon ticked that way
+  // would now read unregistered. Fold each on-route "owned" tick into the shared DONE
+  // by adding its catch/evolve boxes -- only ever ADDS (never un-checks journey
+  // progress), and runs only when something is actually missing, so it's idempotent and
+  // doesn't churn sync. On-route overrides are ignored by dexRegistered either way.
+  let _migrated = false;
+  for (const n of Object.keys(DEXMANUAL)){
+    if (DEXMANUAL[n] !== true || !DEX_COLLECTABLE.has(n)) continue;
+    for (const k of speciesDoneKeys(n)) if (!DONE.has(k)){ DONE.add(k); _migrated = true; }
+  }
+  if (_migrated){ saveDone(); scan = dexScan(); }
   DEX_DERIVED = scan.registered;
   const collectable = scan.collectable;
   const shown = DEX.filter(d => !(d[6] === 1 && !trading));   // hide trade-only in a solo run
@@ -4032,12 +4070,23 @@ document.getElementById("dexFilters").addEventListener("click", ev => {
 document.getElementById("dexSearch").addEventListener("input", ev => {
   dexQuery = ev.target.value; renderDex();
 });
-/* Tap a card to override its registration; a value matching the route-derived
-   default clears the override so future progress flows through again. */
+/* Tap a card to flip a mon's registration. An on-route mon is mirrored straight into
+   the journey: we tick (or clear) the very catch/evolve boxes the journey uses, so the
+   two views always agree, and drop any old manual flag that would mask them. An
+   off-route mon (a prize you bought, say) has no journey box, so it keeps a manual
+   override, cleared when it matches the route-derived default. */
 function dexToggle(name){
   const want = !dexRegistered(name);
-  if (want === DEX_DERIVED.has(name)) delete DEXMANUAL[name];
-  else DEXMANUAL[name] = want;
+  if (DEX_COLLECTABLE.has(name)){
+    const keys = speciesDoneKeys(name);
+    keys.forEach(k => want ? DONE.add(k) : DONE.delete(k));
+    delete DEXMANUAL[name];
+    saveDone();
+  } else if (want === DEX_DERIVED.has(name)) {
+    delete DEXMANUAL[name];
+  } else {
+    DEXMANUAL[name] = want;
+  }
   saveDex(); renderDex();
 }
 document.getElementById("dexGrid").addEventListener("click", ev => {
