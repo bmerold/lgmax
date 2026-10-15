@@ -124,15 +124,25 @@ EVENTS = [
     ("Master Ball from the President", "SilphCo_11F", 23, "President"),
     ("TM29 Psychic from Mr. Psychic", "SaffronCity_MrPsychicsHouse", 23, "MrPsychic"),
     ("Hitmonlee or Hitmonchan (pick one)", "SaffronCity_Dojo", 23),
-    # Seafoam Islands is impassable until its currents are stilled: push the Strength
-    # boulders on B1F/B2F down the holes so they plug B3F's two current slots
-    # (SeafoamIslands_B3F stops its current at NUM_BOULDERS_PRESENT == 2 ->
-    # FLAG_STOPPED_SEAFOAM_B3F_CURRENT, scripts.inc). Until then the current rides you
-    # straight back and Articuno on B4F is unreachable. world.ALT_LAYOUT routes the
-    # stilled layout, so the walk itself is drawable -- this stop is the instruction to
-    # do the puzzle first. Strength (HM04, stage 21) is in hand well before this.
-    ("Still the Seafoam currents: push the boulders down the holes (Strength)",
-     "SeafoamIslands_B1F", 25),
+    # Seafoam Islands is impassable until its currents are stilled: a four-floor
+    # Strength cascade whose B2F pair plugs B3F's two current slots (SeafoamIslands_B3F
+    # stills its current at NUM_BOULDERS_PRESENT == 2 -> FLAG_STOPPED_SEAFOAM_B3F_CURRENT,
+    # scripts.inc); until then the current rides you back and Articuno (B4F) is out of
+    # reach. world.ALT_LAYOUT routes the stilled layout, so the walk is drawable -- these
+    # stops carry the instruction. The puzzle is done one floor at a time on the way
+    # down, so it rides along as a per-floor stop slotted among that floor's items, not
+    # one lumped block; each floor's pushes drop its boulders to the floor below and
+    # reveal the next pair. Strength (HM04, stage 21) is in hand well before this.
+    ("Push 1F's boulders into the holes (Strength)", "SeafoamIslands_1F", 25),
+    ("Push B1F's boulders into the holes (Strength)", "SeafoamIslands_B1F", 25),
+    ("Push B2F's boulders into the holes — stills the current (Strength)",
+     "SeafoamIslands_B2F", 25),
+    # Victory Road's three floor switches each hold a barrier open while a boulder
+    # sits on them (copyobjectxytoperm in each VictoryRoad_*_EventScript_FloorSwitch),
+    # so the climb needs a Strength boulder parked on every switch. One stop, noted
+    # with all the switch tiles (boulders.py).
+    ("Push boulders onto the Victory Road floor switches (Strength)",
+     "VictoryRoad_1F", 31),
     ("Revive your fossils", "CinnabarIsland_PokemonLab_ExperimentRoom", 26, "FossilScientist"),
     ("Help Celio at the Network Center", "OneIsland_PokemonCenter_1F", 28, "Celio"),
     ("HM06 Rock Smash in the Ember Spa", "OneIsland_KindleRoad_EmberSpa", 28, "RockSmashMan"),
@@ -701,6 +711,46 @@ STOP_NOTES = {
         "sweep the cans one by one, and when the first clicks, work its "
         "neighbors. The electric fence to Surge drops when both are set.",
 }
+
+# The Seafoam and Victory Road boulder puzzles, solved from the decomp geometry
+# (boulders.py) rather than spelled out by hand, so the note tracks the maps.
+import boulders as _BLD
+
+
+_SEAFOAM_STEPS = _BLD.seafoam_steps()        # [(floor_map, [push phrases]), ...] top-down
+
+
+def _seafoam_floor_notes():
+    """One note per cascade floor, keyed (label, map) for STOP_NOTES."""
+    labels = {"SeafoamIslands_1F": "Push 1F's boulders into the holes (Strength)",
+              "SeafoamIslands_B1F": "Push B1F's boulders into the holes (Strength)",
+              "SeafoamIslands_B2F": "Push B2F's boulders into the holes — stills the "
+                                    "current (Strength)"}
+    out = {}
+    for i, (fl, ph) in enumerate(_SEAFOAM_STEPS):
+        last = i == len(_SEAFOAM_STEPS) - 1
+        tail = (" They land in B3F's two current slots and the water stops — now you "
+                "can ride the current down to Articuno." if last else
+                " Each drops to the floor below and reveals the boulder you push next.")
+        note = "With Strength: " + "; ".join(ph) + "." + tail
+        if fl in labels:
+            out[(labels[fl], fl)] = note
+    return out
+
+
+def _victory_boulder_note():
+    lead = ("Strength puzzle. Each floor switch holds its barrier open only while a "
+            "boulder sits on it (it stays once parked), so push a boulder onto every "
+            "switch as you climb. Victory Road's ledges mean the short push is by "
+            "sight; the switches are:")
+    rows = [f"• {G.pretty_location(fl)} — " + "; ".join(ln) + "."
+            for fl, ln in _BLD.victory_steps()]
+    return lead + " " + " ".join(rows)
+
+
+STOP_NOTES.update(_seafoam_floor_notes())
+STOP_NOTES[("Push boulders onto the Victory Road floor switches (Strength)",
+            "VictoryRoad_1F")] = _victory_boulder_note()
 
 # ------------------------------------------------------------------ sight aggro
 # A trainer with sight forces the battle the moment your walk enters their
@@ -1412,18 +1462,24 @@ def solve(max_stage=34, verbose=True):
             if not moved:
                 break
 
-        # Seafoam Islands is one-directional until its currents are stilled: the
-        # boulder-push has to happen before the walk rides down to B3F/B4F (Articuno),
-        # or the current sweeps you back. Pull the push stop ahead of every Seafoam
-        # stop on those lower floors.
-        bz = next((k for k, oi in enumerate(order)
-                   if str(picked[oi - 1].get("what", "")).startswith("Still the Seafoam")), None)
-        if bz is not None:
+        # Seafoam Islands is one-directional until its currents are stilled: each
+        # floor's boulder-push (slotted among that floor's items) must land before the
+        # walk rides down to B3F/B4F (Articuno), or the current sweeps you back. The
+        # cave descends 1F -> B1F -> B2F -> B3F, so the pushes already sit on floors
+        # above B3F; this just repairs any push the TSP left after a B3F/B4F stop,
+        # moving it to just before the first such stop (its floor items stay in place).
+        for _ in range(3):
             deep = next((k for k, oi in enumerate(order)
-                         if k != bz and picked[oi - 1]["map"] in
+                         if picked[oi - 1]["map"] in
                          ("SeafoamIslands_B3F", "SeafoamIslands_B4F")), None)
-            if deep is not None and deep < bz:
-                order.insert(deep, order.pop(bz))
+            if deep is None:
+                break
+            late = next((k for k in range(deep + 1, len(order))
+                         if "boulders into the holes" in
+                         str(picked[order[k] - 1].get("what", ""))), None)
+            if late is None:
+                break
+            order.insert(deep, order.pop(late))
 
         def build_steps(ordr):
             stps, cur2, prev_idx, cst = [], pos, 0, 0

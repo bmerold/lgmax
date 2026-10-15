@@ -551,18 +551,20 @@ check("the walk never surfs through a rock (collision-1 water tile)",
 
 # Seafoam Islands' currents only still once you push its Strength boulders into the
 # B3F holes (scripts.inc: FLAG_STOPPED_SEAFOAM_B3F_CURRENT at NUM_BOULDERS_PRESENT==2).
-# The walk routes the stilled layout, so the route must carry the boulder-push stop and
-# order it before anything on B3F/B4F -- otherwise the guide rides a current it never
-# stopped, straight back out, and can't reach Articuno.
+# The cascade is done per floor (1F -> B1F -> B2F) on the way down, and the walk routes
+# the stilled layout, so EVERY boulder-push stop must land before anything on B3F/B4F --
+# otherwise the guide rides a current it never stopped, straight back out, and can't
+# reach Articuno.
 _seafoam_bad = []
 for st in routej["stages"]:
     steps = st["steps"]
-    push = next((i for i, s in enumerate(steps)
-                 if str(s.get("what", "")).startswith("Still the Seafoam")), None)
+    pushes = [i for i, s in enumerate(steps)
+              if "boulders into the holes" in str(s.get("what", ""))
+              and str(s.get("map", "")).startswith("SeafoamIslands")]
     deep = next((i for i, s in enumerate(steps)
                  if str(s.get("map", "")) in ("SeafoamIslands_B3F", "SeafoamIslands_B4F")
-                 and i != push), None)
-    if deep is not None and (push is None or push > deep):
+                 and i not in pushes), None)
+    if deep is not None and (not pushes or max(pushes) > deep):
         _seafoam_bad.append(st["stage"])
 check("Seafoam's boulders are pushed before the walk rides down to B3F/B4F",
       not _seafoam_bad, f"stages {_seafoam_bad}")
