@@ -302,7 +302,9 @@ def main():
 
     def pack_stop(s):
         # [kind, what, map, x, y, walk, flyLanding, pathRuns, species, buried,
-        #  renewable, hunt, note, huntHi, teleportLanding, digLanding]
+        #  renewable, hunt, note, huntHi, teleportLanding, digLanding, boulderPaths]
+        # boulderPaths (slot 16): flat [x0,y0,...] polylines for a Strength-boulder
+        # push, drawn on this stop's own map; empty for every other stop.
         # flyLanding (Fly, 20+), teleportLanding (Teleport, 7+) and digLanding
         # (Dig/Escape Rope out of a single-entrance cave, 9+) each mean "this leg
         # is a jump, landing at this map", kept in separate slots so the app can
@@ -315,7 +317,8 @@ def main():
                 S(s.get("renewable")), s.get("hunt", 0), S(s.get("note")),
                 s.get("huntHi", 0),
                 s["teleport"] if isinstance(s.get("teleport"), str) else 0,
-                s["dig"] if isinstance(s.get("dig"), str) else 0]
+                s["dig"] if isinstance(s.get("dig"), str) else 0,
+                s.get("boulderPaths") or []]
 
     def leg_rows(sec, stage):
         """A section split at its full heals. Each leg carries its own roster

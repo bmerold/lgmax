@@ -101,6 +101,18 @@ def _runs(pushes):
     return [(d, n) for d, n in out]
 
 
+def _trajectory(start, runs):
+    """The boulder's path as a flat [x0,y0,x1,y1,...] of its corner tiles (start,
+    each turn, the hole) -- the same shape the app's svgPath draws."""
+    x, y = start
+    pts = [x, y]
+    for d, n in runs:
+        dx, dy = DIRS[d]
+        x += dx * n; y += dy * n
+        pts += [x, y]
+    return pts
+
+
 def _player_start(g, boulder):
     """Where to seed the player for the first push: any open tile next to the
     boulder. The player can walk up to it from anywhere on the floor, so starting
@@ -126,7 +138,8 @@ SEAFOAM_FLOORS = ["SeafoamIslands_1F", "SeafoamIslands_B1F", "SeafoamIslands_B2F
 
 def seafoam_steps():
     """Per-floor push instructions that cascade the boulders down to B3F's current
-    slots. Returns [(floor_label, [push phrases])]."""
+    slots. Returns [(floor_map, [push phrases], [boulder trajectories])] where each
+    trajectory is a flat [x0,y0,...] the app can draw on that floor's map."""
     out = []
     # which boulders are 'live' on the current floor: start with 1F's two, then
     # follow each floor's reveal-flag to the next floor's matching hide-flag.
@@ -138,14 +151,16 @@ def seafoam_steps():
         bs = _boulders(fl)
         if live is not None:
             bs = [b for b in bs if b[2] in live]   # only the revealed ones
-        phrases, reveal_next = [], set()
+        phrases, paths, reveal_next = [], [], set()
         for (bx, by, _flag, reveal) in bs:
             runs = solve_push(g, (bx, by), holes, _player_start(g, (bx, by)))
             where = (f"push it {_phrase(runs)} into the hole" if runs
                      else "push it into the nearest hole")
             phrases.append(f"the boulder at ({bx},{by}): {where}")
+            if runs:
+                paths.append(_trajectory((bx, by), runs))
             reveal_next.add(reveal)
-        out.append((fl, phrases))
+        out.append((fl, phrases, paths))
         live = reveal_next
     return out
 
@@ -182,10 +197,12 @@ def victory_steps():
 
 if __name__ == "__main__":
     print("=== SEAFOAM ISLANDS (still the currents) ===")
-    for fl, ph in seafoam_steps():
+    for fl, ph, paths in seafoam_steps():
         print(f"  {fl}:")
         for p in ph:
             print(f"    - {p}")
+        for tr in paths:
+            print(f"      path: {tr}")
     print("\n=== VICTORY ROAD (hold the floor switches) ===")
     for fl, ph in victory_steps():
         print(f"  {fl}:")

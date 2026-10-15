@@ -528,6 +528,8 @@ button{font:inherit;color:inherit}
   .mapside{position:static;flex:auto;width:100%;max-height:300px}}
 .mapbox svg{position:absolute;left:0;top:0;pointer-events:none}
 .rpath{fill:none;stroke:#fff;stroke-width:5;stroke-linejoin:round;stroke-linecap:round;opacity:.55}
+.bpath{fill:none;stroke:#E8912B;stroke-width:4;stroke-dasharray:7 5;stroke-linejoin:round;stroke-linecap:round}
+.bpath-start{fill:#E8912B;stroke:#3a2400;stroke-width:1.5}
 .rpath2{fill:none;stroke:#111111;stroke-width:2.5;stroke-linejoin:round;stroke-linecap:round}
 .rarrow0{fill:none;stroke:#111111;stroke-width:4;stroke-linecap:round;stroke-linejoin:round}
 .rarrow{fill:none;stroke:#fff;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
@@ -3375,6 +3377,10 @@ function renderPlayMap(ctx){
     pins += `<span class="mark amb" style="left:${(a[1] + 0.5) * 16}px;top:${(a[2] + 0.5) * 16}px"
       title="${esc(str(a[3]))} — renewable spawn (${RENEW_ODDS[str(a[4])] || "?"})">✦</span>`;
   });
+  // Strength-boulder push trajectories (slot 16) for any stop of this leg on this
+  // map -- the arrow shows which way to shove each boulder into its hole.
+  const bpaths = (L.rt || []).filter(st => st[2] === node.map && (st[16] || []).length)
+                   .flatMap(st => st[16]);
   holder.innerHTML = `<div class="mapbox" style="width:${W}px;height:${H}px">
     <img src="data:image/png;base64,${b64}" width="${W}" height="${H}" alt="">
     <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
@@ -3383,6 +3389,10 @@ function renderPlayMap(ctx){
       ${dim.map(c => svgArrows(c)).join("")}
       ${node.seg ? `<polyline class="rnow0" points="${svgPath(node.seg)}"/>
                     <polyline class="rnow" points="${svgPath(node.seg)}"/>` : ""}
+      ${bpaths.length ? `<defs><marker id="bh" markerWidth="12" markerHeight="12" refX="7" refY="4"
+          orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8 Z" fill="#E8912B"/></marker></defs>
+        ${bpaths.map(tr => `<polyline class="bpath" points="${svgPath(tr)}" marker-end="url(#bh)"/>`).join("")}
+        ${bpaths.map(tr => `<circle class="bpath-start" cx="${(tr[0] + 0.5) * 16}" cy="${(tr[1] + 0.5) * 16}" r="6.5"/>`).join("")}` : ""}
     </svg>
     ${owHtml}${pins}
   </div>`;

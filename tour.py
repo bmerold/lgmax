@@ -717,24 +717,29 @@ STOP_NOTES = {
 import boulders as _BLD
 
 
-_SEAFOAM_STEPS = _BLD.seafoam_steps()        # [(floor_map, [push phrases]), ...] top-down
+_SEAFOAM_STEPS = _BLD.seafoam_steps()   # [(floor_map, [phrases], [trajectories]), ...]
+_SEAFOAM_LABELS = {
+    "SeafoamIslands_1F": "Push 1F's boulders into the holes (Strength)",
+    "SeafoamIslands_B1F": "Push B1F's boulders into the holes (Strength)",
+    "SeafoamIslands_B2F": "Push B2F's boulders into the holes — stills the current (Strength)",
+}
+# The boulder-push trajectories per floor, keyed (label, map) so build_steps can hang
+# them on the stop for the app to draw on that floor's map.
+STOP_PATHS = {(_SEAFOAM_LABELS[fl], fl): paths
+              for fl, _ph, paths in _SEAFOAM_STEPS if fl in _SEAFOAM_LABELS}
 
 
 def _seafoam_floor_notes():
     """One note per cascade floor, keyed (label, map) for STOP_NOTES."""
-    labels = {"SeafoamIslands_1F": "Push 1F's boulders into the holes (Strength)",
-              "SeafoamIslands_B1F": "Push B1F's boulders into the holes (Strength)",
-              "SeafoamIslands_B2F": "Push B2F's boulders into the holes — stills the "
-                                    "current (Strength)"}
     out = {}
-    for i, (fl, ph) in enumerate(_SEAFOAM_STEPS):
+    for i, (fl, ph, _paths) in enumerate(_SEAFOAM_STEPS):
         last = i == len(_SEAFOAM_STEPS) - 1
         tail = (" They land in B3F's two current slots and the water stops — now you "
                 "can ride the current down to Articuno." if last else
                 " Each drops to the floor below and reveals the boulder you push next.")
         note = "With Strength: " + "; ".join(ph) + "." + tail
-        if fl in labels:
-            out[(labels[fl], fl)] = note
+        if fl in _SEAFOAM_LABELS:
+            out[(_SEAFOAM_LABELS[fl], fl)] = note
     return out
 
 
@@ -1531,6 +1536,8 @@ def solve(max_stage=34, verbose=True):
                               f"anyone along for the ride; no fight wants it.")
                         nt = (nt + " " + dn) if nt else dn
                     if nt: step["note"] = nt
+                    bp = STOP_PATHS.get((n["what"], n["map"]))
+                    if bp: step["boulderPaths"] = bp   # push trajectories to draw on the map
                     if n.get("underfoot"): step["underfoot"] = True
                     if n.get("renewable"): step["renewable"] = n["renewable"]
                     if n.get("hunt"): step["hunt"] = n["hunt"]
