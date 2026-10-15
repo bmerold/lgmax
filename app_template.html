@@ -658,7 +658,9 @@ button{font:inherit;color:inherit}
 /* the map and its docked info rail share the leftover height as a row */
 #playStage{flex:1;min-height:0;display:flex;overflow:hidden}
 #playMap{flex:1;min-width:0;min-height:0;display:flex;align-items:center;justify-content:center;
-  overflow:hidden;background:#101014}
+  overflow:hidden;background:#101014;position:relative}
+#playMapTag{pointer-events:none}
+#playMapTag:empty{display:none}
 /* docked rail: the route detail for this step sits beside the map (wild grass
    answers, catch odds, an in-game trade, evolve call-outs). Hidden when empty. */
 #playRail{flex:0 0 248px;min-height:0;overflow-y:auto;background:var(--surface-2);
@@ -951,7 +953,7 @@ details.notes[open] summary::after{content:"−"}
     </div>
     <div id="playTeam"></div>
     <div id="playStage">
-      <div id="playMap"><div id="playFit"></div></div>
+      <div id="playMap"><div id="playFit"></div><span id="playMapTag" class="maptag"></span></div>
       <aside id="playRail" hidden></aside>
     </div>
     <div id="playDrawer" hidden>
@@ -3339,6 +3341,8 @@ function renderPlayMap(ctx){
   const holder = document.getElementById("playFit");
   const node = ctx.node;
   const art = node && MAPART[node.map];
+  const tag0 = document.getElementById("playMapTag");   // which floor/map this is, pinned in the corner
+  if (tag0) tag0.textContent = art ? prettyMap(node.map) : "";
   if (!art){ holder.innerHTML = `<p class="empty" style="color:#ccc">No map for this step.</p>`; return; }
   const [W, H, b64] = art;
   const L = ctx.L;
