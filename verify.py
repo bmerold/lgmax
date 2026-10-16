@@ -630,6 +630,40 @@ for st in routej["stages"]:
 check("the walk never warps up onto a one-way fall hole",
       not _up_hole, str(_up_hole[:4]))
 
+# Pokémon Mansion secret switch: one global flag toggles barriers<->floor across
+# all four floors (world models the pressed config as ~pressed variant maps, flipped
+# at a statue). Walk the Mansion tracking that flag -- it enters unpressed (state 0)
+# -- flipping as the walk reaches each recorded press tile (step["presses"]), and
+# require every tile to be floor in the switch state it has pressed into. Catches any
+# path that strolls through a barrier the switch hasn't opened.
+_m_reset = {f: WORLD.grid(f).coll for f in WORLD.MANSION_FLOORS}
+_m_pressed = {f: WORLD.grid(WORLD.pressed_map(f)).coll for f in WORLD.MANSION_FLOORS}
+_m_state, _m_bad = 0, []
+for st in routej["stages"]:
+    for s in st["steps"]:
+        cs = s["path"]
+        presses = {tuple(p) for p in s.get("presses", [])}
+        tiles = [tuple(cs[0])] if cs else []
+        for (ma, xa, ya), (mb, xb, yb) in zip(cs, cs[1:]):
+            if ma != mb:                       # a warp jump between floors
+                tiles.append((mb, xb, yb)); continue
+            dx, dy = (xb > xa) - (xb < xa), (yb > ya) - (yb < ya)
+            if dx and dy: continue              # non-orthogonal corner (shouldn't happen)
+            cx, cy = xa, ya
+            for _ in range(400):
+                if (cx, cy) == (xb, yb): break
+                cx += dx; cy += dy; tiles.append((ma, cx, cy))
+        for (m, x, y) in tiles:
+            if m in WORLD.MANSION_FLOORS:
+                g = WORLD.grid(m)
+                if (x, y) not in g.warp_tiles \
+                        and (_m_pressed if _m_state else _m_reset)[m][y * g.w + x] != 0:
+                    _m_bad.append((st["stage"], m, (x, y), f"state{_m_state}", s["what"]))
+            if (x, y) in presses:
+                _m_state ^= 1
+check("the Mansion walk stays on floor for the switch state it has pressed into",
+      not _m_bad, str(_m_bad[:4]))
+
 bad_tot = [st["stage"] for st in routej["stages"]
            if not (0 <= st["stepTotal"] < 10 ** 7)]
 check("every stage's step total is finite", not bad_tot, str(bad_tot))

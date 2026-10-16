@@ -181,24 +181,56 @@ class Grid:
 import re as _re
 _SETMETA = _re.compile(r"setmetatile\s+(\d+),\s*(\d+),\s*\S+,\s*0\b")
 
+# ---- Pokémon Mansion secret switch: one global flag toggles barriers<->floor
+# across all four floors, flipped at any of five statues. It is NOT monotonic
+# (press again to flip back) and neither state alone reaches every room, so it
+# can't be a gate token nor the old "union both states" fudge -- it needs real
+# two-state geometry. We model the pressed config as a parallel set of map nodes
+# ("<floor>~pressed"): same art/warps/bodies as the base floor, but the pressed
+# collision, linked to the base floor by a press edge (neighbours) at each statue.
+# The pathfinder then routes over both states and presses where it must; tour's
+# build_steps strips the ~pressed tag back to the base map (with a press note) so
+# aggro, bodies, the battle sim, drawing and the payload are all unchanged.
+PRESS_COST = 4
+_PRESSED = "~pressed"
+MANSION_FLOORS = ("PokemonMansion_1F", "PokemonMansion_2F",
+                  "PokemonMansion_3F", "PokemonMansion_B1F")
+def base_map(name):
+    return name[:-len(_PRESSED)] if name.endswith(_PRESSED) else name
+def is_pressed(name):
+    return name.endswith(_PRESSED)
+def pressed_map(name):
+    return name + _PRESSED
+
 @functools.lru_cache(maxsize=1)
-def _mansion_open():
-    """The Mansion's secret switches live in one shared script file, with the
-    floor encoded in the label (PressSwitch_1F / ResetSwitch_B1F...). Union
-    both switch states: every tile that can ever be floor counts as floor --
-    the walk between re-presses is not modelled."""
+def _mansion_switch():
+    """Parse pokemon_mansion.inc into (pressed deltas, statue-adjacent tiles):
+    per floor the PressSwitch metatile collisions {(x,y): coll} that define the
+    PRESSED config relative to the baked RESET map.json, and the open tiles you
+    stand on to press a statue (a statue's orthogonal neighbours)."""
     path = f"{REPO}/data/scripts/pokemon_mansion.inc"
-    out = collections.defaultdict(set)
-    cur = None
-    for line in open(path):
-        lbl = _re.match(r"(\w+)::", line)
-        if lbl:
-            fl = _re.search(r"Switch_(B?\dF)$", lbl.group(1))
-            cur = f"PokemonMansion_{fl.group(1)}" if fl else cur
-        m = _SETMETA.search(line)
-        if m and cur:
-            out[cur].add((int(m.group(1)), int(m.group(2))))
-    return {k: frozenset(v) for k, v in out.items()}
+    txt = open(path).read()
+    deltas = collections.defaultdict(dict)       # floor -> {(x,y): collision}
+    adj = collections.defaultdict(set)           # floor -> {(x,y) you press from}
+    for fk, floor in {"1F": MANSION_FLOORS[0], "2F": MANSION_FLOORS[1],
+                      "3F": MANSION_FLOORS[2], "B1F": MANSION_FLOORS[3]}.items():
+        m = _re.search(rf"PressSwitch_{fk}::(.*?)\treturn", txt, _re.S)
+        if not m:
+            continue
+        for mm in _re.finditer(
+                r"setmetatile\s+(\d+),\s*(\d+),\s*(\S+),\s*(\d)", m.group(1)):
+            x, y, tile, col = int(mm.group(1)), int(mm.group(2)), mm.group(3), int(mm.group(4))
+            deltas[floor][(x, y)] = col
+            if "Statue" in tile:                 # you press from a tile beside it
+                for dx, dy in DIRS:
+                    adj[floor].add((x + dx, y + dy))
+    return {k: dict(v) for k, v in deltas.items()}, {k: frozenset(v) for k, v in adj.items()}
+
+def _mansion_pressed_deltas(floor):
+    return _mansion_switch()[0].get(floor, {})
+
+def mansion_statue_adjacent(floor, x, y):
+    return (x, y) in _mansion_switch()[1].get(floor, frozenset())
 
 @functools.lru_cache(maxsize=1)
 def _league_open():
@@ -212,8 +244,11 @@ def _league_open():
 
 @functools.lru_cache(maxsize=None)
 def _scripted_open(name):
-    """Tiles this map's scripts ever set passable: `setmetatile x, y, _, 0`."""
-    out = set(_mansion_open().get(name, ()))
+    """Tiles this map's scripts ever set passable: `setmetatile x, y, _, 0`.
+    The Pokémon Mansion is deliberately NOT here any more -- its switch barriers
+    are real two-state geometry (see _mansion_switch / the ~pressed variants),
+    not always-open, so its base floors keep the baked RESET collision."""
+    out = set()
     if name.startswith("PokemonLeague_"):
         out |= _league_open()
     path = f"{REPO}/data/maps/{name}/scripts.inc"
@@ -311,6 +346,18 @@ def _gate_tokens():
 
 @functools.lru_cache(maxsize=None)
 def grid(name):
+    if is_pressed(name):
+        # the pressed switch config: the base floor with the PressSwitch collision
+        # deltas overlaid. Shares behaviors, warps, bodies, elevation (same art and
+        # objects); only walkability differs, and g.name stays the base so anything
+        # reading it sees the real map.
+        import copy
+        base = grid(base_map(name))
+        g = copy.copy(base)
+        g.coll = bytearray(base.coll)
+        for (x, y), c in _mansion_pressed_deltas(base_map(name)).items():
+            g.coll[y * g.w + x] = c
+        return g
     return Grid(name)
 
 # Which stage each map opens at. The progression tables cover the maps that
@@ -397,7 +444,7 @@ def _content_stage_table():
 
 @functools.lru_cache(maxsize=None)
 def _map_stage(name):
-    return stage_table().get(name)
+    return stage_table().get(base_map(name))
 
 def content_stage(name):
     """The stage a map's own content unlocks (ignoring _OPEN_EARLY ground), or None."""
@@ -600,6 +647,10 @@ def neighbours(node, stage):
         if node == _RIVAL_STAIRS and dname.startswith("PokemonTower_3F") \
                 and _OPEN_GATES is not None and RIVAL_TOWER_GATE not in _OPEN_GATES:
             continue
+        # the secret-switch flag is global, so a warp between Mansion floors keeps
+        # the pressed/reset state you're in; carry the ~pressed tag across it.
+        if is_pressed(name) and dname in MANSION_FLOORS:
+            dname = pressed_map(dname)
         dg = grid(dname)
         try: dw = dg.warps[int(dwid)]
         except (ValueError, IndexError): continue
@@ -609,6 +660,13 @@ def neighbours(node, stage):
         # fall down, you don't climb up the landing tile).
         if dg.b(dw[0], dw[1]) == MB_FALL_WARP: continue
         out.append(((dname, dw[0], dw[1]), 1))
+
+    # press a Mansion statue: flip the global switch (reset <-> pressed) in place.
+    # Standing beside a statue, you press it; the barriers on every floor swap, so
+    # you step into the other state's geometry at the same tile.
+    if base_map(name) in MANSION_FLOORS and mansion_statue_adjacent(base_map(name), x, y):
+        flipped = base_map(name) if is_pressed(name) else pressed_map(name)
+        out.append(((flipped, x, y), PRESS_COST))
 
     for dx, dy in DIRS:
         nx, ny = x + dx, y + dy
@@ -738,7 +796,7 @@ _OUTDOOR_TYPES = {"MAP_TYPE_ROUTE", "MAP_TYPE_TOWN", "MAP_TYPE_CITY",
                   "MAP_TYPE_OCEAN_ROUTE", "MAP_TYPE_UNDERWATER"}
 @functools.lru_cache(maxsize=None)
 def is_outdoors(name):
-    mj = R.maps().get(name)
+    mj = R.maps().get(base_map(name))
     return bool(mj) and mj.get("map_type") in _OUTDOOR_TYPES
 
 def _fly_launchable(name):
@@ -999,13 +1057,19 @@ def reach_tile(node, stage):
     need a tile reachability can key on, which the object's own tile gives even on
     the spin-floor puzzles where a fixed adjacent tile would not be reachable.)"""
     name, x, y = node
-    g = grid(name)
-    surf = _surf_ok(g, stage)
-    if _tile_open(g, x, y, stage, surf): return node
-    for dx, dy in DIRS:
-        nx, ny = x + dx, y + dy
-        if g.inb(nx, ny) and _tile_open(g, nx, ny, stage, surf):
-            return (name, nx, ny)
+    # A Mansion stop may only be stand-able in one switch state (the Secret Key's
+    # room is walled until you flip the switch): try the reset floor first, then
+    # its ~pressed variant, so the routed target is a node the pathfinder can
+    # actually reach (it presses a statue to get there).
+    cands = (name, pressed_map(name)) if name in MANSION_FLOORS else (name,)
+    for cand in cands:
+        g = grid(cand)
+        surf = _surf_ok(g, stage)
+        if _tile_open(g, x, y, stage, surf): return (cand, x, y)
+        for dx, dy in DIRS:
+            nx, ny = x + dx, y + dy
+            if g.inb(nx, ny) and _tile_open(g, nx, ny, stage, surf):
+                return (cand, nx, ny)
     return node
 
 # ------------------------------------------------------------------ start point

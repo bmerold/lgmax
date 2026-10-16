@@ -1138,6 +1138,27 @@ def distance_matrix(pts, stage):
                                 mp_context=mp.get_context("fork")) as ex:
         return list(ex.map(_matrix_row, range(n), chunksize=chunk))
 
+def _mansion_presses(path):
+    """Where a drawn Mansion leg flips the secret switch: a press shows in the raw
+    path as two consecutive tiles at the same (x, y), one on the base floor and one
+    on its ~pressed variant. Returns the ordered list of (map, x, y) press tiles (on
+    the base floor), each the spot you stand on beside a statue to flip it."""
+    spots = []
+    for (ma, xa, ya), (mb, xb, yb) in zip(path, path[1:]):
+        if (xa, ya) == (xb, yb) and WD.base_map(ma) == WD.base_map(mb) and ma != mb:
+            spots.append((WD.base_map(ma), xa, ya))
+    return spots
+
+def _mansion_press_note(path):
+    """A one-line instruction for the presses on this leg, or "" if none."""
+    spots = _mansion_presses(path)
+    if not spots:
+        return ""
+    where = ", ".join(f"({x},{y})" for _, x, y in spots)
+    s = "it" if len(spots) == 1 else "each"
+    return (f"Press the secret-switch statue beside {where} — {s} flips the barriers "
+            f"on every floor, and the path continues in the new switch position.")
+
 def solve(max_stage=34, verbose=True):
     nodes = harvest()
     for n in nodes:
@@ -1152,9 +1173,17 @@ def solve(max_stage=34, verbose=True):
         due = [n for n in pending if n["_st"] <= stage]
         if not due: continue
         # what can this stage's world actually reach?
-        reach = {n_id: WD.reach_tile((n["map"], n["x"], n["y"]), stage)
-                 for n_id, n in enumerate(due)}
         dist0 = WD.bfs(pos, stage)
+        def _resolve(n):
+            # A Mansion stop is reachable in only one switch state until a statue is
+            # pressed; reach_tile returns a locally-standable tile but can't see which
+            # state the stage start actually reaches. Prefer the reachable one.
+            t = WD.reach_tile((n["map"], n["x"], n["y"]), stage)
+            if t not in dist0 and n["map"] in WD.MANSION_FLOORS:
+                alt = WD.reach_tile((WD.pressed_map(n["map"]), n["x"], n["y"]), stage)
+                if alt in dist0: return alt
+            return t
+        reach = {n_id: _resolve(n) for n_id, n in enumerate(due)}
         todo = [i for i in range(len(due)) if reach[i] in dist0]
         if not todo:
             continue
@@ -1550,12 +1579,21 @@ def solve(max_stage=34, verbose=True):
                             path = WD.draw_path(landing, tgt, stage) or WD.expand_spins(raw, stage)
                     else:
                         path = WD.draw_path(cur2, tgt, stage) or [cur2, tgt]
-                    path = stop_short(path, n["map"], n["x"], n["y"])
-                    end = tuple(path[-1]) if path else tgt
+                    # A Mansion leg may thread the ~pressed switch-state variant maps.
+                    # Keep the raw end (carrying the switch state) as the running
+                    # position for the next leg, but strip the tag for the displayed
+                    # and packed path, trim the trailing body tile on the base map, and
+                    # surface where the statue gets pressed.
+                    presses = _mansion_presses(path)
+                    press_nt = _mansion_press_note(path)
+                    disp = [[WD.base_map(m), xx, yy] for m, xx, yy in path]
+                    disp = stop_short(disp, n["map"], n["x"], n["y"])
+                    trimmed = len(path) - len(disp)        # 0 or 1 (stop_short)
+                    end = tuple(path[len(path) - 1 - trimmed]) if path else tgt
                     step = {"kind": n["kind"], "what": n["what"],
                             "map": n["map"], "at": [n["x"], n["y"]],
                             "walk": int(mat[prev_idx][oi]),
-                            "path": [[m, x, y] for m, x, y in corners(path)]}
+                            "path": [[m, x, y] for m, x, y in corners(disp)]}
                     if kind:
                         where = path[0][0] if path else True
                         # digfly lands like a Fly (at the Center nearest the target);
@@ -1583,6 +1621,10 @@ def solve(max_stage=34, verbose=True):
                               f"{G.pretty_location(cur2[0])}, then Fly to "
                               f"{G.pretty_location(where)} and go from there.")
                         nt = (nt + " " + dn) if nt else dn
+                    if press_nt:
+                        nt = (nt + " " + press_nt) if nt else press_nt
+                    if presses:
+                        step["presses"] = [[x, y] for _, x, y in presses]
                     if nt: step["note"] = nt
                     bp = STOP_PATHS.get((n["what"], n["map"]))
                     if bp: step["boulderPaths"] = bp   # push trajectories to draw on the map
