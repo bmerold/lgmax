@@ -54,6 +54,12 @@ STAGES = [
 ]
 STAGE_BY_ID = {s["id"]: s for s in STAGES}
 MAX_STAGE = max(s["id"] for s in STAGES)
+# How far routing + team building run. The post-game (stage 33 Sevii 4-7, stage 34
+# Cerulean Cave) is DROPPED for now while the mid-game teams are stabilised -- the
+# post-game islands were doing goofy things. Set LGMAX_MAX_STAGE=34 (or edit the
+# default) to restore the full completion run. Everything after this stage is left
+# out of the harvest, so nothing post-game is routed, solved, or flagged uncollected.
+ROUTE_MAX_STAGE = int(os.environ.get("LGMAX_MAX_STAGE", "32"))
 
 # Badge -> stage at which it is HELD (the gym stage is where you fight, so the
 # badge is held from the next stage onward).

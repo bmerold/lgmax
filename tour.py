@@ -528,6 +528,10 @@ def harvest():
                 x, y = xy
         nodes.append({"kind": "trainer", "what": e["name"], "map": mp,
                       "x": x, "y": y, "enc": e["id"], "stage": e["stage"]})
+    # drop anything past the routing cap (post-game, while it's switched off) so it
+    # is never routed, solved, or counted as left-uncollected -- one lever in
+    # progression.ROUTE_MAX_STAGE.
+    nodes = [n for n in nodes if node_stage(n) <= P.ROUTE_MAX_STAGE]
     return nodes
 
 def node_stage(n):
@@ -1159,7 +1163,8 @@ def _mansion_press_note(path):
     return (f"Press the secret-switch statue beside {where} — {s} flips the barriers "
             f"on every floor, and the path continues in the new switch position.")
 
-def solve(max_stage=34, verbose=True):
+def solve(max_stage=None, verbose=True):
+    if max_stage is None: max_stage = P.ROUTE_MAX_STAGE
     nodes = harvest()
     for n in nodes:
         n["_st"] = node_stage(n)

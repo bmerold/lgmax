@@ -2325,7 +2325,10 @@ def _solve_all_stages(starter, tm_value):
     """Every stage for one starter, threading carry-over and the Moon-Stone budget
     exactly as the serial loop did."""
     result, carry, moon_used = {}, None, set()
-    for stage in sorted(st["id"] for st in P.STAGES):
+    # stop at the routing cap -- the post-game stages are dropped while they're
+    # switched off (progression.ROUTE_MAX_STAGE), so there's no route for them to
+    # build a team against.
+    for stage in sorted(st["id"] for st in P.STAGES if st["id"] <= P.ROUTE_MAX_STAGE):
         result[stage] = solve_section(
             stage, _SECTIONS_GRAPH.get(stage, []), starter, _AVAIL_TABLE,
             tm_value, carry=carry if stage in cold_stage_starts() else None,
