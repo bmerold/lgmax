@@ -1187,9 +1187,23 @@ def solve(max_stage=34, verbose=True):
         # Teleport model would thread last-healed state and force a carrier.)
         teleport = False
         cdist, cparent, centers = {}, {}, []
+        cdist_prior, cparent_prior = {}, {}
         if fly or teleport:
-            centers = [c for c in WD.center_nodes() if WD._open_map(c[0], stage)]
+            # a Center is a legal landing only once its town's CONTENT is unlocked
+            # (fly_center_open), not merely when its ground is crossable -- else the
+            # route Flies to a town it has never physically visited (Cinnabar's shore
+            # opens at 25 for the sea routes, but its Center isn't fly-landable until
+            # the stage-26 content).
+            centers = [c for c in WD.center_nodes() if WD.fly_center_open(c[0], stage)]
             cdist, cparent = WD.bfs_multi(centers, stage)
+            # Dig-then-Fly may only return to a town cleared in an EARLIER stage
+            # (content_stage < stage) -- one you have surely set foot in. Flying to a
+            # town whose content is this very stage could be its first contact (the
+            # Elite Four: you'd be mid-Victory-Road, never yet at Indigo Plateau), so
+            # digfly uses this stricter landing set, not the one plain Fly leans on.
+            prior = [c for c in centers
+                     if (WD.content_stage(c[0]) or 0) < stage]
+            cdist_prior, cparent_prior = WD.bfs_multi(prior, stage)
         pts = [pos] + tiles
         wmat = distance_matrix(pts, stage)   # BFS rows, fanned out on big stages
         mat = [row[:] for row in wmat]
@@ -1250,6 +1264,20 @@ def solve(max_stage=34, verbose=True):
                         if i != j:
                             f = DIG_COST + df.get(pts[j], INF)
                             if f < mat[i][j]: mat[i][j] = f; hop_kind[i][j] = "dig"
+            # Dig-then-Fly: Escape-Rope out of ANY escapable cave that opens on air
+            # (escapable_to_air -- looser than a single mouth, since you Fly off
+            # whichever door you pop out of), then Fly to the Center nearest the
+            # target. This is the Power Plant -> Route 18 trade (its five doors all
+            # open onto Route 10): out and airborne beats trudging overland. Skip
+            # maps you can already Fly from directly (the Saffron Gym), which don't
+            # need the Escape Rope.
+            if fly:
+                for i, p in enumerate(pts):
+                    if WD.fly_origin(p[0]) or not WD.escapable_to_air(p): continue
+                    for j in range(1, len(pts)):
+                        if i == j: continue
+                        f = DIG_COST + FLY_COST + cdist_prior.get(pts[j], INF)
+                        if f < mat[i][j]: mat[i][j] = f; hop_kind[i][j] = "digfly"
         groups = scc_groups(mat, len(pts) - 1)
         order, cur_idx = [], 0
         for gi, grp in enumerate(groups):
@@ -1512,7 +1540,12 @@ def solve(max_stage=34, verbose=True):
                                    else None)
                         path = WD.draw_path(landing, tgt, stage) if landing else None
                         if not path:
-                            raw = WD.walk_back(cparent, tgt)
+                            # digfly lands at the nearest EARLIER-stage Center (the
+                            # restricted set its cost was priced against), so its drawn
+                            # landing matches that cost -- not the all-Centers parent a
+                            # plain Fly uses.
+                            cpar = cparent_prior if kind == "digfly" else cparent
+                            raw = WD.walk_back(cpar, tgt)
                             landing = raw[0] if raw else cur2
                             path = WD.draw_path(landing, tgt, stage) or WD.expand_spins(raw, stage)
                     else:
@@ -1525,7 +1558,14 @@ def solve(max_stage=34, verbose=True):
                             "path": [[m, x, y] for m, x, y in corners(path)]}
                     if kind:
                         where = path[0][0] if path else True
-                        step[{"fly": "fly", "tele": "teleport", "dig": "dig"}[kind]] = where
+                        # digfly lands like a Fly (at the Center nearest the target);
+                        # it just reached open air by Escape-Roping out of the cave
+                        # first, so it carries the Fly marker plus a digFly flag the
+                        # legality guard reads to require a valid cave mouth, not a
+                        # fly-origin departure tile.
+                        marker = "fly" if kind == "digfly" else kind
+                        step[{"fly": "fly", "tele": "teleport", "dig": "dig"}[marker]] = where
+                        if kind == "digfly": step["digFly"] = True
                     if n.get("enc"): step["enc"] = n["enc"]
                     nt = STOP_NOTES.get((n["what"], n["map"]))
                     if kind == "dig":
@@ -1534,6 +1574,14 @@ def solve(max_stage=34, verbose=True):
                         dn = (f"Use Dig (or an Escape Rope) — you pop straight out to "
                               f"{G.pretty_location(where)}, then walk on. Teach TM28 to "
                               f"anyone along for the ride; no fight wants it.")
+                        nt = (nt + " " + dn) if nt else dn
+                    elif kind == "digfly":
+                        # out of the cave, then airborne: Escape-Rope pops you to the
+                        # mouth (open air), from which you Fly on. (Keeps "Dig" in the
+                        # note so straighten() leaves the hop's legs alone.)
+                        dn = (f"Dig (or an Escape Rope) out of "
+                              f"{G.pretty_location(cur2[0])}, then Fly to "
+                              f"{G.pretty_location(where)} and go from there.")
                         nt = (nt + " " + dn) if nt else dn
                     if nt: step["note"] = nt
                     bp = STOP_PATHS.get((n["what"], n["map"]))

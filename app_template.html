@@ -2306,9 +2306,12 @@ function renderSecPanel(id, leg){
             // ghosted; both it and a real sprite are "art" the number badges above
             const ghost = !spr && p.kind === "hidden" && OW["ITEM_BALL"];
             const artH = spr ? a[1] : 16;
+            // width from the sprite's own dims (a[2]); sprites wider than one tile
+            // (the 32px-wide birds) overhang the tile evenly, centred on its column
+            const artW = spr ? (a[2] || 16) : 16;
             if (spr || ghost) owHtml += `<img class="owsprite${ghost ? " owfaded" : ""}" alt="" aria-hidden="true"
               src="data:image/png;base64,${OW[spr ? a[0] : "ITEM_BALL"]}"
-              style="left:${(ox + p.x) * 16}px;top:${(oy + p.y + 1) * 16 - artH}px;height:${artH}px"${
+              style="left:${(ox + p.x) * 16 - (artW - 16) / 2}px;top:${(oy + p.y + 1) * 16 - artH}px;width:${artW}px;height:${artH}px"${
               ghost ? ' title="hidden item — no sprite shows in-game"' : ""}>`;
             else if (p.kind === "hidden") owHtml += `<span class="owhidden"
               style="left:${(ox + p.x) * 16}px;top:${(oy + p.y) * 16}px" title="hidden item — no sprite">?</span>`;
@@ -3360,9 +3363,10 @@ function renderPlayMap(ctx){
     const a = anc[st[3] + "," + st[4]], spr = a && OW[a[0]];
     const ghost = !spr && str(st[0]) === "hidden" && OW["ITEM_BALL"];   // faded ball
     const artH = spr ? a[1] : 16;
+    const artW = spr ? (a[2] || 16) : 16;   // see region map: width keeps aspect, centred on the tile
     if (spr || ghost) owHtml += `<img class="owsprite${ghost ? " owfaded" : ""}" alt="" aria-hidden="true"
       src="data:image/png;base64,${OW[spr ? a[0] : "ITEM_BALL"]}"
-      style="left:${st[3] * 16}px;top:${(st[4] + 1) * 16 - artH}px;height:${artH}px"${
+      style="left:${st[3] * 16 - (artW - 16) / 2}px;top:${(st[4] + 1) * 16 - artH}px;width:${artW}px;height:${artH}px"${
       ghost ? ' title="hidden item — no sprite shows in-game"' : ""}>`;
     else if (str(st[0]) === "hidden") owHtml += `<span class="owhidden"
       style="left:${st[3] * 16}px;top:${st[4] * 16}px" title="hidden item — no sprite">?</span>`;

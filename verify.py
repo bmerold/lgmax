@@ -583,11 +583,24 @@ check("the route is one continuous walk", not disc, str(disc[:5]))
 # out instead. A hop departs from where you were standing, i.e. the previous stop's
 # tile.
 import world as WORLD
-_indoor_hop, _bad_dig = [], []
+_indoor_hop, _bad_dig, _bad_digland = [], [], []
 for st in routej["stages"]:
     _pe = st["startsAt"]
     for s in st["steps"]:
-        if (s.get("fly") or s.get("teleport")) and _pe and not WORLD.fly_origin(_pe[0]):
+        # A digFly hop Escape-Ropes out of the cave first and launches Fly from the
+        # mouth (open air), so it is vetted like a Dig (a valid single mouth) rather
+        # than like a Fly (a fly-origin departure tile).
+        if s.get("digFly"):
+            if _pe and not WORLD.escapable_to_air(_pe):
+                _bad_dig.append((st["stage"], _pe[0], s["what"]))
+            # and it may only Fly back to a town cleared in an EARLIER stage (one you
+            # have surely visited), never one whose content is this very stage -- that
+            # would be a first-visit-by-Fly (flying into the Elite Four from inside
+            # Victory Road, before ever reaching Indigo Plateau).
+            land = s.get("fly")
+            if isinstance(land, str) and not ((WORLD.content_stage(land) or 0) < st["stage"]):
+                _bad_digland.append((st["stage"], land, s["what"]))
+        elif (s.get("fly") or s.get("teleport")) and _pe and not WORLD.fly_origin(_pe[0]):
             _indoor_hop.append((st["stage"], _pe[0], s["what"]))
         # Dig / Escape Rope is the inverse: it only works INSIDE an escapable
         # cave (allow_escaping), and only from one with a single mouth (else you
@@ -599,6 +612,23 @@ check("the walk never Flies or Teleports out of a cave or building",
       not _indoor_hop, str(_indoor_hop[:4]))
 check("the walk only Digs out from inside a single-entrance cave",
       not _bad_dig, str(_bad_dig[:4]))
+check("Dig-then-Fly only returns to a town cleared in an earlier stage",
+      not _bad_digland, str(_bad_digland[:4]))
+
+# A fall-warp hole (the Pokemon Mansion's floor holes) is strictly one-way DOWN:
+# you can step onto it and drop, but nothing can warp you UP onto it. In a path a
+# warp shows as two consecutive tiles on different maps; flag any whose arrival
+# tile is a fall hole (that would be climbing up through a hole you can only fall
+# through).
+_up_hole = []
+for st in routej["stages"]:
+    for s in st["steps"]:
+        p = s["path"]
+        for (ma, xa, ya), (mb, xb, yb) in zip(p, p[1:]):
+            if mb != ma and WORLD.grid(mb).b(xb, yb) == WORLD.MB_FALL_WARP:
+                _up_hole.append((st["stage"], mb, (xb, yb), s["what"]))
+check("the walk never warps up onto a one-way fall hole",
+      not _up_hole, str(_up_hole[:4]))
 
 bad_tot = [st["stage"] for st in routej["stages"]
            if not (0 <= st["stepTotal"] < 10 ** 7)]

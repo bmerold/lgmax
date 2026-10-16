@@ -39,6 +39,13 @@ MB_JUMP = {0x38: (1, 0), 0x39: (-1, 0), 0x3A: (0, -1), 0x3B: (0, 1)}  # E W N S
 MB_SPIN = {0x54: (1, 0), 0x55: (-1, 0), 0x56: (0, -1), 0x57: (0, 1)}
 MB_STOP_SPINNING = 0x58
 MB_WATERFALL = 0x13
+# A fall-warp hole (the Pokemon Mansion's floor holes) drops you to the floor
+# below -- it is ONE-WAY. The engine only fires a warp from a trigger behavior
+# (IsWarpMetatileBehavior: doors/ladders/stairs/arrows/pads/fall), never from the
+# plain MB_CAVE/MB_NORMAL tile a fall deposits you on, so you can't climb back up
+# through the hole. Nothing may warp you ONTO a fall tile either (you'd just fall
+# again), so any warp edge landing on one is dropped -- which makes the hole one-way.
+MB_FALL_WARP = 0x66
 # water currents (Seafoam) ride like surf once Surf is live -- the boulder
 # puzzle that stills them is not state-modelled
 MB_CURRENT = {0x50, 0x51, 0x52, 0x53}
@@ -321,10 +328,15 @@ _CLOSED_PREFIXES = ("NavelRock", "BirthIsland", "TrainerTower_",
 # stage-5 walk into Mt. Moon passes the west stub of Route 4 (that's where
 # the cave mouth and the Center are), even though Route 4's own trainers are
 # stage 6. Same reading sections.py takes via center_between().
-_OPEN_EARLY = {"Route4": 5}
+#   Cinnabar Island is the same case for the sea routes: its Mansion/Lab/Gym
+# content is stage 26, but the island's GROUND is open water away once you have
+# Surf -- you reach it from Route 21 (south of Pallet) or across Route 20, with
+# no gate in between. Opening it at 25 lets the sea-route leg actually set foot
+# on Cinnabar (so Fly-to-Cinnabar is registered for the stage-26 content instead
+# of a 327-tile surf back through Seafoam on the first approach).
+_OPEN_EARLY = {"Route4": 5, "CinnabarIsland": 25}
 
-@functools.lru_cache(maxsize=1)
-def stage_table():
+def _build_stage_table(open_early):
     explicit, adj = {}, collections.defaultdict(set)
     names = [n for n in R.maps()
              if not n.startswith(_CLOSED_PREFIXES)]
@@ -341,8 +353,8 @@ def stage_table():
             elif cid.startswith(("ONE_ISLAND", "TWO_ISLAND", "THREE_ISLAND",
                                  "MT_EMBER")):
                 st = 28
-        if name in _OPEN_EARLY:
-            st = _OPEN_EARLY[name] if st is None else min(st, _OPEN_EARLY[name])
+        if name in open_early:
+            st = open_early[name] if st is None else min(st, open_early[name])
         if st is not None: explicit[name] = st
         for w in mj.get("warp_events", []):
             nb = folder.get(w.get("dest_map", ""))
@@ -365,9 +377,38 @@ def stage_table():
                     table[name] = best; changed = True
     return table
 
+@functools.lru_cache(maxsize=1)
+def stage_table():
+    """When a map's GROUND is first crossable. _OPEN_EARLY opens a few maps
+    before their own battles (Route 4's Mt. Moon stub, Cinnabar's island)."""
+    return _build_stage_table(_OPEN_EARLY)
+
+@functools.lru_cache(maxsize=1)
+def _content_stage_table():
+    """When a map's own CONTENT (and thus its heal Center, as a Fly landing)
+    unlocks -- the same reading WITHOUT the _OPEN_EARLY ground shortcut. You can
+    walk onto Cinnabar's shore at stage 25, but you have NOT visited its Center
+    until the stage-26 content, so Fly can't land there before then; gating Fly
+    on this table (not the ground one) keeps the first approach a real surf-visit
+    rather than an illegal Fly to a town you've never set foot in. (Harmless for
+    Route 4: Fly/Teleport don't exist until stage 7, long after its stage-5/6
+    ground.)"""
+    return _build_stage_table({})
+
 @functools.lru_cache(maxsize=None)
 def _map_stage(name):
     return stage_table().get(name)
+
+def content_stage(name):
+    """The stage a map's own content unlocks (ignoring _OPEN_EARLY ground), or None."""
+    return _content_stage_table().get(name)
+
+def fly_center_open(name, stage):
+    """Is this map's heal Center a legal Fly/Teleport landing yet? Gated on the
+    map's CONTENT stage, so an _OPEN_EARLY town whose ground you can reach early
+    still isn't fly-landable until you've actually been through its content."""
+    st = _content_stage_table().get(name)
+    return st is not None and st <= stage
 
 @functools.lru_cache(maxsize=1)
 def _const_to_folder():
@@ -562,6 +603,11 @@ def neighbours(node, stage):
         dg = grid(dname)
         try: dw = dg.warps[int(dwid)]
         except (ValueError, IndexError): continue
+        # never warp ONTO a fall-warp hole: the engine would drop you straight
+        # through it, so such a pairing is only the hole's own one-way exit, not a
+        # way up into it. Dropping this edge makes the Mansion holes one-way (you
+        # fall down, you don't climb up the landing tile).
+        if dg.b(dw[0], dw[1]) == MB_FALL_WARP: continue
         out.append(((dname, dw[0], dw[1]), 1))
 
     for dx, dy in DIRS:
@@ -695,40 +741,65 @@ def is_outdoors(name):
     mj = R.maps().get(name)
     return bool(mj) and mj.get("map_type") in _OUTDOOR_TYPES
 
-@functools.lru_cache(maxsize=None)
-def fly_origin(name):
-    """Can you launch Fly from this map? Fly needs open air
-    (Overworld_MapTypeAllowsTeleportAndFly: ROUTE/TOWN/CITY/OCEAN_ROUTE). An indoor
-    map still qualifies when its every door opens straight onto an outdoor one --
-    you step out and fly. That covers the Safari Zone's Secret House (all its exits
-    land in the outdoor SafariZone_West -- the Safari areas are MAP_TYPE_ROUTE) and
-    single-room town buildings (gyms, houses), but not a multi-floor interior whose
-    stairs lead to more indoors (SilphCo, Victory Road), nor an escapable dungeon
-    (allow_escaping: Power Plant, the Sevii caves) -- there you Dig or Escape-Rope
-    out, which the Dig model already owns, not step to a door and fly."""
+def _fly_launchable(name):
+    """A map you can't be Flown/Teleported out of OUTRIGHT, but whose warps still
+    only lead toward open air -- a pass-through building (a gatehouse, a Center's
+    upper floor, a department store, the Pokemon League rooms): not itself outdoors
+    and not an escapable dungeon. Its own warps either reach outdoors or lead to
+    another such pass-through, so you walk to a door and step outside."""
     if is_outdoors(name):
-        return True
+        return False
     mj = R.maps().get(name) or {}
     # allow_escaping marks a cave you Dig / Escape-Rope out of (Power Plant, the Sevii
-    # caves) rather than walk to a door and fly from. The lone exception is the Saffron
-    # Gym: the flag is there for its teleporter maze (step on a panel and Escape Rope
-    # bails you out), but it is still a town building whose doors open onto Saffron
-    # City -- you walk out and fly like any other gym. Only the Saffron Gym is both a
-    # gym and allow_escaping, so the carve-out touches nothing else.
+    # caves) rather than walk to a door and fly from -- except the Saffron Gym, whose
+    # flag is for its teleporter maze yet whose doors still open onto Saffron City.
     if mj.get("allow_escaping") and not name.endswith("_Gym"):
         return False
+    return True
+
+@functools.lru_cache(maxsize=1)
+def _fly_origin_set():
+    """Fixpoint over the launchable maps: one is a Fly origin if EVERY leaving warp
+    lands outdoors or on another Fly-origin building. A gatehouse's 2F opens only
+    onto its 1F, which opens onto the route -- so you step down and out and fly; a
+    deep tower's floors lead to more floors that never clear to open air on their
+    own warps (SilphCo, the Mansion, Victory Road), so it never settles True."""
     folder = _const_to_folder()
-    # Only warps that LEAVE this map count: a warp whose destination is the map
-    # itself is an in-room teleporter, not an exit. The Saffron Gym is 30 such
-    # teleporter panels (the warp maze) plus 3 doors to Saffron City -- without this
-    # the self-warps make it look like it doesn't open onto open air, and the walk
-    # can't Fly out of it (it would trek on foot all the way to the next area).
-    dests = {folder.get(w.get("dest_map", ""))
-             for w in mj.get("warp_events", [])
-             if w.get("dest_map") not in ("", "MAP_DYNAMIC")
-             and folder.get(w.get("dest_map", "")) != name}
-    dests.discard(None)
-    return bool(dests) and all(is_outdoors(d) for d in dests)
+    cand = [n for n in R.maps() if _fly_launchable(n)]
+    def leaving(name):
+        mj = R.maps().get(name) or {}
+        out = set()
+        for w in mj.get("warp_events", []):
+            dm = w.get("dest_map", "")
+            if dm in ("", "MAP_DYNAMIC"): continue
+            d = folder.get(dm)
+            # self-warps (the Saffron Gym's 30 teleporter pads) and elevator cars
+            # aren't exits; neither are event-only closed islands
+            if not d or d == name or d.endswith("_Elevator") \
+               or d.startswith(_CLOSED_PREFIXES):
+                continue
+            out.add(d)
+        return out
+    leaves = {n: leaving(n) for n in cand}
+    ok = {n for n in cand if leaves[n]}          # a sealed room (no exits) can't fly out
+    changed = True
+    while changed:                               # peel off any that still points at a non-origin
+        changed = False
+        for n in list(ok):
+            if not all(is_outdoors(d) or d in ok for d in leaves[n]):
+                ok.discard(n); changed = True
+    return frozenset(ok)
+
+def fly_origin(name):
+    """Can you launch Fly from this map? Fly needs open air
+    (Overworld_MapTypeAllowsTeleportAndFly: ROUTE/TOWN/CITY/OCEAN_ROUTE). An outdoor
+    map always qualifies; an indoor one qualifies when you can walk out to open air
+    through nothing but pass-through building floors (_fly_origin_set) -- a gatehouse,
+    a Center's 2F, the department store, the Pokemon League rooms. A multi-floor
+    dungeon whose stairs lead to more cave/tower (SilphCo, the Mansion, Victory Road)
+    or an escapable cave (Power Plant, the Sevii caves) does NOT: there you Dig or
+    Escape-Rope out, which the Dig model owns, not step to a door and fly."""
+    return is_outdoors(name) or name in _fly_origin_set()
 
 @functools.lru_cache(maxsize=None)
 def fly_launch_cost(node, stage):
@@ -761,7 +832,10 @@ def fly_launch_cost(node, stage):
 # Victory Road) Escape Rope drops you back at whichever end you came in, so it
 # never shortens a crossing; those regions get no mouth here.
 @functools.lru_cache(maxsize=1)
-def _dungeon_mouths():
+def _dungeon_regions():
+    """(region_of, mouths): each allow_escaping map's region (linked caves share
+    one), and that region's set of drop tiles (where its warps out of the region
+    land you)."""
     maps = R.maps()
     esc = [n for n in maps if maps[n].get("allow_escaping")]
     escset = set(esc)
@@ -774,7 +848,7 @@ def _dungeon_mouths():
         for w in maps[n].get("warp_events", []):
             d = folder.get(w.get("dest_map", ""))
             if d in escset: parent[find(n)] = find(d)
-    mouths = collections.defaultdict(set)        # region -> outdoor drop tiles
+    mouths = collections.defaultdict(set)        # region -> drop tiles
     for n in esc:
         r = find(n)
         for w in maps[n].get("warp_events", []):
@@ -787,14 +861,29 @@ def _dungeon_mouths():
             try: wt = grid(d).warps[int(w.get("dest_warp_id", "0"))]
             except (ValueError, IndexError): continue
             mouths[r].add((d, wt[0], wt[1]))       # where that warp lands you
-    return {n: (next(iter(mouths[find(n)])) if len(mouths[find(n)]) == 1 else None)
-            for n in esc}
+    return {n: find(n) for n in esc}, dict(mouths)
+
+@functools.lru_cache(maxsize=1)
+def _dungeon_mouths():
+    region_of, mouths = _dungeon_regions()
+    return {n: (next(iter(mouths[r])) if len(mouths[r]) == 1 else None)
+            for n, r in region_of.items()}
 
 def dungeon_mouth(tile):
     """The single tile Dig/Escape Rope drops you at from inside `tile`'s cave,
     or None when `tile` isn't in a cave or the cave is a multi-mouth through-cave
     (where Dig only sends you back the way you came)."""
     return _dungeon_mouths().get(tile[0])
+
+def escapable_to_air(tile):
+    """True when Escape Rope from inside `tile`'s cave lands you in OPEN AIR -- any
+    one of the region's doors opens outdoors. Looser than dungeon_mouth on purpose:
+    a Dig-then-Fly doesn't care WHICH of several doors you pop out of (the Power
+    Plant has five, all onto Route 10), because you Fly off whichever it is; only
+    plain Dig, which then walks on, needs the single unambiguous mouth."""
+    region_of, mouths = _dungeon_regions()
+    r = region_of.get(tile[0])
+    return r is not None and any(is_outdoors(m[0]) for m in mouths.get(r, ()))
 
 def encounter_anchor(name, mode="land"):
     """A tile that stands for this map's encounter ground: the land-encounter

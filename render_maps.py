@@ -458,7 +458,7 @@ def overworld_sprites():
         for (x, y) in tiles:
             gid, mt = oe.get((x, y), ("", ""))
             if not gid or gid not in resolve: continue
-            _, _, ht, inanimate = resolve[gid]
+            _, wt, ht, inanimate = resolve[gid]
             face = facing_of(mt)
             # one sprite per (graphics id, facing it stands) -- an item ball is
             # inanimate so it keeps its bare id (and the hidden-item marker keys
@@ -474,7 +474,11 @@ def overworld_sprites():
                     written.add(key)
                 except Exception as ex:
                     print(f"  ow skip {key}: {ex}"); continue
-            by_map.setdefault(m, {})[f"{x},{y}"] = [key, ht * 8]
+            # carry BOTH pixel dims: the page anchors the sprite's feet on the
+            # tile by height, and sizes its width from wt so non-16-wide sprites
+            # (the 32x32 legendary-bird pokemon, 64x64/128x64 specials) keep
+            # their aspect instead of being squished into a 16px-wide column.
+            by_map.setdefault(m, {})[f"{x},{y}"] = [key, ht * 8, wt * 8]
     return files, by_map
 
 def main():
