@@ -302,9 +302,13 @@ def main():
 
     def pack_stop(s):
         # [kind, what, map, x, y, walk, flyLanding, pathRuns, species, buried,
-        #  renewable, hunt, note, huntHi, teleportLanding, digLanding, boulderPaths]
+        #  renewable, hunt, note, huntHi, teleportLanding, digLanding, boulderPaths,
+        #  presses]
         # boulderPaths (slot 16): flat [x0,y0,...] polylines for a Strength-boulder
         # push, drawn on this stop's own map; empty for every other stop.
+        # presses (slot 17): [[x,y],...] secret-switch statue tiles this leg flips
+        # (the Pokémon Mansion), drawn as a switch marker on this stop's map so the
+        # door past it reads as "press first"; empty everywhere else.
         # flyLanding (Fly, 20+), teleportLanding (Teleport, 7+) and digLanding
         # (Dig/Escape Rope out of a single-entrance cave, 9+) each mean "this leg
         # is a jump, landing at this map", kept in separate slots so the app can
@@ -318,7 +322,8 @@ def main():
                 s.get("huntHi", 0),
                 s["teleport"] if isinstance(s.get("teleport"), str) else 0,
                 s["dig"] if isinstance(s.get("dig"), str) else 0,
-                s.get("boulderPaths") or []]
+                s.get("boulderPaths") or [],
+                s.get("presses") or []]
 
     def leg_rows(sec, stage):
         """A section split at its full heals. Each leg carries its own roster

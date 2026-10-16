@@ -530,6 +530,9 @@ button{font:inherit;color:inherit}
 .rpath{fill:none;stroke:#fff;stroke-width:5;stroke-linejoin:round;stroke-linecap:round;opacity:.55}
 .bpath{fill:none;stroke:#E8912B;stroke-width:4;stroke-dasharray:7 5;stroke-linejoin:round;stroke-linecap:round}
 .bpath-start{fill:#E8912B;stroke:#3a2400;stroke-width:1.5}
+.pressmark{position:absolute;width:16px;height:16px;display:flex;align-items:center;justify-content:center;
+  font-size:11px;line-height:1;color:#fff;background:#8b3fd6;border:1.5px solid #3a1d5c;border-radius:3px;
+  box-shadow:0 1px 3px rgba(0,0,0,.45);z-index:2;pointer-events:auto}
 .rpath2{fill:none;stroke:#111111;stroke-width:2.5;stroke-linejoin:round;stroke-linecap:round}
 .rarrow0{fill:none;stroke:#111111;stroke-width:4;stroke-linecap:round;stroke-linejoin:round}
 .rarrow{fill:none;stroke:#fff;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
@@ -3385,6 +3388,13 @@ function renderPlayMap(ctx){
   // map -- the arrow shows which way to shove each boulder into its hole.
   const bpaths = (L.rt || []).filter(st => st[2] === node.map && (st[16] || []).length)
                    .flatMap(st => st[16]);
+  // secret-switch presses (slot 17) on this map: a switch badge on the statue tile
+  // you flip, so the gated door past it reads as "press this first", not a wall the
+  // path strangely walks through (the Pokémon Mansion).
+  const presses = (L.rt || []).filter(st => st[2] === node.map && (st[17] || []).length)
+                   .flatMap(st => st[17]);
+  const pressHtml = presses.map(p => `<span class="pressmark" style="left:${p[0] * 16}px;top:${p[1] * 16}px"
+    title="Press the secret switch here — it flips the barriers on every floor; the way ahead opens.">⚡</span>`).join("");
   holder.innerHTML = `<div class="mapbox" style="width:${W}px;height:${H}px">
     <img src="data:image/png;base64,${b64}" width="${W}" height="${H}" alt="">
     <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
@@ -3398,7 +3408,7 @@ function renderPlayMap(ctx){
         ${bpaths.map(tr => `<polyline class="bpath" points="${svgPath(tr)}" marker-end="url(#bh)"/>`).join("")}
         ${bpaths.map(tr => `<circle class="bpath-start" cx="${(tr[0] + 0.5) * 16}" cy="${(tr[1] + 0.5) * 16}" r="6.5"/>`).join("")}` : ""}
     </svg>
-    ${owHtml}${pins}
+    ${owHtml}${pressHtml}${pins}
   </div>`;
   // the viewer boxes itself around what matters on this map: the leg's path,
   // the gold stretch, and the pinned stops — not the whole map image
