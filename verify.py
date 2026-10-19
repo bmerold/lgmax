@@ -583,10 +583,15 @@ check("the route is one continuous walk", not disc, str(disc[:5]))
 # out instead. A hop departs from where you were standing, i.e. the previous stop's
 # tile.
 import world as WORLD
-_indoor_hop, _bad_dig, _bad_digland = [], [], []
+_indoor_hop, _bad_dig, _bad_digland, _sevii_fly = [], [], [], []
 for st in routej["stages"]:
     _pe = st["startsAt"]
     for s in st["steps"]:
+        # Fly is unavailable on the Sevii Islands -- no Fly/Teleport/Dig-then-Fly may
+        # launch from one, you ride the Seagallop ferry back to Kanto.
+        if (s.get("fly") or s.get("teleport") or s.get("digFly")) \
+                and _pe and WORLD.is_sevii(_pe[0]):
+            _sevii_fly.append((st["stage"], _pe[0], s["what"]))
         # A digFly hop Escape-Ropes out of the cave first and launches Fly from the
         # mouth (open air), so it is vetted like a Dig (a valid single mouth) rather
         # than like a Fly (a fly-origin departure tile).
@@ -610,6 +615,8 @@ for st in routej["stages"]:
         if s["path"]: _pe = s["path"][-1]
 check("the walk never Flies or Teleports out of a cave or building",
       not _indoor_hop, str(_indoor_hop[:4]))
+check("the walk never Flies off the Sevii Islands (ferry only)",
+      not _sevii_fly, str(_sevii_fly[:4]))
 check("the walk only Digs out from inside a single-entrance cave",
       not _bad_dig, str(_bad_dig[:4]))
 check("Dig-then-Fly only returns to a town cleared in an earlier stage",

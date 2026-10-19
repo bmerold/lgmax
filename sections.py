@@ -330,6 +330,14 @@ def _center_doors():
                 doors.setdefault(name, []).append((w.get("x", 0), w.get("y", 0)))
     return doors
 
+# The Ember Spa's heal (special HealPlayerParty) fires from a coord trigger sitting
+# in the spring itself -- a water tile the walk can't stand on, and the dry path to
+# the Rock Smash tutor skirts the pool entirely. But you only ever enter this dead-end
+# map to fetch HM06, and you soak in the spring to do it, so the heal is tied to the
+# VISIT, not to a tile the route can reach. Mark it whole-map; the Purified Zone stays
+# tile-based (its trigger is on the walked floor and 5F has fights that must not heal).
+_WHOLE_MAP_HEAL = {"OneIsland_KindleRoad_EmberSpa"}
+
 def _heal_zones():
     """The two in-dungeon healing spots, as trigger tiles."""
     out = {}
@@ -354,6 +362,8 @@ def _step_heal(step, doors, zones):
         if "PokemonCenter" in m:
             town = m.split("_PokemonCenter")[0]
             return G.pretty_location(town) + " Pokémon Center"
+        if m in _WHOLE_MAP_HEAL and m in zones:
+            return zones[m][0]
         if prev and prev[0] == m:
             n = max(abs(x - prev[1]), abs(y - prev[2]), 1)
             pts = [(round(prev[1] + (x - prev[1]) * t / n),

@@ -986,6 +986,10 @@ def _grid_bodies(mp):
     try: return WD.grid(mp).bodies
     except Exception: return set()
 
+# Maps whose mere visit heals the party -- the Ember Spa (special HealPlayerParty
+# in OneIsland_KindleRoad_EmberSpa) sits off a dead-end you enter only for HM06.
+WHOLE_MAP_HEAL = {"OneIsland_KindleRoad_EmberSpa"}
+
 def _passes_heal(step):
     """Mirror of sections._step_heal, on this route step: a flight or teleport
     (both land you at a Center), a Center interior, or any walked tile within 4
@@ -995,6 +999,10 @@ def _passes_heal(step):
     prev = None
     for m, x, y in step["path"]:
         if "PokemonCenter" in m: return True
+        # the Ember Spa heals on any visit (you soak fetching HM06); its spring
+        # trigger is on an unreachable water tile, so match the map, not the tile
+        # (mirrors sections._WHOLE_MAP_HEAL / _step_heal).
+        if m in WHOLE_MAP_HEAL: return True
         if prev and prev[0] == m:
             n = max(abs(x - prev[1]), abs(y - prev[2]), 1)
             pts = [(round(prev[1] + (x - prev[1]) * t / n),
@@ -1334,7 +1342,12 @@ def solve(max_stage=None, verbose=True):
             # need the Escape Rope.
             if fly:
                 for i, p in enumerate(pts):
-                    if WD.fly_origin(p[0]) or not WD.escapable_to_air(p): continue
+                    # not from a fly-origin (plain Fly already covers it), not from a
+                    # non-escapable cave, and NEVER from the Sevii Islands -- Fly is
+                    # unavailable there, so escaping a Sevii cave still can't get you
+                    # airborne back to Kanto; you ride the Seagallop ferry.
+                    if WD.fly_origin(p[0]) or WD.is_sevii(p[0]) \
+                            or not WD.escapable_to_air(p): continue
                     for j in range(1, len(pts)):
                         if i == j: continue
                         f = DIG_COST + FLY_COST + cdist_prior.get(pts[j], INF)
@@ -1376,9 +1389,18 @@ def solve(max_stage=None, verbose=True):
         # ones on the way back; the fetch/precedence fixpoint below still repairs any
         # real dependency (and the trade's Ponyta is a Sevii catch, so it stays after).
         if any(WD.is_sevii(picked[oi - 1]["map"]) for oi in order):
-            sev = [oi for oi in order if WD.is_sevii(picked[oi - 1]["map"])]
-            kan = [oi for oi in order if not WD.is_sevii(picked[oi - 1]["map"])]
-            order[:] = sev + kan
+            # Group each island together in ferry order (One Island + its Mt Ember,
+            # then Two, then Three), so the walk finishes an island before sailing on
+            # instead of bouncing back later (it was doing Mt Ember's grunts early,
+            # then returning for Moltres after Three Island). Stable within a group,
+            # so each island keeps its own TSP order; Kanto errands come last.
+            def _sevii_group(m):
+                if not WD.is_sevii(m): return 9           # Kanto -> last
+                if m.startswith(("OneIsland", "MtEmber")): return 0
+                if m.startswith("TwoIsland"): return 1
+                if m.startswith("ThreeIsland"): return 2
+                return 3                                   # Four-Seven (post-game)
+            order.sort(key=lambda oi: _sevii_group(picked[oi - 1]["map"]))
         for _ in range(8):
             changed = False
             for a_name, b_name in pairs:
