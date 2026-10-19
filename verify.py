@@ -9,6 +9,7 @@ import json, os, sys, collections, re
 import engine as E
 import progression as P
 import constraints as C
+import world as WORLD
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 fails = []
@@ -500,6 +501,39 @@ for st in routej["stages"]:
                 _item_before_trainer.append((st["stage"], s["what"], s["at"]))
 check("an item under a trainer is taken after that trainer is beaten",
       not _item_before_trainer, str(_item_before_trainer[:4]))
+
+# The Route 22 rival is a coord-trigger scene across the route's Viridian mouth, so the
+# walk sets it off the moment it steps onto Route 22 -- before any Route 22/23 errand.
+# The guide must therefore list the fight ahead of any stop whose path crosses that
+# trigger line (a playthrough hit the battle at node 2 with it ordered last).
+_r22_trig = {(c.get("x"), c.get("y"))
+             for c in WORLD.R.maps().get("Route22", {}).get("coord_events", [])
+             if "Rival" in (c.get("script") or "")}
+def _crosses_r22(step, tiles):
+    prev = None
+    for m, x, y in step.get("path", []):
+        if m == "Route22":
+            if prev and prev[0] == "Route22":
+                n = max(abs(x - prev[1]), abs(y - prev[2]), 1)
+                for t in range(n + 1):
+                    if (round(prev[1] + (x - prev[1]) * t / n),
+                            round(prev[2] + (y - prev[2]) * t / n)) in tiles:
+                        return True
+            elif (x, y) in tiles:
+                return True
+        prev = (m, x, y)
+    return False
+_rival_late = []
+for st in routej["stages"]:
+    steps = st["steps"]
+    ri = next((i for i, s in enumerate(steps)
+               if "RIVAL_ROUTE22" in str(s.get("enc", ""))), None)
+    if ri is None:
+        continue
+    if any(_crosses_r22(steps[i], _r22_trig) for i in range(ri)):
+        _rival_late.append(st["stage"])
+check("the Route 22 rival is fought where its trigger fires, not after its errands",
+      not _rival_late, f"stages {_rival_late}")
 
 # A one-off legendary (Zapdos, Articuno, Moltres, Mewtwo) may only sit on a stage's
 # recommended team if the route has already caught it when that stage's fighting

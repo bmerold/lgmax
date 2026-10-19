@@ -1805,6 +1805,31 @@ def solve(max_stage=None, verbose=True):
             moved_pairs.add(move)
             tj, si = move
             order.remove(tj); order.insert(si, tj)
+
+        # The Route 22 rival is not a standing trainer but a coord-trigger scene
+        # (addobject): a line of tiles across the Viridian mouth of Route 22 that fires
+        # the battle the instant you step onto the route, before any Route 22/23 errand.
+        # The aggro reorder above only sees sighted trainers, so it left the fight at
+        # the TSP's cheapest slot -- last -- while the walk actually triggers it first.
+        # Pull it ahead of the earliest stop whose path crosses its trigger line
+        # (tiles read from the map, so it tracks both the early and late rival scenes).
+        rival_oi = next((oi for oi in order
+                         if "RIVAL_ROUTE22" in (picked[oi - 1].get("enc") or "")), None)
+        if rival_oi is not None:
+            trig = {(c.get("x"), c.get("y"))
+                    for c in R.maps().get("Route22", {}).get("coord_events", [])
+                    if "Rival" in (c.get("script") or "")}
+            steps, _c, _cur = build_steps(order)
+            cross = None
+            for si, (oi, step) in enumerate(zip(order, steps)):
+                if oi == rival_oi:
+                    break
+                if trig & walked_tiles(step["path"]).get("Route22", set()):
+                    cross = si
+                    break
+            if cross is not None and order.index(rival_oi) > cross:
+                order.insert(cross, order.pop(order.index(rival_oi)))
+
         steps, cost, cur = build_steps(order)
         cost += insert_heal(steps, stage, pos, fought_since_heal)
         cost += insert_boss_heal(steps, stage, pos)
