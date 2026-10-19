@@ -664,6 +664,24 @@ for st in routej["stages"]:
 check("the Mansion walk stays on floor for the switch state it has pressed into",
       not _m_bad, str(_m_bad[:4]))
 
+# HM06 Rock Smash is picked up partway through stage 28 (the Ember Spa), so no rock
+# may be broken before that stop is reached. Walk the whole route in order, flipping
+# a flag on at the Ember Spa, and flag any Rock Smash rock tile the path crosses
+# while it's still off.
+_have_rs, _rs_bad = False, []
+for st in routej["stages"]:
+    for s in st["steps"]:
+        if not _have_rs:
+            for m, x, y in s["path"]:
+                g = WORLD.grid(m)
+                if (x, y) in g.rock_smash:
+                    _rs_bad.append((st["stage"], m, (x, y), s["what"]))
+                    break
+        if str(s.get("what", "")).startswith("HM06 Rock Smash"):
+            _have_rs = True
+check("no Rock Smash rock is broken before HM06 is obtained",
+      not _rs_bad, str(_rs_bad[:4]))
+
 bad_tot = [st["stage"] for st in routej["stages"]
            if not (0 <= st["stepTotal"] < 10 ** 7)]
 check("every stage's step total is finite", not bad_tot, str(bad_tot))

@@ -889,6 +889,9 @@ def gate_token(node):
         return WD.CARD_KEY_GATE
     if node["kind"] == "scripted" and node["map"].startswith("PokemonTower"):
         return WD.MAROWAK_GATE
+    # the Ember Spa hands over HM06 Rock Smash -- reaching it unlocks every rock
+    if str(node.get("what", "")).startswith("HM06 Rock Smash"):
+        return WD.ROCK_SMASH_GATE
     return None
 
 def stop_short(path, mp, x, y):
@@ -1121,6 +1124,64 @@ def insert_boss_heal(steps, stage, start_pos):
         "walk": len(p1) - 1, "path": [[m, x, y] for m, x, y in corners(p1)]})
     boss["path"] = [[m, x, y] for m, x, y in corners(p2)]
     boss["walk"] = len(p2) - 1
+    return added
+
+def insert_sevii_heals(steps, stage, start_pos):
+    """The Sevii 1-3 trip is one long ferry-isolated gauntlet (~28 trainers) with
+    no gym to trigger insert_boss_heal, so a real player ducks into an island
+    Pokémon Center when worn. Walk through the stage and, whenever HEAL_FIGHT_RUN
+    fights pile up since the last heal, splice a round-trip to the nearest Sevii
+    Center before the next trainer. Sevii-only, so Kanto stages are untouched.
+    Returns the added step count."""
+    if not any(WD.is_sevii(s["map"]) for s in steps):
+        return 0
+    sevii_doors = [(m, x, y) for m, xys in center_doors().items()
+                   if WD.is_sevii(m) and WD._open_map(m, stage) for x, y in xys]
+    if not sevii_doors:
+        return 0
+    added = 0
+    run, k = 0, 0
+    while k < len(steps):
+        s = steps[k]
+        if _passes_heal(s):
+            run = 0
+        elif s["kind"] in ("trainer", "catch"):
+            run += 1
+        # heal just BEFORE the trainer that would push the run past the cap, but only
+        # when the party is in Sevii then (the Center it heals at is a Sevii one)
+        nxt = steps[k + 1] if k + 1 < len(steps) else None
+        if (run >= HEAL_FIGHT_RUN and nxt and nxt["kind"] == "trainer"
+                and WD.is_sevii(nxt["map"]) and not nxt.get("fly")
+                and not nxt.get("teleport") and not nxt.get("dig")):
+            here = start_pos if k + 1 == 0 else tuple(steps[k]["path"][-1])
+            a = WD.reach_tile(here, stage)
+            b = WD.reach_tile((nxt["map"], nxt["at"][0], nxt["at"][1]), stage)
+            da = WD.bfs(a, stage, targets=set(sevii_doors))
+            best = None
+            for d in sevii_doors:
+                if d not in da: continue
+                db = WD.bfs(d, stage, targets={b})
+                if b in db and (best is None or da[d] + db[b] < best[0]):
+                    best = (da[d] + db[b], d)
+            if best is not None:
+                _cost, door = best
+                p1 = WD.draw_path(here, door, stage)
+                p2 = WD.draw_path(door, (nxt["map"], nxt["at"][0], nxt["at"][1]), stage)
+                if p1 and p2:
+                    p2 = stop_short(p2, nxt["map"], nxt["at"][0], nxt["at"][1])
+                    added += (len(p1) - 1) + (len(p2) - 1) - nxt["walk"]
+                    steps.insert(k + 1, {
+                        "kind": "heal",
+                        "what": f"Heal up — {G.pretty_location(door[0])} Pokémon Center",
+                        "map": door[0], "at": [door[1], door[2]],
+                        "walk": len(p1) - 1,
+                        "path": [[m, x, y] for m, x, y in corners(p1)]})
+                    nxt["path"] = [[m, x, y] for m, x, y in corners(p2)]
+                    nxt["walk"] = len(p2) - 1
+                    run = 0
+                    k += 2
+                    continue
+        k += 1
     return added
 
 # ------------------------------------------------------------------ the run
@@ -1366,6 +1427,16 @@ def solve(max_stage=None, verbose=True):
                         and any(str(s).split(" (")[0] == give
                                 for s in (n.get("species") or []))), None)
             if src: pairs.append((src, w))
+        # The Sevii Islands are reachable only by the Seagallop ferry, so a lone
+        # Kanto errand wedged between island stops forces a wasteful ferry out and
+        # back (the Cinnabar Ponyta->Seel trade did exactly that mid-Mt.-Ember). When
+        # a stage mixes Sevii and Kanto stops, do ALL of Sevii first and the Kanto
+        # ones on the way back; the fetch/precedence fixpoint below still repairs any
+        # real dependency (and the trade's Ponyta is a Sevii catch, so it stays after).
+        if any(WD.is_sevii(picked[oi - 1]["map"]) for oi in order):
+            sev = [oi for oi in order if WD.is_sevii(picked[oi - 1]["map"])]
+            kan = [oi for oi in order if not WD.is_sevii(picked[oi - 1]["map"])]
+            order[:] = sev + kan
         for _ in range(8):
             changed = False
             for a_name, b_name in pairs:
@@ -1405,6 +1476,11 @@ def solve(max_stage=None, verbose=True):
         card_here = any(gate_token(picked[oi - 1]) == WD.CARD_KEY_GATE for oi in order)
         if card_here:
             gate_consts.add(WD.CARD_KEY_GATE)
+        # the Ember Spa hands over HM06 Rock Smash; stops behind a rock are ordered
+        # after it, never before (else the walk breaks a rock it hasn't got yet)
+        rs_here = any(gate_token(picked[oi - 1]) == WD.ROCK_SMASH_GATE for oi in order)
+        if rs_here:
+            gate_consts.add(WD.ROCK_SMASH_GATE)
         if gate_consts:
             reach_open = set(dist0)
             for m in {picked[oi - 1]["map"] for oi in order}:
@@ -1444,6 +1520,13 @@ def solve(max_stage=None, verbose=True):
                 behind = reach_open - set(WD.bfs(pos, stage))
                 if behind:
                     stage_barriers.append(({WD.CARD_KEY_GATE}, behind))
+            if rs_here:
+                # everything reachable only past a Rock Smash rock drops out when just
+                # that gate is shut -- those stops get pushed after the Ember Spa
+                WD._OPEN_GATES = frozenset(gate_consts - {WD.ROCK_SMASH_GATE})
+                behind = reach_open - set(WD.bfs(pos, stage))
+                if behind:
+                    stage_barriers.append(({WD.ROCK_SMASH_GATE}, behind))
             WD._OPEN_GATES = None
         for _ in range(len(order) + 4):
             changed = False
@@ -1720,6 +1803,7 @@ def solve(max_stage=None, verbose=True):
         steps, cost, cur = build_steps(order)
         cost += insert_heal(steps, stage, pos, fought_since_heal)
         cost += insert_boss_heal(steps, stage, pos)
+        cost += insert_sevii_heals(steps, stage, pos)
         # Dig / Escape Rope is priced into the distance matrix above (a hop from
         # inside a single-entrance cave to its mouth), so it needs no post-pass.
         # order is now final and aggro-clean; straighten stand tiles where it's

@@ -93,7 +93,7 @@ class Grid:
     """One map's tiles: walkability, behavior, and the events standing on it."""
     __slots__ = ("name", "w", "h", "beh", "coll", "enc", "elev", "warps",
                  "warp_tiles", "obstacles", "scripted_open", "blockers",
-                 "barrier_gates", "bodies", "card_doors")
+                 "barrier_gates", "bodies", "card_doors", "rock_smash")
     def __init__(self, name):
         mj = R.maps()[name]
         lay = _layouts()[ALT_LAYOUT.get(name) or mj["layout"]]
@@ -125,6 +125,10 @@ class Grid:
         self.warp_tiles = {(w[0], w[1]) for w in self.warps}
         # HM obstacles standing on tiles, with the stage each melts away
         self.obstacles = {}
+        # Rock Smash rocks specifically are also GATED within their stage: HM06 is
+        # picked up partway through the Sevii 1-3 trip (the Ember Spa), so its rocks
+        # stay solid until that stop is reached, not from the stage's first step.
+        self.rock_smash = set()
         # A trainer or NPC is a body you never stand on: you talk to it from the
         # tile beside it, or trip its sight line -- it never steps aside. `bodies`
         # is every such tile (trainer/NPC, mover or not); the drawn walk stops one
@@ -137,7 +141,10 @@ class Grid:
             hm = HM.OBSTACLE_SCRIPT.get(o.get("script"))
             if hm:
                 st = max(_map_stage(name) or 0, P.HM_STAGE[hm])
-                self.obstacles[(o.get("x", 0), o.get("y", 0))] = st
+                xy = (o.get("x", 0), o.get("y", 0))
+                self.obstacles[xy] = st
+                if hm == "ROCK_SMASH":
+                    self.rock_smash.add(xy)
                 continue
             gfx = o.get("graphics_id", "")
             if "ITEM_BALL" in gfx: continue
@@ -305,6 +312,11 @@ _RIVAL_STAIRS = ("PokemonTower_2F", 4, 10)      # 2F -> 3F warp tile
 # so without this gate the route strolls through a locked door pre-key (the same
 # gap the Rocket Hideout lift had).
 CARD_KEY_GATE = "SILPH_CARD_KEY"
+# HM06 Rock Smash is handed over mid-trip at One Island's Ember Spa (stage 28), so
+# its rocks stay solid until the walk reaches that stop -- even though the stage is
+# already right. Earned there, the token carries to every later stage (you keep the
+# HM), so Rock Smash rocks are open from stage 29 on.
+ROCK_SMASH_GATE = "HM06_ROCK_SMASH"
 _OPEN_GATES = None
 
 @functools.lru_cache(maxsize=1)
@@ -338,7 +350,7 @@ def _gate_tokens():
     whole set of trainers fought so far, but pathing checks only these -- so the
     draw cache keys on _OPEN_GATES ∩ this, not the full set. That turns the
     aggro-reorder loop (which only churns non-gate consts) from misses to hits."""
-    toks = {LIFT_GATE, MAROWAK_GATE, RIVAL_TOWER_GATE, CARD_KEY_GATE}
+    toks = {LIFT_GATE, MAROWAK_GATE, RIVAL_TOWER_GATE, CARD_KEY_GATE, ROCK_SMASH_GATE}
     for entries in gated_barriers().values():
         for _tiles, gates in entries:
             toks |= set(gates)
@@ -581,6 +593,13 @@ def _tile_open(g, x, y, stage, surf_ok):
     if not g.inb(x, y): return False
     st = g.obstacles.get((x, y))
     if st is not None and stage < st: return False
+    # a Rock Smash rock needs HM06, picked up partway through stage 28 (the Ember
+    # Spa). Even at/after its stage it stays solid until that stop is reached
+    # (ROCK_SMASH_GATE); the token carries forward, so it's open from stage 29 on.
+    # Untracked gates (_OPEN_GATES None -> reachability/matrix) treat it as open.
+    if (x, y) in g.rock_smash and _OPEN_GATES is not None \
+            and ROCK_SMASH_GATE not in _OPEN_GATES:
+        return False
     gates = g.barrier_gates.get((x, y))
     if gates is not None:
         # the barrier's floor is drawn by the unlock script, not baked into the
@@ -881,7 +900,14 @@ def fly_origin(name):
     a Center's 2F, the department store, the Pokemon League rooms. A multi-floor
     dungeon whose stairs lead to more cave/tower (SilphCo, the Mansion, Victory Road)
     or an escapable cave (Power Plant, the Sevii caves) does NOT: there you Dig or
-    Escape-Rope out, which the Dig model owns, not step to a door and fly."""
+    Escape-Rope out, which the Dig model owns, not step to a door and fly.
+
+    Fly is also unavailable ON the Sevii Islands: the Town Map doesn't cover them,
+    so you can't launch Fly there at all -- you ride the Seagallop ferry back to
+    Kanto first. Excluding them keeps the route from flying out of Sevii mid-trip
+    (then having to ferry all the way back to finish an island)."""
+    if is_sevii(name):
+        return False
     return is_outdoors(name) or name in _fly_origin_set()
 
 @functools.lru_cache(maxsize=None)
