@@ -44,7 +44,7 @@ STAGES = [
     dict(id=25, name="Sea routes 19-21 & Seafoam Islands", chapter="Marsh Badge", badges=6, level=36),
     dict(id=26, name="Cinnabar Island & Pokemon Mansion",  chapter="Marsh Badge", badges=6, level=39),
     dict(id=27, name="Cinnabar Gym — Blaine",    chapter="Volcano Badge",   badges=6, level=39, gym="Blaine"),
-    dict(id=28, name="Sevii Islands 1-3",        chapter="Volcano Badge",   badges=7, level=39),
+    dict(id=28, name="Sevii Islands 1-3",        chapter="Volcano Badge",   badges=7, level=40),
     dict(id=29, name="Viridian Gym — Giovanni",  chapter="Earth Badge",     badges=7, level=39, gym="Giovanni"),
     dict(id=30, name="Route 22 (late) & Route 23", chapter="Victory Road",  badges=8, level=39),
     dict(id=31, name="Victory Road",             chapter="Victory Road",    badges=8, level=49),
