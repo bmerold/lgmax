@@ -146,6 +146,9 @@ EVENTS = [
     ("Revive your fossils", "CinnabarIsland_PokemonLab_ExperimentRoom", 26, "FossilScientist"),
     ("Help Celio at the Network Center", "OneIsland_PokemonCenter_1F", 28, "Celio"),
     ("HM06 Rock Smash in the Ember Spa", "OneIsland_KindleRoad_EmberSpa", 28, "RockSmashMan"),
+    # Mt Ember's climb and its Fire Stone are walled off by Strength boulders (solved
+    # from the map in boulders.py); the note below spells out which to shove where.
+    ("Shove Mt Ember's Strength boulders aside (Strength)", "MtEmber_Exterior", 28),
     ("Rescue Lostelle in the Berry Forest", "ThreeIsland_BerryForest", 28, "Lostelle"),
     # the Dunsparce Tunnel is only dug out once the National Dex is enabled (post-game)
     ("The prospector's Nugget", "ThreeIsland_DunsparceTunnel", 33, "Prospector"),
@@ -773,6 +776,21 @@ def _victory_boulder_note():
 STOP_NOTES.update(_seafoam_floor_notes())
 STOP_NOTES[("Push boulders onto the Victory Road floor switches (Strength)",
             "VictoryRoad_1F")] = _victory_boulder_note()
+
+# Mt Ember's shove-aside boulders (boulders.py): one stop carries the whole plan,
+# with each boulder's push drawn on the exterior map. The lower pair opens the Summit
+# Path stairs; the rest open the Fire Stone ledge you reach coming back out up top.
+_MT_EMBER_LABEL = "Shove Mt Ember's Strength boulders aside (Strength)"
+_MT_EMBER_PHRASES, _MT_EMBER_PATHS = _BLD.mt_ember_steps()
+if _MT_EMBER_PATHS:
+    STOP_PATHS[(_MT_EMBER_LABEL, "MtEmber_Exterior")] = _MT_EMBER_PATHS
+if _MT_EMBER_PHRASES:
+    STOP_NOTES[(_MT_EMBER_LABEL, "MtEmber_Exterior")] = (
+        "Strength puzzle. Mt Ember's climb and its Fire Stone are walled off by plain "
+        "Strength boulders you shove aside — no holes, no switches. With Strength: "
+        + "; ".join(_MT_EMBER_PHRASES) + ". The first two clear the way to the Summit "
+        "Path stairs (and so the whole upper mountain); the rest open the Fire Stone "
+        "ledge once you come back out of Summit Path 3F.")
 
 # ------------------------------------------------------------------ sight aggro
 # A trainer with sight forces the battle the moment your walk enters their

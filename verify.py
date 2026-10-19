@@ -569,6 +569,20 @@ for st in routej["stages"]:
 check("Seafoam's boulders are pushed before the walk rides down to B3F/B4F",
       not _seafoam_bad, f"stages {_seafoam_bad}")
 
+# Mt Ember's Fire Stone and its Summit Path climb are walled off by plain Strength
+# boulders you shove aside (no holes/switches). boulders.mt_ember_steps solves the
+# shove from the map geometry; the route must carry that solve and draw it, so the
+# walk never silently glides through a boulder it never tells you to move -- a
+# playthrough caught the Fire Stone reached with no push narrated.
+import boulders as _BLD_V
+_me_phrases, _me_paths = _BLD_V.mt_ember_steps()
+_me_stops = [s for st in routej["stages"] for s in st["steps"]
+             if str(s.get("map", "")) == "MtEmber_Exterior" and s.get("boulderPaths")]
+check("Mt Ember's Strength-boulder shove is solved and drawn on the route",
+      bool(_me_paths) and any(len(s["boulderPaths"]) == len(_me_paths)
+                              for s in _me_stops),
+      f"solved_paths={len(_me_paths)} drawn_stops={len(_me_stops)}")
+
 prev_end, disc = None, []
 for st in routej["stages"]:
     if prev_end is not None and st["startsAt"] != prev_end:

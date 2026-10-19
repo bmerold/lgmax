@@ -195,6 +195,125 @@ def victory_steps():
     return out
 
 
+# ------------------------------------------------------------------ Mt Ember
+# Mt Ember's exterior is gated by plain Strength boulders (EventScript_StrengthBoulder)
+# -- no holes, no switches: you shove them aside to open the climb. Two clusters block
+# the route and with every boulder solid NEITHER is passable (verified): a lower pair
+# walls off the Summit Path stairs, and so the whole upper mountain (Moltres, the items),
+# and an upper trio walls off the Fire Stone ledge you reach coming back out of Summit
+# Path 3F. The pushes are on flat ground (no ledges/elevation like Victory Road), so the
+# exact solve is safe to dictate; a multi-box Sokoban over the boulders finds it.
+MT_EMBER = "MtEmber_Exterior"
+
+
+def _warp_tile(g, dest_const):
+    """The exterior tile whose warp leads to dest_const (a Summit Path stair)."""
+    for wx, wy, dmap, _id in g.warps:
+        if dmap == dest_const:
+            return (wx, wy)
+    return None
+
+
+def _object_tile(mapname, script_sub):
+    """The tile of the object whose script contains script_sub (an item ball)."""
+    for o in W.R.maps()[mapname].get("object_events", []):
+        if script_sub in (o.get("script") or ""):
+            return (o.get("x"), o.get("y"))
+    return None
+
+
+def _multi_region(g, player, boxes):
+    """Every tile reachable from player with the whole box set treated as walls."""
+    seen = {player}
+    stack = [player]
+    while stack:
+        x, y = stack.pop()
+        for dx, dy in DIRS.values():
+            n = (x + dx, y + dy)
+            if n not in seen and n not in boxes and _passable(g, n[0], n[1]):
+                seen.add(n)
+                stack.append(n)
+    return seen
+
+
+def solve_push_multi(g, boxes, player_start, goal):
+    """Fewest boulder pushes (over several boulders) to make `goal` walk-reachable.
+    Multi-box Sokoban: BFS over frozenset box layouts. A push of box b in direction d
+    is legal when the near side (b-d) is in the player's current region and the far
+    side (b+d) is clear; the player ends on b's old tile, so the next region is seeded
+    there. Returns the pushes in order as (before, after), or None if unsolvable."""
+    boxes0 = frozenset(boxes)
+    init = _multi_region(g, player_start, boxes0)
+    if goal in init:
+        return []
+    q = collections.deque([(boxes0, init, [])])
+    seen = {(boxes0, min(init))}
+    while q:
+        bxs, reg, pushes = q.popleft()
+        if goal in reg:
+            return pushes
+        for b in bxs:
+            for dx, dy in DIRS.values():
+                near, dest = (b[0] - dx, b[1] - dy), (b[0] + dx, b[1] + dy)
+                if near in reg and dest not in bxs and _passable(g, dest[0], dest[1]):
+                    nb = frozenset((bxs - {b}) | {dest})
+                    nreg = _multi_region(g, near, nb)
+                    key = (nb, min(nreg))
+                    if key not in seen:
+                        seen.add(key)
+                        q.append((nb, nreg, pushes + [(b, dest)]))
+    return None
+
+
+def _per_boulder(boulders, pushes):
+    """Replay the ordered pushes to recover each boulder's own trajectory (tracking
+    identity by current position, so two boulders crossing the same tile don't mix).
+    Returns [(start, runs, flat_path)] for the boulders that actually move."""
+    pos = {i: b for i, b in enumerate(boulders)}
+    steps = {i: [] for i in pos}
+    for before, after in pushes:
+        i = next(k for k, p in pos.items() if p == before)
+        d = next(name for name, (dx, dy) in DIRS.items()
+                 if (before[0] + dx, before[1] + dy) == after)
+        steps[i].append(d)
+        pos[i] = after
+    out = []
+    for i, b in enumerate(boulders):
+        if not steps[i]:
+            continue
+        runs = _runs(steps[i])
+        out.append((b, runs, _trajectory(b, runs)))
+    return out
+
+
+def mt_ember_steps():
+    """The Mt Ember exterior boulder pushes, lower cluster then upper, each solved as
+    its own sub-puzzle (they sit in regions the warp network joins, so a single
+    exterior Sokoban can't see across them). Returns (phrases, trajectories) for
+    MtEmber_Exterior, the same shape a Seafoam floor yields."""
+    g = W.grid(MT_EMBER)
+    boulders = [(x, y) for x, y, _f, _r in _boulders(MT_EMBER)]
+    entrance = _warp_tile(g, "MAP_ONE_ISLAND_KINDLE_ROAD")
+    start = (entrance[0], entrance[1] - 1)          # stand just inside the entrance
+    # (goal tile, player start) for each sub-puzzle, in the order you meet them
+    legs = [
+        (_warp_tile(g, "MAP_MT_EMBER_SUMMIT_PATH_1F"), start),       # open the climb
+        (_object_tile(MT_EMBER, "ItemFireStone"),                   # open the Fire Stone
+         _warp_tile(g, "MAP_MT_EMBER_SUMMIT_PATH_3F")),
+    ]
+    phrases, trajs = [], []
+    for goal, pstart in legs:
+        if not goal or not pstart:
+            continue
+        pushes = solve_push_multi(g, boulders, pstart, goal)
+        if not pushes:
+            continue
+        for b, runs, flat in _per_boulder(boulders, pushes):
+            phrases.append(f"the boulder at ({b[0]},{b[1]}): push it {_phrase(runs)}")
+            trajs.append(flat)
+    return phrases, trajs
+
+
 if __name__ == "__main__":
     print("=== SEAFOAM ISLANDS (still the currents) ===")
     for fl, ph, paths in seafoam_steps():
@@ -208,3 +327,9 @@ if __name__ == "__main__":
         print(f"  {fl}:")
         for p in ph:
             print(f"    - {p}")
+    print("\n=== MT EMBER (shove the boulders aside) ===")
+    ph, trajs = mt_ember_steps()
+    for p in ph:
+        print(f"    - {p}")
+    for tr in trajs:
+        print(f"      path: {tr}")
