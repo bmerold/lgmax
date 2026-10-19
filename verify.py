@@ -484,6 +484,23 @@ for st in routej["stages"]:
 check("every gym leader is fought last in its gym", not _gym_leader_early,
       str(_gym_leader_early[:3]))
 
+# A hidden/underfoot item on a trainer's exact tile (the Macho Brace under Viridian's
+# Giovanni, hidden_item ITEM_MACHO_BRACE at his (2,2)) is pinned under the body until
+# that trainer removeobjects on defeat -- so it must be collected AFTER the fight, not
+# before (a playthrough caught it taken first). Within each stage, an item co-located
+# with a trainer must come later in the step order.
+_item_before_trainer = []
+for st in routej["stages"]:
+    tpos = {(s["map"], tuple(s["at"])): i for i, s in enumerate(st["steps"])
+            if s["kind"] == "trainer"}
+    for i, s in enumerate(st["steps"]):
+        if s["kind"] in ("item", "hidden"):
+            ti = tpos.get((s["map"], tuple(s["at"])))
+            if ti is not None and ti > i:
+                _item_before_trainer.append((st["stage"], s["what"], s["at"]))
+check("an item under a trainer is taken after that trainer is beaten",
+      not _item_before_trainer, str(_item_before_trainer[:4]))
+
 # A one-off legendary (Zapdos, Articuno, Moltres, Mewtwo) may only sit on a stage's
 # recommended team if the route has already caught it when that stage's fighting
 # starts -- otherwise the guide fields a Pokémon not yet in the bag. The route catches

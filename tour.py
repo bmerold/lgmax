@@ -1618,6 +1618,26 @@ def solve(max_stage=None, verbose=True):
             if not moved:
                 break
 
+        # A hidden/underfoot item sharing a trainer's exact tile -- the Macho Brace
+        # under Viridian's Giovanni -- can only be taken once that trainer is beaten:
+        # co-location means the trainer removeobjects on defeat (ViridianCity_Gym
+        # scripts.inc: removeobject LOCALID_VIRIDIAN_GIOVANNI), vacating the tile;
+        # were it a trainer that stays, the item would sit under a body forever. So
+        # order each such item right after its trainer, and flag it to stand ON the
+        # tile (the body is gone by then) instead of beside it.
+        tpos = {(picked[o - 1]["map"], picked[o - 1]["x"], picked[o - 1]["y"]): o
+                for o in order if picked[o - 1]["kind"] == "trainer"}
+        for oi in list(order):
+            n = picked[oi - 1]
+            if n["kind"] not in ("item", "hidden"):
+                continue
+            toi = tpos.get((n["map"], n["x"], n["y"]))
+            if toi is None or toi == oi:
+                continue
+            n["onVacatedTile"] = True
+            order.remove(oi)
+            order.insert(order.index(toi) + 1, oi)
+
         # Seafoam Islands is one-directional until its currents are stilled: each
         # floor's boulder-push (slotted among that floor's items) must land before the
         # walk rides down to B3F/B4F (Articuno), or the current sweeps you back. The
@@ -1682,7 +1702,10 @@ def solve(max_stage=None, verbose=True):
                     press_nt = _mansion_press_note(path)
                     ferry_nt = _ferry_note(path)
                     disp = [[WD.base_map(m), xx, yy] for m, xx, yy in path]
-                    disp = stop_short(disp, n["map"], n["x"], n["y"])
+                    # an item on a vanished trainer's tile is picked up standing ON it
+                    # (the body is gone post-fight), so don't trim that tile away
+                    if not n.get("onVacatedTile"):
+                        disp = stop_short(disp, n["map"], n["x"], n["y"])
                     trimmed = len(path) - len(disp)        # 0 or 1 (stop_short)
                     end = tuple(path[len(path) - 1 - trimmed]) if path else tgt
                     step = {"kind": n["kind"], "what": n["what"],
