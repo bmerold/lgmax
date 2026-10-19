@@ -450,10 +450,24 @@ def content_stage(name):
     """The stage a map's own content unlocks (ignoring _OPEN_EARLY ground), or None."""
     return _content_stage_table().get(name)
 
+# The Sevii Islands sit on their own map; Fly only ever lists Kanto towns, so you
+# never Fly to Sevii -- you ride the Seagallop ferry (world._FERRIES), which also
+# makes the islands unlock in ferry order (One, then Two, then Three). Their heal
+# spots are still Centers you can WALK to and heal at (center_nodes keeps them),
+# they're just not Fly/Teleport landing pads.
+_SEVII_PREFIXES = ("OneIsland", "TwoIsland", "ThreeIsland", "FourIsland",
+                   "FiveIsland", "SixIsland", "SevenIsland", "MtEmber", "NavelRock",
+                   "BirthIsland")
+def is_sevii(name):
+    return base_map(name).startswith(_SEVII_PREFIXES)
+
 def fly_center_open(name, stage):
     """Is this map's heal Center a legal Fly/Teleport landing yet? Gated on the
     map's CONTENT stage, so an _OPEN_EARLY town whose ground you can reach early
-    still isn't fly-landable until you've actually been through its content."""
+    still isn't fly-landable until you've actually been through its content. The
+    Sevii Islands are never Fly landings (ferry-only), so they are excluded."""
+    if is_sevii(name):
+        return False
     st = _content_stage_table().get(name)
     return st is not None and st <= stage
 
@@ -516,6 +530,11 @@ def _ferry_edges():
         out[nb].append((na, st))
     return dict(out)
 
+def is_ferry_hop(a, b):
+    """True if stepping a -> b rides the Seagallop ferry (a scripted boat, not a
+    walkable edge). The guide calls it out so you know to board, not swim."""
+    return any(nb == tuple(b) for nb, _ in _ferry_edges().get(tuple(a), ()))
+
 # ------------------------------------------------------------------ movement rules
 # Reachability (what is collectable, and the TSP distances) ignores bodies --
 # the game is always completable, and some rooms sit behind an NPC you talk past
@@ -575,6 +594,12 @@ def _tile_open(g, x, y, stage, surf_ok):
     if (x, y) in g.warp_tiles: return True
     if (x, y) in g.scripted_open: return True
     beh = g.b(x, y)
+    if beh == MB_WATERFALL:
+        # a waterfall is CLIMBED with HM07 Waterfall (from the post-game Icefall Cave),
+        # not merely surfed -- so it's a wall until that stage. The Two Island Cape
+        # Brink's upper shelf (move tutor, PP Max, Rare Candy) sits above one, so it's
+        # post-game, not reachable on the stage-28 Sevii trip.
+        return stage >= P.HM_STAGE["WATERFALL"] and g.c(x, y) == 0
     if beh in SURFABLE:
         # Surfable water, but a rock (or tree stump) sitting on it keeps collision 1
         # while its behavior still reads as water -- e.g. the rocks dotting Route 20

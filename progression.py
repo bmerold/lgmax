@@ -124,8 +124,12 @@ MAP_STAGE = {
     "ONE_ISLAND": 28, "ONE_ISLAND_KINDLE_ROAD": 28, "ONE_ISLAND_TREASURE_BEACH": 28,
     "MT_EMBER_EXTERIOR": 28, "MT_EMBER_SUMMIT_PATH_1F": 28,
     "MT_EMBER_SUMMIT_PATH_2F": 28, "MT_EMBER_SUMMIT_PATH_3F": 28,
-    "TWO_ISLAND_CAPE_BRINK": 28, "THREE_ISLAND": 28, "THREE_ISLAND_PORT": 28,
+    "THREE_ISLAND": 28, "THREE_ISLAND_PORT": 28,
     "THREE_ISLAND_BOND_BRIDGE": 28, "THREE_ISLAND_BERRY_FOREST": 28,
+    # Cape Brink's shelf (move tutor, PP Max, Rare Candy) is reached by HM07
+    # Waterfall, and the Dunsparce Tunnel is only dug out once the National Dex is
+    # enabled -- both post-game, not the stage-28 Sevii 1-3 trip.
+    "TWO_ISLAND_CAPE_BRINK": 33, "THREE_ISLAND_DUNSPARCE_TUNNEL": 33,
     "ROUTE23": 30,
     "VICTORY_ROAD_1F": 31, "VICTORY_ROAD_2F": 31, "VICTORY_ROAD_3F": 31,
     "INDIGO_PLATEAU_EXTERIOR": 32,

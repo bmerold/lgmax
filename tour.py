@@ -147,7 +147,8 @@ EVENTS = [
     ("Help Celio at the Network Center", "OneIsland_PokemonCenter_1F", 28, "Celio"),
     ("HM06 Rock Smash in the Ember Spa", "OneIsland_KindleRoad_EmberSpa", 28, "RockSmashMan"),
     ("Rescue Lostelle in the Berry Forest", "ThreeIsland_BerryForest", 28, "Lostelle"),
-    ("The prospector's Nugget", "ThreeIsland_DunsparceTunnel", 28, "Prospector"),
+    # the Dunsparce Tunnel is only dug out once the National Dex is enabled (post-game)
+    ("The prospector's Nugget", "ThreeIsland_DunsparceTunnel", 33, "Prospector"),
     ("Togepi egg from the caretaker", "FiveIsland_WaterLabyrinth", 33, "EggGentleman"),
     ("TM42 Facade for a Lemonade", "FiveIsland_MemorialPillar", 33, "MemorialMan"),
     ("Take the Ruby", "MtEmber_RubyPath_B3F", 33),
@@ -424,11 +425,16 @@ def harvest():
             old = cands[sp].get((name, label))
             if old is None or share > old[0]:
                 cands[sp][(name, label)] = (share, spe)
+    # A map whose grass sits behind an in-map gate the map stage doesn't capture:
+    # Three Island Port's only wild grass is the eastern patch reachable solely
+    # through the Dunsparce Tunnel, which is dug out only once the National Dex is
+    # enabled -- so its encounters (Dunsparce) are post-game, not the stage-28 Port.
+    _ENCOUNTER_GATE = {"ThreeIsland_Port": 33}
     for enc in E.WILD["encounters"]:
         if enc["version"] == E.EXCLUDE_VERSION: continue
         name = WD._const_to_folder().get(enc["map"])
         if not name or WD._map_stage(name) is None: continue
-        ms = WD._map_stage(name)
+        ms = max(WD._map_stage(name), _ENCOUNTER_GATE.get(name, 0))
         for method, tbl in (enc["tables"] or {}).items():
             if not tbl or not tbl.get("slots"): continue
             if method == "fishing_mons":
@@ -697,6 +703,13 @@ SCRIPTED_TILE = {f"TRAINER_{k}_{st}": v for k, v in _SCRIPTED_RIVAL.items()
 # point-blank he stays on (28,4) and walls off TM43's pocket until Cut.
 # The node stands at the foot of his three-tile sight line.
 SCRIPTED_TILE["TRAINER_CAMPER_FLINT"] = ("Route25", 28, 7)
+# Three Island's biker gang (TRAINER_BIKER_GOON{,_2,_3} + CUE_BALL_PAXTON) is a
+# scripted scene with no standing overworld trainers -- the fight fires when you
+# step up to the gang blocking the road north out of town (BattleBikersTrigger at
+# y=26). Anchor all four at the approach tile so the stop lands on the gang, not
+# defaulted to the ferry dock.
+for _b in ("BIKER_GOON", "BIKER_GOON_2", "BIKER_GOON_3", "CUE_BALL_PAXTON"):
+    SCRIPTED_TILE[f"TRAINER_{_b}"] = ("ThreeIsland", 9, 27)
 
 # Play notes for stops with a mechanical catch the map can't show.
 STOP_NOTES = {
@@ -1141,6 +1154,17 @@ def distance_matrix(pts, stage):
     with cf.ProcessPoolExecutor(max_workers=min(workers, n),
                                 mp_context=mp.get_context("fork")) as ex:
         return list(ex.map(_matrix_row, range(n), chunksize=chunk))
+
+def _ferry_note(path):
+    """If this leg rides the Seagallop ferry (a scripted boat edge, world.is_ferry_hop),
+    name it so the guide tells you to board rather than wonder how to cross -- the
+    Sevii Islands are only reachable this way (Bill sets up the first trip)."""
+    for a, b in zip(path, path[1:]):
+        if WD.is_ferry_hop(a, b):
+            dest = G.pretty_location(b[0])
+            return (f"Take the Seagallop ferry to {dest} (from the harbour you're on) "
+                    f"— the Sevii Islands are only reachable by boat, not Fly.")
+    return ""
 
 def _mansion_presses(path):
     """Where a drawn Mansion leg flips the secret switch: a press shows in the raw
@@ -1591,6 +1615,7 @@ def solve(max_stage=None, verbose=True):
                     # surface where the statue gets pressed.
                     presses = _mansion_presses(path)
                     press_nt = _mansion_press_note(path)
+                    ferry_nt = _ferry_note(path)
                     disp = [[WD.base_map(m), xx, yy] for m, xx, yy in path]
                     disp = stop_short(disp, n["map"], n["x"], n["y"])
                     trimmed = len(path) - len(disp)        # 0 or 1 (stop_short)
@@ -1626,6 +1651,8 @@ def solve(max_stage=None, verbose=True):
                               f"{G.pretty_location(cur2[0])}, then Fly to "
                               f"{G.pretty_location(where)} and go from there.")
                         nt = (nt + " " + dn) if nt else dn
+                    if ferry_nt:
+                        nt = (nt + " " + ferry_nt) if nt else ferry_nt
                     if press_nt:
                         nt = (nt + " " + press_nt) if nt else press_nt
                     if presses:
