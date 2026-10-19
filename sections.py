@@ -1767,23 +1767,31 @@ def solve_section(stage, encs, starter, avail, tm_value=None, carry=None, moon_u
             e["_mons"] = [E.realize_trainer_mon(e["trainerConst"], i)
                           for i in range(len(e["party"]))]
     trainer_battles = list(battles)
-    # A section with no trainers is still a section you have to WALK: the Safari
-    # Zone and Cerulean Cave have no trainer in them and still want Cut, Strength,
-    # Surf and Rock Smash, so they go through the same solve on their wild load
-    # rather than returning an empty recommendation.
     wild = wild_battles_for(stage)
-    # The Ghost Marowak (setwildbattle SPECIES_MAROWAK, 30) blocks Pokémon Tower
-    # 6F but is neither a trainer nor a wild-table slot, so nothing above it sees
-    # it. Inject it here as a one-off "scripted" fight so the damage cards plan
-    # for it; grouping it on 6F lets interleave_wild seat it among that floor's
-    # Channelers, and it simulates like any other battle via its _mons.
+    # The Ghost Marowak (setwildbattle SPECIES_MAROWAK, 30) blocks Pokémon Tower 6F
+    # but is neither a trainer nor a wild-table slot, so nothing above it sees it.
+    # It is MANDATORY -- it walls the climb to Mr. Fuji -- so unlike grass wilds it
+    # IS fought: inject it as a one-off "scripted" fight grouped on 6F, where
+    # interleave_wild seats it among that floor's Channelers, simulated via its _mons.
+    scripted = []
     if any((b.get("locationRaw") or "").startswith("PokemonTower") for b in battles):
         mk = E.make_mon("SPECIES_MAROWAK", 30)
-        wild.append({"id": "scripted:MAROWAK", "kind": "scripted",
-                     "name": "Ghost Marowak (Silph Scope)", "location": "PokemonTower_6F",
-                     "locationRaw": "PokemonTower_6F", "group": "PokemonTower_6F",
-                     "items": [], "_mons": [mk], "_dist": [(mk, 1.0)]})
-    battles = interleave_wild(stage, battles, wild)
+        scripted.append({"id": "scripted:MAROWAK", "kind": "scripted",
+                         "name": "Ghost Marowak (Silph Scope)", "location": "PokemonTower_6F",
+                         "locationRaw": "PokemonTower_6F", "group": "PokemonTower_6F",
+                         "items": [], "_mons": [mk], "_dist": [(mk, 1.0)]})
+    # Grass wild battles are OPTIONAL -- you flee or Repel past them -- so they are NOT
+    # simmed against the party: simming them would wear it down (HP/PP) and pad the team
+    # with bodies kept only to tank random grass (and push the survive-don't-wipe level
+    # up), which is exactly the bloat we want gone. The team is chosen and levelled for
+    # the TRAINERS (and the one mandatory scripted fight) you cannot avoid; the grass
+    # contents stay visible as reference via wildPlan below. A section with NO forced
+    # fight at all (the Safari Zone, Cerulean Cave) still has to be WALKED and wants its
+    # HM carriers, so it falls back to its wild load rather than recommending nothing.
+    if trainer_battles or scripted:
+        battles = interleave_wild(stage, trainer_battles, scripted)
+    else:
+        battles = interleave_wild(stage, [], wild)
     if not battles:
         return {"stage": stage, "starter": starter, "level": level,
                 "badges": badges["count"], "battles": 0, "opposingMons": 0,
