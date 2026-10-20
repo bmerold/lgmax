@@ -18,7 +18,7 @@ The only mid-dungeon healing spots in FRLG, per the game's scripts
     Seven Island house — post-game
 Notably Rocket Hideout has none, so its whole basement is one continuous run.
 """
-import json, os, math, re, collections
+import json, os, sys, math, re, collections
 from collections import defaultdict
 import engine as E
 import progression as P
@@ -2408,6 +2408,48 @@ def _run_starters(fn, arglist):
                                 mp_context=mp.get_context("fork")) as ex:
         return list(ex.map(fn, arglist))
 
+def _calibrate_levels(args2):
+    """Forward sweep for the recommended-level curve now that grass wilds are out of
+    the sim: the LOWEST level per stage at which EVERY (starter, trade-mode) still
+    clears it without a full wipe. Each context threads its own carry + Moon-Stone
+    budget forward exactly as the real solve does, and a stage never falls below the
+    running peak (you don't de-level). Runs serially in the parent -- it is one-time,
+    invoked with LGMAX_CALIBRATE=1 -- and writes data/levelCurve.json for review
+    before the numbers are baked into progression.STAGES by hand."""
+    ctxs = [{"starter": s, "trading": tr, "picks": pk, "counts": ct, "tv": tv,
+             "carry": None, "moon": set()} for (s, tr, pk, ct, tv) in args2]
+    cold = cold_stage_starts()
+    def solve_at(c, stage, L):
+        O.set_allow_trade(c["trading"]); C.set_commitments(c["picks"]); set_usage(c["counts"])
+        owners, _ = assign_tms(c["tv"], SCARCE); O.set_tm_plan(SCARCE, owners)
+        reset_solve_caches(); reset_hm_held()
+        return solve_section(stage, _SECTIONS_GRAPH.get(stage, []), c["starter"], _AVAIL_TABLE,
+                             None, carry=c["carry"] if stage in cold else None,
+                             moon_used=c["moon"], level_override=L)
+    # search up to a high ceiling, not the current baked level: once the curve is
+    # lowered and re-fed into pass 1, a stage's true floor can land ABOVE its (now
+    # lowered) baked value, so capping at baked would silently under-level it. Run
+    # this to a fixpoint -- bake, re-run, repeat -- until the no-wipe guard is green.
+    CEIL = 70
+    curve, prev = {}, 0
+    for stage in sorted(st["id"] for st in P.STAGES if st["id"] <= P.ROUTE_MAX_STAGE):
+        baked = P.STAGE_BY_ID[stage]["level"]
+        chosen = next((L for L in range(max(prev, 2), CEIL + 1)
+                       if all((solve_at(c, stage, L) or {}).get("unanswered", 0) == 0
+                              for c in ctxs)), baked)
+        for c in ctxs:          # thread carry + Moon budget forward at the chosen level
+            res = solve_at(c, stage, chosen)
+            c["carry"] = (res or {}).get("carryOut") or c["carry"]
+            for t in (res or {}).get("team", []):
+                if t["species"] in MOON_EVOS:
+                    c["moon"].add(t["species"])
+        curve[stage] = chosen
+        prev = chosen
+        print(f"  stage {stage:2}: baked {baked} -> calibrated {chosen}", flush=True)
+    with open(f"{OUT}/levelCurve.json", "w") as f:
+        json.dump(curve, f)
+    print("wrote data/levelCurve.json", flush=True)
+
 # ------------------------------------------------------------------ run
 if __name__ == "__main__":
     import time
@@ -2486,6 +2528,11 @@ if __name__ == "__main__":
                 for t in sec["team"]:
                     counts[t["species"]] += 1
             args2.append((starter, trading, picks, counts, tm_value[mode][starter]))
+
+    if os.environ.get("LGMAX_CALIBRATE"):
+        print("\n=== calibrating level curve (trainers only, both modes) ===", flush=True)
+        _calibrate_levels(args2)
+        sys.exit(0)
 
     # ---- pass 2 (both modes at once): re-solve with commitments + TM plans ----
     res2 = _run_starters(_worker_pass2, args2)
