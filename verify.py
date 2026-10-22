@@ -120,6 +120,17 @@ check("every party member is obtainable by that section",
 # ------------------------------------------------------------------ run-wide commitments
 raw = json.load(open(f"{OUT}/sections.json"))
 raw["sections"] = secs
+
+# The legendary birds are caught for the Dex but excluded from team comps by request
+# (sections.NO_TEAM_SPECIES). No stage's recommended party may field one.
+_birds = {"SPECIES_ARTICUNO", "SPECIES_ZAPDOS", "SPECIES_MOLTRES"}
+_bird_team = [(sk, st, t["name"]) for sk, per in raw["sections"].items()
+              for st, sec in per.items() if sec
+              for t in sec.get("team", [])
+              if NAME_TO_SPECIES.get(t["name"]) in _birds]
+check("no recommended team fields a legendary bird (Dex only, by request)",
+      not _bird_team, str(_bird_team[:4]))
+
 conflicts = []
 for starter, per_stage in raw["sections"].items():
     used = collections.defaultdict(set)

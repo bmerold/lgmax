@@ -47,8 +47,8 @@ STAGES = [
     dict(id=28, name="Sevii Islands 1-3",        chapter="Volcano Badge",   badges=7, level=35),
     dict(id=29, name="Viridian Gym — Giovanni",  chapter="Earth Badge",     badges=7, level=35, gym="Giovanni"),
     dict(id=30, name="Route 22 (late) & Route 23", chapter="Victory Road",  badges=8, level=35),
-    dict(id=31, name="Victory Road",             chapter="Victory Road",    badges=8, level=40),
-    dict(id=32, name="Elite Four & Champion",    chapter="Pokémon League",  badges=8, level=40),
+    dict(id=31, name="Victory Road",             chapter="Victory Road",    badges=8, level=42),
+    dict(id=32, name="Elite Four & Champion",    chapter="Pokémon League",  badges=8, level=42),
     dict(id=33, name="Post-game: Sevii Islands 4-7", chapter="Post-game",   badges=8, level=62),
     dict(id=34, name="Post-game: Cerulean Cave", chapter="Post-game",       badges=8, level=68),
 ]

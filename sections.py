@@ -882,6 +882,7 @@ def assign_hms(team, stage, level, badges, avail, opponents, starter,
         if pool is None:
             pool = [sp for sp in O.candidates(stage)
                     if sp not in chosen and C.allowed(sp)
+                    and sp not in NO_TEAM_SPECIES
                     and C.starter_of(sp) in (None, starter)
                     and not C.outgrown(sp, stage, avail)]
         best, bestkey = None, None
@@ -941,6 +942,7 @@ def assign_hms(team, stage, level, badges, avail, opponents, starter,
             swap_in, key = None, None
             for sp in O.candidates(stage):
                 if sp in chosen or not C.allowed(sp): continue
+                if sp in NO_TEAM_SPECIES: continue
                 if C.starter_of(sp) not in (None, starter): continue
                 if C.outgrown(sp, stage, avail): continue
                 if not HM.can_learn(sp, mv): continue
@@ -1716,6 +1718,12 @@ def build_legs(battles, final, avail, stage):
 # budget. verify.py's Moon-Stone guard is the safety net for this.
 MOON_EVOS = {"SPECIES_NIDOKING", "SPECIES_NIDOQUEEN",
              "SPECIES_CLEFABLE", "SPECIES_WIGGLYTUFF"}
+
+# The legendary birds are caught for the Dex but kept OFF the recommended teams by
+# request -- a one-of-a-kind catch sunk deep in a dungeon shouldn't be the game's
+# answer to a gym. They stay in the route (catch stops) and the Dex; this only bars
+# them from team selection. (Mewtwo is post-game, never on a team anyway.)
+NO_TEAM_SPECIES = {"SPECIES_ARTICUNO", "SPECIES_ZAPDOS", "SPECIES_MOLTRES"}
 _MOON_BUDGET = None
 def moon_budget(stage):
     """How many Moon-Stone evolutions the run can hold by `stage`: the count of
@@ -1839,6 +1847,7 @@ def solve_section(stage, encs, starter, avail, tm_value=None, carry=None, moon_u
     # Charmeleon slip into parties they could never legally join
     cands = [sp for sp in O.candidates(stage)
              if C.starter_of(sp) in (None, starter) and C.allowed(sp)
+             and sp not in NO_TEAM_SPECIES
              and not C.outgrown(sp, stage, avail)
              and moon_ok(sp, stage, moon_used)]
 
