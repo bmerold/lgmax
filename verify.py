@@ -645,6 +645,21 @@ check("Mt Ember's Strength-boulder shove is solved and drawn on the route",
                               for s in _me_stops),
       f"solved_paths={len(_me_paths)} drawn_stops={len(_me_stops)}")
 
+# Victory Road's barriers open when you STEP on a floor switch (the coord script fires
+# on the player's tile, not a boulder's -- TryStartCoordEventScript), and a single 1F
+# boulder forks between two item balls: push it one way to free one, the other way for
+# the other, resetting by leaving the floor. boulders.victory_steps solves the fork from
+# the map; the route must DRAW both push paths, not just describe them -- a playthrough
+# caught the puzzle "not indicated" with no path shown.
+_vr_fork_paths = [flat for _fl, _sw, forks in _BLD_V.victory_steps()
+                  for _b, picks in forks for _n, _t, _r, flat in picks]
+_vr_stops = [s for st in routej["stages"] for s in st["steps"]
+             if str(s.get("map", "")) == "VictoryRoad_1F" and s.get("boulderPaths")]
+check("Victory Road's 1F boulder fork is solved and both push paths are drawn",
+      len(_vr_fork_paths) == 2 and any(len(s["boulderPaths"]) == len(_vr_fork_paths)
+                                       for s in _vr_stops),
+      f"fork_paths={len(_vr_fork_paths)} drawn_stops={len(_vr_stops)}")
+
 prev_end, disc = None, []
 for st in routej["stages"]:
     if prev_end is not None and st["startsAt"] != prev_end:

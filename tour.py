@@ -137,11 +137,13 @@ EVENTS = [
     ("Push B1F's boulders into the holes (Strength)", "SeafoamIslands_B1F", 25),
     ("Push B2F's boulders into the holes — stills the current (Strength)",
      "SeafoamIslands_B2F", 25),
-    # Victory Road's three floor switches each hold a barrier open while a boulder
-    # sits on them (copyobjectxytoperm in each VictoryRoad_*_EventScript_FloorSwitch),
-    # so the climb needs a Strength boulder parked on every switch. One stop, noted
-    # with all the switch tiles (boulders.py).
-    ("Push boulders onto the Victory Road floor switches (Strength)",
+    # Victory Road's barriers open when you STEP on a floor switch -- the coord script
+    # fires on the player's tile, not a boulder's (TryStartCoordEventScript), and sets
+    # VAR_MAP_SCENE_...=100 so the barrier stays open for good (the opened tile is a
+    # one-way Cave_Floor_Ledge drop). The Strength boulders are a SEPARATE puzzle: on 1F
+    # a single boulder forks between two item balls. One stop, noted with the switch
+    # tiles and the fork, the fork's two push paths drawn on the 1F map (boulders.py).
+    ("Victory Road floor switches & the 1F boulder fork (Strength)",
      "VictoryRoad_1F", 31),
     ("Revive your fossils", "CinnabarIsland_PokemonLab_ExperimentRoom", 26, "FossilScientist"),
     ("Help Celio at the Network Center", "OneIsland_PokemonCenter_1F", 28, "Celio"),
@@ -763,19 +765,46 @@ def _seafoam_floor_notes():
     return out
 
 
-def _victory_boulder_note():
-    lead = ("Strength puzzle. Each floor switch holds its barrier open only while a "
-            "boulder sits on it (it stays once parked), so push a boulder onto every "
-            "switch as you climb. Victory Road's ledges mean the short push is by "
-            "sight; the switches are:")
-    rows = [f"• {G.pretty_location(fl)} — " + "; ".join(ln) + "."
-            for fl, ln in _BLD.victory_steps()]
-    return lead + " " + " ".join(rows)
+_VICTORY_LABEL = "Victory Road floor switches & the 1F boulder fork (Strength)"
+_VICTORY_STEPS = _BLD.victory_steps()   # [(floor_map, [switch tiles], [fork]), ...]
 
+
+def _victory_boulder_note():
+    """Spell out the two Victory Road puzzles from the decomp geometry: the floor
+    switches you STEP on (each opens its barrier for good), and the 1F one-boulder
+    fork between two item balls (you can free only one per visit)."""
+    sw_rows = []
+    for fl, switches, _forks in _VICTORY_STEPS:
+        if switches:
+            tiles = ", ".join(f"({x},{y})" for x, y in switches)
+            sw_rows.append(f"{G.pretty_location(fl)}: {tiles}")
+    lead = ("Victory Road has two Strength puzzles. First, STEP on each floor switch "
+            "(a boulder can't trigger it) — the barrier it controls then opens for good "
+            "(it becomes a one-way drop), so hit every switch as you climb: "
+            + "; ".join(sw_rows) + ".")
+    fork_lines = []
+    for fl, _switches, forks in _VICTORY_STEPS:
+        for _b, picks in forks:
+            opts = " or ".join(
+                f"push it {_BLD._phrase(runs)} to free the {name} at ({ix},{iy})"
+                for name, (ix, iy), runs, _flat in picks)
+            fork_lines.append(
+                f"Second, the {G.pretty_location(fl)} boulder forks between two items: "
+                f"{opts}. You can only clear one per visit — grab it, step out of "
+                f"Victory Road and back in to respawn the boulder, then push the other "
+                f"way for the other. Both push paths are drawn on the map.")
+    return " ".join([lead] + fork_lines)
+
+
+# The 1F fork's two push paths, drawn on the 1F map (slot 16) so the boulder route is
+# shown, not just described.
+_VICTORY_PATHS = [flat for _fl, _sw, forks in _VICTORY_STEPS
+                  for _b, picks in forks for _n, _t, _r, flat in picks]
 
 STOP_NOTES.update(_seafoam_floor_notes())
-STOP_NOTES[("Push boulders onto the Victory Road floor switches (Strength)",
-            "VictoryRoad_1F")] = _victory_boulder_note()
+STOP_NOTES[(_VICTORY_LABEL, "VictoryRoad_1F")] = _victory_boulder_note()
+if _VICTORY_PATHS:
+    STOP_PATHS[(_VICTORY_LABEL, "VictoryRoad_1F")] = _VICTORY_PATHS
 
 # Mt Ember's shove-aside boulders (boulders.py): one stop carries the whole plan,
 # with each boulder's push drawn on the exterior map. The lower pair opens the Summit

@@ -166,9 +166,25 @@ def seafoam_steps():
 
 
 # ------------------------------------------------------------------ Victory Road
-# Floor switches (coord_events) and the boulder pushed onto each. The switch's own
-# tile is the target; the nearest boulder that can reach it is the one to use.
+# Victory Road is NOT a push-onto-a-switch puzzle (TryStartCoordEventScript fires on
+# the PLAYER's tile, not a boulder's -- src/field_control_avatar.c): you STEP on each
+# floor switch and its barrier opens for good (setvar VAR_MAP_SCENE_... , 100, so the
+# OnLoad SetRockBarrier never redraws it). The opened barrier is a Cave_Floor_Ledge --
+# a one-way drop. The boulders are a SEPARATE puzzle: they wall off items, and on 1F a
+# single boulder forks between two item balls -- push it one way to free one, the other
+# way to free the other, and you can't do both without leaving to respawn it.
+#
+# The caves mix elevation 3 and 4 (0 is a transition tile), so a flat push-flood would
+# shove a boulder across a cliff the game forbids. This solver walks the REAL movement
+# graph (world.neighbours -- ledges, elevation transitions and all) for the player's
+# reach, and checks every push against the same elevation/edge rules the engine uses,
+# so the tile-by-tile path it dictates is one the game actually allows.
 VICTORY_FLOORS = ["VictoryRoad_1F", "VictoryRoad_2F", "VictoryRoad_3F"]
+# Where you first set foot on each floor (the warp you arrive through), so the player's
+# reach is seeded from a real entry, not a disconnected pocket.
+VICTORY_ENTRY = {"VictoryRoad_1F": (11, 20),   # up from Route 23
+                 "VictoryRoad_2F": (1, 9),      # the 1F -> 2F warp lands here
+                 "VictoryRoad_3F": (5, 2)}      # the 2F -> 3F warp lands here
 
 
 def _switches(mapname):
@@ -177,22 +193,200 @@ def _switches(mapname):
             if "FloorSwitch" in (c.get("script") or "")]
 
 
-def victory_steps():
-    """Which boulder to push onto each Victory Road floor switch. Victory Road is
-    laced with one-way ledges and elevation changes that a flat push-path solver
-    would route a boulder straight over, so this does NOT dictate a tile-by-tile
-    path (it would risk a route the game forbids). It names the verified facts: the
-    switch tile to hold down, and the nearest boulder to shove onto it -- the short
-    push itself is in plain sight once you are there. Returns [(floor, [lines])]."""
-    out = []
-    for fl in VICTORY_FLOORS:
-        sw = _switches(fl)
-        lines = []
-        for (sx, sy) in sw:
-            lines.append(f"push a Strength boulder onto the floor switch at "
-                         f"({sx},{sy}) to hold its barrier open")
-        out.append((fl, lines))
+def _vr_items(mapname):
+    """Floor item balls as {(x,y): short-name}."""
+    out = {}
+    for o in W.R.maps()[mapname].get("object_events", []):
+        if o.get("graphics_id") == "OBJ_EVENT_GFX_ITEM_BALL":
+            name = (o.get("script") or "").split("Item")[-1] or "item"
+            out[(o.get("x"), o.get("y"))] = name
     return out
+
+
+def _vr_region(mapname, start, blocked):
+    """Every tile the player can reach on `mapname`, honouring the same walk rules the
+    engine applies tile-to-tile: open collision (_tile_open), matched elevation across
+    the step (_elev_ok -- the cave's 3/4 cliff), and directional walls (_edge_ok).
+    `blocked` tiles (the boulders) are walls. A lean 4-neighbour flood: Victory Road's
+    static geometry has no ledges or spin tiles (the one-way ledge only appears after a
+    switch script runs, which the baked map doesn't carry), so this matches
+    world.neighbours here while being an order of magnitude cheaper -- the push BFS runs
+    it per boulder position."""
+    g = W.grid(mapname)
+    seen = {start}
+    stack = [start]
+    while stack:
+        x, y = stack.pop()
+        beh = g.b(x, y)
+        for dx, dy in DIRS.values():
+            n = (x + dx, y + dy)
+            if n in seen or n in blocked:
+                continue
+            if (_passable(g, n[0], n[1]) and W._elev_ok(g, x, y, g, n[0], n[1])
+                    and W._edge_ok(beh, g.b(n[0], n[1]), dx, dy)):
+                seen.add(n)
+                stack.append(n)
+    return seen
+
+
+# A fork's item-freeing shove is always short (a boulder a few tiles off an item), so
+# the push BFS is capped: it keeps the search bounded on floors whose boulders can
+# otherwise wander hundreds of tiles, without missing any real fork.
+_FORK_MAX_PUSHES = 12
+
+
+def _push_reach(mapname, bstart, others, max_pushes=_FORK_MAX_PUSHES):
+    """Where boulder `bstart` can be shoved in at most `max_pushes` pushes (others = the
+    floor's other boulders, held fixed as walls). BFS over boulder positions on the real
+    graph. Returns {rest_tile: (player_region_there, parent_tile)} -- the player region
+    lets a caller ask which items/tiles are reachable once the boulder rests there, and
+    parent lets it recover the push path."""
+    g = W.grid(mapname)
+    others = frozenset(others)
+    pstart = _player_start(g, bstart)
+    out = {}
+    q = collections.deque([(bstart, pstart, 0)])
+    parent = {bstart: None}
+    while q:
+        b, p, depth = q.popleft()
+        reg = _vr_region(mapname, p, blocked={b} | others)
+        out[b] = (reg, parent[b])
+        if depth >= max_pushes:
+            continue
+        for d, (dx, dy) in DIRS.items():
+            near = (b[0] - dx, b[1] - dy)
+            dest = (b[0] + dx, b[1] + dy)
+            if dest in out or dest in others:
+                continue
+            if (near in reg and _passable(g, dest[0], dest[1])
+                    and W._elev_ok(g, b[0], b[1], g, dest[0], dest[1])
+                    and W._edge_ok(g.b(*b), g.b(*dest), dx, dy)
+                    and W._elev_ok(g, near[0], near[1], g, b[0], b[1])
+                    and W._edge_ok(g.b(*near), g.b(*b), dx, dy)):
+                parent[dest] = b
+                q.append((dest, b, depth + 1))
+    return out, parent
+
+
+def _runs_to(parent, start, rest):
+    """Collapse the parent-chain from `start` to `rest` into (direction, count) runs."""
+    chain = [rest]
+    while chain[-1] != start:
+        chain.append(parent[chain[-1]])
+    chain.reverse()
+    steps = []
+    for a, b in zip(chain, chain[1:]):
+        steps.append(next(nm for nm, (dx, dy) in DIRS.items()
+                          if (a[0] + dx, a[1] + dy) == b))
+    return _runs(steps)
+
+
+def _vr_fork(mapname):
+    """A one-boulder fork: a boulder whose two shove directions each free a DIFFERENT
+    item ball, with no single resting tile freeing both. Returns [(boulder, [(item_name,
+    item_tile, runs, trajectory), ...])] -- the mutually-exclusive item reaches, each
+    with the push that frees it. From the geometry, nothing hand-listed."""
+    g = W.grid(mapname)
+    items = _vr_items(mapname)
+    boulders = [(o["x"], o["y"]) for o in W.R.maps()[mapname].get("object_events", [])
+                if o.get("graphics_id") == "OBJ_EVENT_GFX_PUSHABLE_BOULDER"]
+    forks = []
+    for b in boulders:
+        rests, parent = _push_reach(mapname, b, set(boulders) - {b})
+        # for each item, the resting tiles from which the player can reach it
+        reach = {it: [r for r, (reg, _p) in rests.items() if it in reg] for it in items}
+        freed = {it: rs for it, rs in reach.items() if rs}
+        # a pair is a fork when neither item is reachable from any tile that frees the
+        # other (disjoint rest sets) -- you must pick one, then reset for the other.
+        picks = []
+        names = list(freed)
+        for i in range(len(names)):
+            for j in range(i + 1, len(names)):
+                a, c = names[i], names[j]
+                if set(freed[a]) & set(freed[c]):
+                    continue                       # some tile frees both: not a fork
+                ra, rc = freed[a][0], freed[c][0]  # a representative push each
+                picks = [(items[a], a, _runs_to(parent, b, ra),
+                          _trajectory(b, _runs_to(parent, b, ra))),
+                         (items[c], c, _runs_to(parent, b, rc),
+                          _trajectory(b, _runs_to(parent, b, rc)))]
+        if picks:
+            forks.append((b, picks))
+    return forks
+
+
+def _vr_mandatory_shoves(mapname):
+    """Boulders that WALL OFF a trainer or an exit (reachable only once shoved aside),
+    with the push that frees them. Solved with the switch barriers already open (you
+    step on the switch first); a flat multi-box Sokoban over the real graph. Returns
+    (phrases, trajectories)."""
+    g = W.grid(mapname)
+    m = W.R.maps()[mapname]
+    boulders = [(o["x"], o["y"]) for o in m.get("object_events", [])
+                if o.get("graphics_id") == "OBJ_EVENT_GFX_PUSHABLE_BOULDER"]
+    goals = {(o["x"], o["y"]) for o in m.get("object_events", [])
+             if o.get("trainer_type") == "TRAINER_TYPE_NORMAL"}
+    goals |= {(w["x"], w["y"]) for w in m.get("warp_events", [])}
+    entry = VICTORY_ENTRY[mapname]
+    pushes = _solve_reach_multi(mapname, boulders, entry, goals)
+    if not pushes:
+        return [], []
+    phrases, trajs = [], []
+    for b, runs, flat in _per_boulder(boulders, pushes):
+        phrases.append(f"shove the boulder at ({b[0]},{b[1]}) {_phrase(runs)} to clear "
+                       f"the way")
+        trajs.append(flat)
+    return phrases, trajs
+
+
+def _solve_reach_multi(mapname, boxes, player_start, goals):
+    """Fewest pushes (over several boulders) to make every tile in `goals` reachable
+    from `player_start`, on the real movement graph. Multi-box Sokoban over frozenset
+    layouts. Returns the pushes as (before, after), or [] if the goals are already open
+    / None if unsolvable."""
+    g = W.grid(mapname)
+    goals = set(goals)
+    boxes0 = frozenset(boxes)
+    init = _vr_region(mapname, player_start, boxes0)
+    if goals <= init:
+        return []
+    q = collections.deque([(boxes0, player_start, [])])
+    seen = {(boxes0, min(init))}
+    while q:
+        bxs, p, pushes = q.popleft()
+        reg = _vr_region(mapname, p, bxs)
+        if goals <= reg:
+            return pushes
+        for b in bxs:
+            for d, (dx, dy) in DIRS.items():
+                near = (b[0] - dx, b[1] - dy)
+                dest = (b[0] + dx, b[1] + dy)
+                if dest in bxs or not _passable(g, dest[0], dest[1]):
+                    continue
+                if (near in reg and W._elev_ok(g, b[0], b[1], g, dest[0], dest[1])
+                        and W._edge_ok(g.b(*b), g.b(*dest), dx, dy)
+                        and W._elev_ok(g, near[0], near[1], g, b[0], b[1])
+                        and W._edge_ok(g.b(*near), g.b(*b), dx, dy)):
+                    nb = frozenset((bxs - {b}) | {dest})
+                    nreg = _vr_region(mapname, near, nb)
+                    key = (nb, min(nreg))
+                    if key not in seen:
+                        seen.add(key)
+                        q.append((nb, near, pushes + [(b, dest)]))
+    return None
+
+
+def victory_steps():
+    """Per-floor Victory Road boulder guidance, solved from the decomp geometry.
+    Returns [(floor_map, switches, forks)] where `switches` are the floor-switch tiles
+    you step on to open each barrier and `forks` is the one-boulder two-item fork from
+    _vr_fork (empty on floors without one). The Strength boulders are transparent in the
+    collision model (passable once Strength is in hand, like Mt Ember's), so they gate no
+    REACHABILITY -- the barrier gating (world.py) is what sequences the floor; the fork is
+    pure item-collection guidance. (The _vr_mandatory_shoves / _solve_reach_multi helpers
+    below stay for a floor that ever needs a shove narrated, but the multi-box search is
+    too slow to run at import, so victory_steps doesn't call it.)"""
+    return [(fl, _switches(fl), _vr_fork(fl)) for fl in VICTORY_FLOORS]
 
 
 # ------------------------------------------------------------------ Mt Ember
@@ -322,11 +516,13 @@ if __name__ == "__main__":
             print(f"    - {p}")
         for tr in paths:
             print(f"      path: {tr}")
-    print("\n=== VICTORY ROAD (hold the floor switches) ===")
-    for fl, ph in victory_steps():
-        print(f"  {fl}:")
-        for p in ph:
-            print(f"    - {p}")
+    print("\n=== VICTORY ROAD (step on switches; one-boulder item forks) ===")
+    for fl, switches, forks in victory_steps():
+        print(f"  {fl}:  step on switches {switches}")
+        for b, picks in forks:
+            print(f"    FORK at boulder {b} (grab one, leave & re-enter to reset, grab the other):")
+            for name, tile, runs, flat in picks:
+                print(f"      - {name} at {tile}: push {_phrase(runs)}   path: {flat}")
     print("\n=== MT EMBER (shove the boulders aside) ===")
     ph, trajs = mt_ember_steps()
     for p in ph:
