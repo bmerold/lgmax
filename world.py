@@ -168,6 +168,12 @@ class Grid:
         for tiles, gates in gated_barriers().get(name, ()):
             for t in tiles:
                 self.barrier_gates[t] = gates
+        # Victory Road's floor-switch barriers: the FloorSwitch script lays their open
+        # Floor_Ledge with setmetatile _, 0, so they'd land in scripted_open (always open)
+        # and let a drawn leg stroll through a barrier the boulder hasn't opened yet. Gate
+        # them on the floor's switch token instead (tour grants it at the push stop).
+        for t in _vr_barrier_tiles(name):
+            self.barrier_gates[t] = frozenset({vr_switch_gate(name)})
         if self.barrier_gates:
             self.scripted_open = frozenset(self.scripted_open) - self.barrier_gates.keys()
         # Silph Co's locked doors: impassable until the Card Key is in hand.
@@ -317,7 +323,46 @@ CARD_KEY_GATE = "SILPH_CARD_KEY"
 # already right. Earned there, the token carries to every later stage (you keep the
 # HM), so Rock Smash rocks are open from stage 29 on.
 ROCK_SMASH_GATE = "HM06_ROCK_SMASH"
+# Victory Road's three floors each wall a rock barrier shut until a Strength boulder is
+# pushed onto that floor's MB_STRENGTH_BUTTON (HandleBoulderActivateVictoryRoadSwitch,
+# src/field_control_avatar.c -- a PLAYER step never opens it). World can't track push
+# state, so each floor's barrier is gated on a per-floor token that tour.py grants at the
+# floor's boulder-push stop; reachability (untracked gates) treats them open, so the route
+# and the matrix are unchanged -- only a pre-push drawn leg routes around the shut barrier.
+_VR_FLOORS = ("VictoryRoad_1F", "VictoryRoad_2F", "VictoryRoad_3F")
+# One token for all three floors: you push every switch over a single Victory Road visit,
+# and a drawn leg to any floor's content threads the lower floors' barriers, so they open
+# together (tour grants it for the whole Victory Road stage). base_map so ~pressed-style
+# variants, if any, share it.
+VR_SWITCH_GATE = "VR_SWITCH"
+def vr_switch_gate(name):
+    return VR_SWITCH_GATE
 _OPEN_GATES = None
+
+@functools.lru_cache(maxsize=None)
+def _vr_barrier_tiles(name):
+    """The RockBarrier tiles Victory Road's OnLoad draws shut (setmetatile _, 1), parsed
+    from this floor's scripts.inc. Empty for any other map. These are kept OUT of
+    scripted_open and gated on the floor's switch token instead of read as always-open."""
+    if name not in _VR_FLOORS:
+        return frozenset()
+    path = f"{REPO}/data/maps/{name}/scripts.inc"
+    if not os.path.exists(path):
+        return frozenset()
+    return frozenset((int(a), int(b)) for a, b in _BARRIER_TILE.findall(open(path).read()))
+
+@functools.lru_cache(maxsize=1)
+def _vr_draw_walls():
+    """{(map, x, y)} of Victory Road Strength boulders a drawn path must not walk through
+    (boulders.victory_wall_boulders -- every present boulder bar the item-forking ones).
+    Lazily imported to avoid a world<->boulders import cycle; boulders reads world, so by
+    the time a draw asks for this the grids it needs are already built and cached."""
+    import boulders as _B
+    out = set()
+    for fl, tiles in _B.victory_wall_boulders().items():
+        for (x, y) in tiles:
+            out.add((fl, x, y))
+    return frozenset(out)
 
 @functools.lru_cache(maxsize=1)
 def _silph_card_doors():
@@ -351,6 +396,7 @@ def _gate_tokens():
     draw cache keys on _OPEN_GATES ∩ this, not the full set. That turns the
     aggro-reorder loop (which only churns non-gate consts) from misses to hits."""
     toks = {LIFT_GATE, MAROWAK_GATE, RIVAL_TOWER_GATE, CARD_KEY_GATE, ROCK_SMASH_GATE}
+    toks |= {vr_switch_gate(fl) for fl in _VR_FLOORS}
     for entries in gated_barriers().values():
         for _tiles, gates in entries:
             toks |= set(gates)
@@ -737,6 +783,15 @@ def neighbours(node, stage):
             if (_elev_ok(g, x, y, g, nx, ny)
                     or g.b(x, y) in SURFABLE or beh in SURFABLE
                     or (nx, ny) in g.warp_tiles or (x, y) in g.warp_tiles):
+                # You can't walk THROUGH a Strength boulder: in Victory Road the drawn
+                # line must route around them, not plow across one at body-cost (that's
+                # how the 2F Guard Spec leg walked the player up a dead-end column and
+                # told them to push a boulder that only jams). Hard wall while drawing
+                # (_DRAW_PENALTY set); free for reachability/the matrix, so the route and
+                # teams are unchanged. The item-forking boulders stay crossable (not in
+                # the set) so their fork items still draw.
+                if _DRAW_PENALTY and (name, nx, ny) in _vr_draw_walls():
+                    continue
                 # drawing prices a step onto a standing body far above any detour,
                 # so the line skirts trainers and NPCs except at a real choke
                 cost = 1 + (_DRAW_PENALTY if (nx, ny) in g.blockers else 0)

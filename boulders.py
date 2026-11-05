@@ -24,8 +24,13 @@ clear and the player can reach the tile on the near side to shove from. Everythi
 here is read from the maps; nothing is hand-listed.
 """
 import collections
+import functools
+import os
+import re
 import engine as E
 import world as W
+
+_cache = functools.lru_cache(maxsize=None)
 
 DIRS = {"east": (1, 0), "west": (-1, 0), "south": (0, 1), "north": (0, -1)}
 MB_FALL_WARP = 0x66
@@ -166,13 +171,19 @@ def seafoam_steps():
 
 
 # ------------------------------------------------------------------ Victory Road
-# Victory Road is NOT a push-onto-a-switch puzzle (TryStartCoordEventScript fires on
-# the PLAYER's tile, not a boulder's -- src/field_control_avatar.c): you STEP on each
-# floor switch and its barrier opens for good (setvar VAR_MAP_SCENE_... , 100, so the
-# OnLoad SetRockBarrier never redraws it). The opened barrier is a Cave_Floor_Ledge --
-# a one-way drop. The boulders are a SEPARATE puzzle: they wall off items, and on 1F a
-# single boulder forks between two item balls -- push it one way to free one, the other
-# way to free the other, and you can't do both without leaving to respawn it.
+# Victory Road IS a push-onto-a-switch puzzle. Each floor's rock barrier is drawn CLOSED
+# on load (OnLoad SetRockBarrier, setmetatile ...Barrier..., 1) and opens only when a
+# Strength boulder is pushed onto the floor's MB_STRENGTH_BUTTON tile: landing a boulder
+# there runs HandleBoulderActivateVictoryRoadSwitch (src/field_control_avatar.c), which
+# fires the FloorSwitch coord script -- turning the barrier into a Cave_Floor_Ledge
+# (setmetatile ..., 0, a one-way drop) and setvar VAR_MAP_SCENE_... , 100 so it stays
+# open for good. A PLAYER stepping on the button does nothing: the coord event's own
+# trigger is var_value 99, a value nothing ever sets, so only the boulder-landing path
+# opens it. (Earlier code here wrongly said you STEP on the switch -- the decomp is
+# explicit that a boulder must sit on it.) One boulder per switch; it's parked there
+# permanently (copyobjectxytoperm). Separately, on 1F a single NON-switch boulder forks
+# between two item balls -- push it one way to free one, the other way for the other,
+# and you can't do both without leaving to respawn it.
 #
 # The caves mix elevation 3 and 4 (0 is a transition tile), so a flat push-flood would
 # shove a boulder across a cliff the game forbids. This solver walks the REAL movement
@@ -379,14 +390,196 @@ def _solve_reach_multi(mapname, boxes, player_start, goals):
 def victory_steps():
     """Per-floor Victory Road boulder guidance, solved from the decomp geometry.
     Returns [(floor_map, switches, forks)] where `switches` are the floor-switch tiles
-    you step on to open each barrier and `forks` is the one-boulder two-item fork from
-    _vr_fork (empty on floors without one). The Strength boulders are transparent in the
-    collision model (passable once Strength is in hand, like Mt Ember's), so they gate no
-    REACHABILITY -- the barrier gating (world.py) is what sequences the floor; the fork is
-    pure item-collection guidance. (The _vr_mandatory_shoves / _solve_reach_multi helpers
-    below stay for a floor that ever needs a shove narrated, but the multi-box search is
+    and `forks` is the one-boulder two-item fork from _vr_fork (empty on floors without
+    one). The switch pushes themselves come from victory_switch_steps(); this stays the
+    source of the 1F fork. (The _vr_mandatory_shoves / _solve_reach_multi helpers above
+    stay for a floor that ever needs a generic shove narrated, but the multi-box search is
     too slow to run at import, so victory_steps doesn't call it.)"""
     return [(fl, _switches(fl), _vr_fork(fl)) for fl in VICTORY_FLOORS]
+
+
+MB_STRENGTH_BUTTON = 0x20
+_SWITCH_MAX_PUSHES = 80          # a switch can be clear across the floor (3F: ~40 pushes)
+
+
+@_cache
+def victory_barriers():
+    """{floor_map: {switch_button_tile: (barrier_tile, ...)}} from the decomp. Each
+    VictoryRoad_*_EventScript_FloorSwitch* coord script turns its rock barrier into an
+    open Cave_Floor_Ledge (setmetatile x, y, _, 0); those are the tiles the switch
+    unseals. The switch tile is the coord event's own (x, y) -- an MB_STRENGTH_BUTTON a
+    boulder must be pushed onto. Nothing hand-listed: parsed per floor."""
+    out = {}
+    for fl in VICTORY_FLOORS:
+        g = W.grid(fl)
+        txt = open(f"{W.REPO}/data/maps/{fl}/scripts.inc").read()
+        m = {}
+        for c in W.R.maps()[fl].get("coord_events", []):
+            script = c.get("script") or ""
+            if "FloorSwitch" not in script:
+                continue
+            sx, sy = c.get("x"), c.get("y")
+            if g.b(sx, sy) != MB_STRENGTH_BUTTON:
+                continue                       # only real button switches
+            name = script.split("::")[0].strip()
+            blk = re.search(re.escape(name) + r"::(.*?)\n\tend", txt, re.S)
+            tiles = []
+            if blk:
+                for mm in re.finditer(r"setmetatile\s+(\d+),\s*(\d+),\s*\S+,\s*0\b",
+                                      blk.group(1)):
+                    tiles.append((int(mm.group(1)), int(mm.group(2))))
+            m[(sx, sy)] = tuple(tiles)
+        out[fl] = m
+    return out
+
+
+def _vr_boulders_present(mapname):
+    """The floor's boulders that start on the map (hide-flag clear), as (x, y)."""
+    return [(x, y) for (x, y, flag, _rev) in _boulders(mapname)
+            if not (flag and flag != "0")]
+
+
+def _vr_hidden(mapname):
+    """The floor's boulders that start HIDDEN behind a hide-flag, as {(x, y): hide_flag}.
+    They drop in from the floor above's cascade (a boulder with reveal_flag == this hide
+    flag pushed into a hole)."""
+    return {(x, y): flag for (x, y, flag, _rev) in _boulders(mapname)
+            if flag and flag != "0"}
+
+
+def _holes(mapname):
+    g = W.grid(mapname)
+    return [(x, y) for y in range(g.h) for x in range(g.w)
+            if g.b(x, y) == MB_FALL_WARP]
+
+
+def _reveal_parent(hide_flag):
+    """(floor_map, boulder_tile) of the boulder whose reveal_flag clears `hide_flag` when
+    it's pushed into a hole -- i.e. the boulder one floor up that drops in to become this
+    hidden one (HandleBoulderFallThroughHole / its reveal flag). None if nothing reveals
+    it (a boulder that's simply present from the start)."""
+    for fl in VICTORY_FLOORS:
+        for (x, y, _hide, rev) in _boulders(fl):
+            if rev == hide_flag:
+                return (fl, (x, y))
+    return None
+
+
+def _cascade_for(hidden_tile, hide_flag):
+    """The push that reveals a hidden boulder: shove its parent (one floor up) into the
+    nearest hole. Returns (parent_floor, parent_boulder, hole, runs, trajectory) or None."""
+    par = _reveal_parent(hide_flag)
+    if not par:
+        return None
+    pfl, pb = par
+    holes = _holes(pfl)
+    if not holes:
+        return None
+    others = (set(_vr_boulders_present(pfl)) - {pb})
+    best = None
+    for h in holes:
+        sol = _solve_switch_push(pfl, pb, h, others)
+        if sol and (best is None or len(sol[0]) < len(best[1])):
+            best = (h, sol[0], sol[1])
+    if not best:
+        return None
+    h, runs, traj = best
+    return (pfl, pb, h, runs, traj)
+
+
+def _solve_switch_push(mapname, start, target, walls):
+    """Fewest pushes to shove the boulder at `start` onto `target`, with `walls` (other
+    boulders + still-closed barrier tiles) treated as walls, on the REAL movement graph
+    (elevation/edge rules). Returns (runs, trajectory) or None. BFS over boulder positions
+    tracking the player's tile, like solve_push, with early exit at the target so it stays
+    cheap even for a switch clear across the floor."""
+    g = W.grid(mapname)
+    walls = frozenset(walls)
+    pstart = _player_start(g, start)
+    q = collections.deque([(start, pstart)])
+    parent = {start: None}
+    while q:
+        b, p = q.popleft()
+        if b == target:
+            runs = _runs_to(parent, start, b)
+            return runs, _trajectory(start, runs)
+        reg = _vr_region(mapname, p, blocked={b} | walls)
+        for d, (dx, dy) in DIRS.items():
+            near = (b[0] - dx, b[1] - dy)         # where the player shoves from
+            dest = (b[0] + dx, b[1] + dy)         # where the boulder lands
+            if dest in parent or dest in walls:
+                continue
+            if (near in reg and _passable(g, dest[0], dest[1])
+                    and W._elev_ok(g, b[0], b[1], g, dest[0], dest[1])
+                    and W._edge_ok(g.b(*b), g.b(*dest), dx, dy)
+                    and W._elev_ok(g, near[0], near[1], g, b[0], b[1])
+                    and W._edge_ok(g.b(*near), g.b(*b), dx, dy)):
+                parent[dest] = b
+                q.append((dest, b))               # player ends on the boulder's old tile
+    return None
+
+
+@_cache
+def victory_switch_steps():
+    """Per floor, the boulder push that opens each rock barrier -- one boulder shoved onto
+    each MB_STRENGTH_BUTTON. Solved in climb order (1F -> 2F -> 3F): a switch is solved
+    with its own barrier still CLOSED (a wall) and every earlier-solved barrier OPEN, and
+    one boulder is spent per switch (parked there for good). A switch with no present
+    boulder that can reach it (2F's second switch) is served by a HIDDEN boulder dropped
+    in from the floor above's cascade -- `cascade` carries that prerequisite push. Returns
+    [(floor_map, [(boulder_start, switch_tile, barrier_tiles, runs, trajectory, cascade),
+    ...])] where cascade is (parent_floor, parent_boulder, hole, runs, trajectory) or None.
+    From the geometry; nothing hand-listed."""
+    barriers = victory_barriers()
+    out = []
+    for fl in VICTORY_FLOORS:
+        sw_barr = barriers.get(fl, {})
+        all_barrier_tiles = {t for tiles in sw_barr.values() for t in tiles}
+        present = _vr_boulders_present(fl)
+        hidden = _vr_hidden(fl)
+        # present boulders first, then hidden ones (which need a cascade to drop in)
+        candidates = list(present) + list(hidden)
+        opened, used, steps = set(), set(), []
+        for switch, barr in sw_barr.items():
+            closed = all_barrier_tiles - opened
+            for b in candidates:
+                if b in used:
+                    continue
+                walls = (set(present) - {b}) | closed
+                sol = _solve_switch_push(fl, b, switch, walls)
+                if not sol:
+                    continue
+                cascade = _cascade_for(b, hidden[b]) if b in hidden else None
+                if b in hidden and not cascade:
+                    continue                       # can't be revealed -> not usable
+                runs, traj = sol
+                steps.append((b, switch, tuple(barr), runs, traj, cascade))
+                used.add(b)
+                opened |= set(barr)
+                break
+        out.append((fl, steps))
+    return out
+
+
+@_cache
+def victory_fork_boulders():
+    """{floor_map: frozenset(boulder_tile)} of the boulders that FORK between items (so a
+    draw must still cross them -- pushing one frees the item you walk in to grab)."""
+    return {fl: frozenset(b for b, _picks in _vr_fork(fl)) for fl in VICTORY_FLOORS}
+
+
+@_cache
+def victory_wall_boulders():
+    """{floor_map: frozenset(tile)} of Victory Road boulders a drawn path must NOT cross:
+    every present boulder except the item-forking ones. You can't walk through a Strength
+    boulder, so the drawn walk routes around them (the switch boulders included -- pushing
+    one up a dead-end corridor just jams it, which is exactly the trap the old body-cost
+    model walked the player into on the way to the 2F Guard Spec). Reachability still
+    treats them as free, so the route and teams are unchanged; only DRAWING avoids them.
+    The forking boulders are kept crossable so the fork items still draw a path."""
+    forks = victory_fork_boulders()
+    return {fl: frozenset(set(_vr_boulders_present(fl)) - forks.get(fl, frozenset()))
+            for fl in VICTORY_FLOORS}
 
 
 # ------------------------------------------------------------------ Mt Ember

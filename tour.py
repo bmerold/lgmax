@@ -137,14 +137,21 @@ EVENTS = [
     ("Push B1F's boulders into the holes (Strength)", "SeafoamIslands_B1F", 25),
     ("Push B2F's boulders into the holes — stills the current (Strength)",
      "SeafoamIslands_B2F", 25),
-    # Victory Road's barriers open when you STEP on a floor switch -- the coord script
-    # fires on the player's tile, not a boulder's (TryStartCoordEventScript), and sets
-    # VAR_MAP_SCENE_...=100 so the barrier stays open for good (the opened tile is a
-    # one-way Cave_Floor_Ledge drop). The Strength boulders are a SEPARATE puzzle: on 1F
-    # a single boulder forks between two item balls. One stop, noted with the switch
-    # tiles and the fork, the fork's two push paths drawn on the 1F map (boulders.py).
-    ("Victory Road floor switches & the 1F boulder fork (Strength)",
+    # Victory Road's barriers open only when a Strength boulder is pushed onto each floor
+    # switch (MB_STRENGTH_BUTTON -> HandleBoulderActivateVictoryRoadSwitch; a player step
+    # never fires it -- the coord event's trigger value, 99, is one nothing sets). One
+    # stop per floor, each anchored on that floor's switch, noted with the push(es) and
+    # drawing them on the floor's map (boulders.py); 2F's second boulder is the one the
+    # 3F cascade drops in, and the 1F stop also carries the one-boulder two-item fork.
+    # No NPC giver -- like the Seafoam boulder stops these anchor on the floor's warp,
+    # not a sprite (so they stay out of verify's interacted-NPC sprite check); the pushes
+    # are drawn from boulderPaths regardless of the anchor tile.
+    ("Victory Road 1F — push a boulder onto the floor switch (Strength)",
      "VictoryRoad_1F", 31),
+    ("Victory Road 2F — push boulders onto both floor switches (Strength)",
+     "VictoryRoad_2F", 31),
+    ("Victory Road 3F — push a boulder onto the floor switch (Strength)",
+     "VictoryRoad_3F", 31),
     ("Revive your fossils", "CinnabarIsland_PokemonLab_ExperimentRoom", 26, "FossilScientist"),
     ("Help Celio at the Network Center", "OneIsland_PokemonCenter_1F", 28, "Celio"),
     ("HM06 Rock Smash in the Ember Spa", "OneIsland_KindleRoad_EmberSpa", 28, "RockSmashMan"),
@@ -765,46 +772,85 @@ def _seafoam_floor_notes():
     return out
 
 
-_VICTORY_LABEL = "Victory Road floor switches & the 1F boulder fork (Strength)"
-_VICTORY_STEPS = _BLD.victory_steps()   # [(floor_map, [switch tiles], [fork]), ...]
+# One push-onto-switch stop per Victory Road floor (matches the EVENTS labels), each
+# anchored on that floor's switch, its note spelling out the boulder push(es) and its
+# boulderPaths drawing them on the floor's map. 2F's second switch is fed by the boulder
+# the 3F cascade drops in, so that cascade push is drawn on the 3F stop; the 1F stop also
+# carries the one-boulder two-item fork.
+_VICTORY_FLOOR_LABEL = {
+    "VictoryRoad_1F": "Victory Road 1F — push a boulder onto the floor switch (Strength)",
+    "VictoryRoad_2F": "Victory Road 2F — push boulders onto both floor switches (Strength)",
+    "VictoryRoad_3F": "Victory Road 3F — push a boulder onto the floor switch (Strength)",
+}
+_VICTORY_SWITCH_STEPS = _BLD.victory_switch_steps()  # [(fl, [(b,sw,barr,runs,traj,casc)])]
+_VICTORY_FORK_STEPS = _BLD.victory_steps()           # [(fl, [switch tiles], [fork]), ...]
 
 
-def _victory_boulder_note():
-    """Spell out the two Victory Road puzzles from the decomp geometry: the floor
-    switches you STEP on (each opens its barrier for good), and the 1F one-boulder
-    fork between two item balls (you can free only one per visit)."""
-    sw_rows = []
-    for fl, switches, _forks in _VICTORY_STEPS:
-        if switches:
-            tiles = ", ".join(f"({x},{y})" for x, y in switches)
-            sw_rows.append(f"{G.pretty_location(fl)}: {tiles}")
-    lead = ("Victory Road has two Strength puzzles. First, STEP on each floor switch "
-            "(a boulder can't trigger it) — the barrier it controls then opens for good "
-            "(it becomes a one-way drop), so hit every switch as you climb: "
-            + "; ".join(sw_rows) + ".")
-    fork_lines = []
-    for fl, _switches, forks in _VICTORY_STEPS:
+def _victory_floor_notes_and_paths():
+    """Per-floor note + drawn push paths for Victory Road, from the decomp geometry: the
+    boulder(s) you shove onto that floor's MB_STRENGTH_BUTTON to open its rock barrier,
+    the 3F->2F cascade that supplies 2F's second boulder, and the 1F one-boulder two-item
+    fork. Returns (notes {(label, floor): text}, paths {(label, floor): [trajectory...]})."""
+    notes, paths = {}, {}
+    cascade_paths = collections.defaultdict(list)   # parent floor -> [cascade trajectory]
+    cascade_notes = collections.defaultdict(list)   # parent floor -> [cascade sentence]
+    switch_by_floor = dict(_VICTORY_SWITCH_STEPS)
+    for fl, steps in _VICTORY_SWITCH_STEPS:
+        label = _VICTORY_FLOOR_LABEL[fl]
+        lines, flats = [], []
+        for (b, sw, _barr, runs, traj, casc) in steps:
+            flats.append(traj)
+            if casc:
+                pfl, pb, hole, cruns, ctraj = casc
+                lines.append(
+                    f"the boulder at ({b[0]},{b[1]}) — push it {_BLD._phrase(runs)} onto "
+                    f"the switch at ({sw[0]},{sw[1]}); that boulder is the one the "
+                    f"{G.pretty_location(pfl)} cascade drops in")
+                cascade_paths[pfl].append(ctraj)
+                cascade_notes[pfl].append(
+                    f"first shove the boulder at ({pb[0]},{pb[1]}) {_BLD._phrase(cruns)} "
+                    f"into the hole at ({hole[0]},{hole[1]}) — it drops to "
+                    f"{G.pretty_location(fl)} as the boulder for that floor's second switch")
+            else:
+                lines.append(
+                    f"the boulder at ({b[0]},{b[1]}) — push it {_BLD._phrase(runs)} onto "
+                    f"the switch at ({sw[0]},{sw[1]})")
+        joined = "; ".join(lines)
+        joined = (joined[0].upper() + joined[1:] + ".") if joined else ""
+        lead = (f"{G.pretty_location(fl)}'s rock barrier is shut until a Strength boulder "
+                f"sits on its floor switch (a boulder, not you — stepping on it does "
+                f"nothing). " + joined)
+        notes[(label, fl)] = lead
+        if flats:
+            paths[(label, fl)] = flats
+    # fold each floor's cascade push (drawn on the floor it happens on) into that stop
+    for pfl, extra in cascade_paths.items():
+        label = _VICTORY_FLOOR_LABEL[pfl]
+        paths.setdefault((label, pfl), []).extend(extra)
+        notes[(label, pfl)] = (notes.get((label, pfl), "")
+                               + " Cascade: " + "; ".join(cascade_notes[pfl]) + ".")
+    # the 1F one-boulder two-item fork: note + both push paths, on the 1F stop
+    for fl, _switches, forks in _VICTORY_FORK_STEPS:
+        if not forks:
+            continue
+        label = _VICTORY_FLOOR_LABEL[fl]
         for _b, picks in forks:
             opts = " or ".join(
                 f"push it {_BLD._phrase(runs)} to free the {name} at ({ix},{iy})"
                 for name, (ix, iy), runs, _flat in picks)
-            fork_lines.append(
-                f"Second, the {G.pretty_location(fl)} boulder forks between two items: "
-                f"{opts}. You can only clear one per visit — grab it, step out of "
-                f"Victory Road and back in to respawn the boulder, then push the other "
-                f"way for the other. Both push paths are drawn on the map.")
-    return " ".join([lead] + fork_lines)
+            notes[(label, fl)] = notes.get((label, fl), "") + (
+                f" A separate boulder here forks between two items: {opts}. You can clear "
+                f"only one per visit — grab it, step out of Victory Road and back in to "
+                f"respawn the boulder, then push the other way for the other.")
+            paths.setdefault((label, fl), []).extend(flat for *_r, flat in picks)
+    return notes, paths
 
 
-# The 1F fork's two push paths, drawn on the 1F map (slot 16) so the boulder route is
-# shown, not just described.
-_VICTORY_PATHS = [flat for _fl, _sw, forks in _VICTORY_STEPS
-                  for _b, picks in forks for _n, _t, _r, flat in picks]
+_VICTORY_NOTES, _VICTORY_PATHS = _victory_floor_notes_and_paths()
 
 STOP_NOTES.update(_seafoam_floor_notes())
-STOP_NOTES[(_VICTORY_LABEL, "VictoryRoad_1F")] = _victory_boulder_note()
-if _VICTORY_PATHS:
-    STOP_PATHS[(_VICTORY_LABEL, "VictoryRoad_1F")] = _VICTORY_PATHS
+STOP_NOTES.update(_VICTORY_NOTES)
+STOP_PATHS.update(_VICTORY_PATHS)
 
 # Mt Ember's shove-aside boulders (boulders.py): one stop carries the whole plan,
 # with each boulder's push drawn on the exterior map. The lower pair opens the Summit
@@ -939,6 +985,10 @@ def gate_token(node):
     # the Ember Spa hands over HM06 Rock Smash -- reaching it unlocks every rock
     if str(node.get("what", "")).startswith("HM06 Rock Smash"):
         return WD.ROCK_SMASH_GATE
+    # a Victory Road floor-switch stop (you push a boulder onto the button) opens that
+    # floor's rock barrier; one shared token, so the whole climb's barriers open together
+    if node["map"] in WD._VR_FLOORS and "floor switch" in str(node.get("what", "")).lower():
+        return WD.VR_SWITCH_GATE
     return None
 
 def stop_short(path, mp, x, y):
@@ -1694,6 +1744,14 @@ def solve(max_stage=None, verbose=True):
             # through it (world.gated_barriers / _OPEN_GATES). Reset to "all open"
             # on the way out so the matrix and later stages are unaffected.
             fought = set(ROUTED_FOUGHT)
+            # Victory Road's three barriers all open over one visit -- you push every
+            # floor switch as you climb, and a drawn leg to any floor threads the lower
+            # floors' barriers -- so grant the shared switch token for the whole stage
+            # rather than per stop. Otherwise an item/trainer leg ordered before the
+            # push stop would draw through a still-shut barrier and, with the boulders now
+            # hard draw-walls, find no path at all (falling back to a straight line).
+            if any(picked[oi - 1]["map"] in WD._VR_FLOORS for oi in ordr):
+                fought.add(WD.VR_SWITCH_GATE)
             try:
                 for oi in ordr:
                     n = picked[oi - 1]

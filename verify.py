@@ -645,20 +645,74 @@ check("Mt Ember's Strength-boulder shove is solved and drawn on the route",
                               for s in _me_stops),
       f"solved_paths={len(_me_paths)} drawn_stops={len(_me_stops)}")
 
-# Victory Road's barriers open when you STEP on a floor switch (the coord script fires
-# on the player's tile, not a boulder's -- TryStartCoordEventScript), and a single 1F
-# boulder forks between two item balls: push it one way to free one, the other way for
-# the other, resetting by leaving the floor. boulders.victory_steps solves the fork from
-# the map; the route must DRAW both push paths, not just describe them -- a playthrough
-# caught the puzzle "not indicated" with no path shown.
+# Victory Road's barriers open ONLY when a Strength boulder is pushed onto each floor
+# switch (MB_STRENGTH_BUTTON -> HandleBoulderActivateVictoryRoadSwitch; a player step
+# never fires it -- the coord event's trigger value, 99, is one nothing sets). The model
+# must (a) gate every barrier closed, not read it as always-open; (b) solve the boulder
+# push for every switch (2F's second via the 3F cascade); (c) draw them, plus the 1F
+# two-item fork; and (d) NEVER draw a walk THROUGH a Strength boulder -- a playthrough
+# caught the 2F Guard Spec leg routed up a dead-end column onto a boulder that only jams.
+import world as _W_V
+_vr_barriers = _BLD_V.victory_barriers()
+_vr_switch = _BLD_V.victory_switch_steps()
+_n_barriers = sum(len(m) for m in _vr_barriers.values())
+_n_solved = sum(len(steps) for _fl, steps in _vr_switch)
+_unsolved = [(fl, sw) for fl, steps in _vr_switch
+             for (_b, sw, _barr, runs, _traj, _casc) in steps if not runs]
+check("Victory Road: a boulder push is solved for every floor switch",
+      _n_barriers > 0 and _n_solved == _n_barriers and not _unsolved,
+      f"solved={_n_solved} barriers={_n_barriers} unsolved={_unsolved}")
+
+# gated closed, not always-open
+_vr_gate_bad = []
+for _fl in _W_V._VR_FLOORS:
+    _g = _W_V.grid(_fl)
+    for _t in _W_V._vr_barrier_tiles(_fl):
+        if _t in _g.scripted_open or _t not in _g.barrier_gates:
+            _vr_gate_bad.append((_fl, _t))
+check("Victory Road's rock barriers are gated closed, not read as always-open",
+      not _vr_gate_bad and any(_W_V._vr_barrier_tiles(f) for f in _W_V._VR_FLOORS),
+      f"bad={_vr_gate_bad}")
+
+# every switch push, the 3F->2F cascade, and the 1F fork are DRAWN on the route
+_vr_cascades = sum(1 for _fl, steps in _vr_switch
+                   for (*_r, _casc) in steps if _casc)
 _vr_fork_paths = [flat for _fl, _sw, forks in _BLD_V.victory_steps()
                   for _b, picks in forks for _n, _t, _r, flat in picks]
-_vr_stops = [s for st in routej["stages"] for s in st["steps"]
-             if str(s.get("map", "")) == "VictoryRoad_1F" and s.get("boulderPaths")]
-check("Victory Road's 1F boulder fork is solved and both push paths are drawn",
-      len(_vr_fork_paths) == 2 and any(len(s["boulderPaths"]) == len(_vr_fork_paths)
-                                       for s in _vr_stops),
-      f"fork_paths={len(_vr_fork_paths)} drawn_stops={len(_vr_stops)}")
+_vr_expect = _n_solved + _vr_cascades + len(_vr_fork_paths)
+_vr_drawn = sum(len(s["boulderPaths"]) for st in routej["stages"] for s in st["steps"]
+                if str(s.get("map", "")) in _W_V._VR_FLOORS and s.get("boulderPaths"))
+check("Victory Road's switch pushes, cascade and 1F fork are all drawn on the route",
+      len(_vr_fork_paths) == 2 and _vr_expect > 0 and _vr_drawn == _vr_expect,
+      f"drawn={_vr_drawn} expected={_vr_expect} (switch={_n_solved} "
+      f"cascade={_vr_cascades} fork={len(_vr_fork_paths)})")
+
+# no drawn WALK threads a Strength boulder (expand the corner path to tiles and check)
+def _vr_path_tiles(path):
+    # Expand a corner path to tiles. Same-map segments are axis-aligned grid runs; a
+    # non-aligned pair (map change, or a non-straight corner) is left as its endpoints,
+    # never stepped (stepping a diagonal would never land on the end -> infinite loop).
+    out = []
+    for (ma, ax, ay), (mb, bx, by) in zip(path, path[1:]):
+        out.append((ma, ax, ay))
+        if ma != mb or (ax != bx and ay != by):
+            continue
+        dx = (bx > ax) - (bx < ax); dy = (by > ay) - (by < ay)
+        x, y = ax, ay
+        while (x, y) != (bx, by):
+            x += dx; y += dy; out.append((ma, x, y))
+    if path:
+        out.append(tuple(path[-1]))
+    return out
+_vr_walls = _W_V._vr_draw_walls()
+_vr_through = []
+for st in routej["stages"]:
+    for s in st["steps"]:
+        for t in _vr_path_tiles([tuple(p) for p in s.get("path", [])]):
+            if t in _vr_walls:
+                _vr_through.append((s.get("what"), t))
+check("No Victory Road walk is drawn through a Strength boulder (the dead-end trap)",
+      not _vr_through, f"through={_vr_through[:5]}")
 
 prev_end, disc = None, []
 for st in routej["stages"]:
