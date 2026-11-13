@@ -285,6 +285,13 @@ button{font:inherit;color:inherit}
 
 .opp{border-bottom:1px solid var(--line)}
 .opp:last-child{border-bottom:0}
+/* a counter that is KO'd before it can win the trade: demoted below survivors in
+   the table and flagged, so a reader never leads with a glass-cannon pick. */
+tr.loses{opacity:.62}
+.tchip{display:inline-block;font-size:11px;padding:1px 6px;margin:0 2px;border-radius:999px;
+  background:var(--accent-soft);color:var(--accent-ink);white-space:nowrap}
+.ko-tag{display:inline-block;margin-left:6px;font-family:var(--mono);font-size:10px;
+  font-weight:600;padding:1px 5px;border-radius:0;background:var(--bad-soft);color:var(--bad)}
 .opp-h{padding:12px 16px 8px;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
 .opp-h .mon-n{font-size:15px}
 .opp-h .num{color:var(--ink-3);font-size:12px}
@@ -1791,8 +1798,10 @@ function oppView(e){
         .slice(0, 5).map(b => {
         const bn = b[0], bt = b[1], move = b[2], eff = b[4], dmin = b[5], dmax = b[6],
               turns = b[8], ohko = b[9], faster = b[10], threat = b[11], tpct = b[12],
-              pctHit = b[13], alts = b[15] || [], btm = b[16] != null ? b[16] : -1;
-        return `<tr><td><strong>${esc(str(bn))}</strong>
+              pctHit = b[13], alts = b[15] || [], btm = b[16] != null ? b[16] : -1,
+              surv = b[18];
+        return `<tr${surv ? "" : ` class="loses"`}><td><strong>${esc(str(bn))}</strong>
+            ${surv ? "" : `<span class="ko-tag" title="Their best move KOs this before it can win the trade">gets KO'd</span>`}
             ${alts.length ? `<div class="linehint">or ${alts.map(x => esc(str(x))).join(", ")}</div>` : ""}
             <br><span class="tw">${typeChips(bt)}</span></td>
           <td>${esc(str(move))} <span class="eff ${effClass(eff)}">${effLabel(eff)}</span>${
@@ -2593,7 +2602,7 @@ function dangerBadge(L){
 function logRow(l, fightNo, st){
   st = st || {};
   const name = l[0], kind = l[2], location = l[3], steps = l[4], healed = l[5],
-        count = l[6] || 0;
+        count = l[6] || 0, patched = l[7] || 0;
   const k = KIND[str(kind)] || KIND.trainer;
   // a scripted one-off (Ghost Marowak) renders as a fight card but has no
   // matchup-analysis dataset entry, so its name stays plain text, not a link
@@ -2623,7 +2632,10 @@ function logRow(l, fightNo, st){
           : ""; })()}</div>
     <div class="log-steps">${steps.map(st => {
       const opp = st[0], lvl = st[1], by = st[2], move = st[3], turns = st[6],
-            selfKO = st[11], handover = st[13];
+            selfKO = st[11], handover = st[13], tac = st[17];
+      // League bag / setup use before the attack ("X Special ×2"), packed by compact.py
+      const tchip = (tac !== undefined && tac !== -1)
+        ? `<span class="tchip" title="Used from the bag / set up before attacking">${esc(str(tac))}</span>` : "";
       if (by === -1) return `<span class="step" style="color:var(--bad)">
         <b>${esc(str(opp))}</b> <span class="num">no answer</span></span>`;
       // per-step radar marker, shown only for the two hard tiers (a mon you lose
@@ -2633,16 +2645,17 @@ function logRow(l, fightNo, st){
       // the second half of a mid-fight handover: same opponent, new Pokemon
       if (handover) return `<span class="step ho" title="Switched in mid-fight to finish this Pokémon">
         <span class="num">↳ then</span>
-        <span class="by">${esc(str(by))}</span>
+        <span class="by">${esc(str(by))}</span>${tchip}
         <span class="num">${esc(str(move))} · ${turns.toFixed(1)}t</span>${mark}</span>`;
       return `<span class="step"><b>${esc(str(opp))}</b>
         <span class="num">L${lvl}</span>
-        <span class="by">${esc(str(by))}</span>
+        <span class="by">${esc(str(by))}</span>${tchip}
         <span class="num">${esc(str(move))} · ${turns.toFixed(1)}t</span>
         ${selfKO ? `<span class="num" style="color:var(--bad)">self-KO</span>` : ""}${mark}</span>`;
     }).join("")}</div>
     ${healed ? `<div class="healnote">Fully healed here${
       typeof healed === "number" && healed > 1 ? " at " + esc(str(healed)) : ""} — HP and PP restored</div>` : ""}
+    ${patched && !healed ? `<div class="healnote">Heal &amp; revive from the bag before the next room — HP restored, PP carries over</div>` : ""}
   </div>`;
 }
 

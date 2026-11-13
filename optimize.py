@@ -14,6 +14,7 @@ import engine as E
 import progression as P
 import build_graph as G
 import constraints as C
+import trainer_items as TI
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 FINALISTS = 22          # how many candidates get the exact treatment
@@ -103,6 +104,27 @@ def move_pool(species, level, stage):
     level-up moves learned by `level`, plus TMs/HMs/tutor moves obtainable by `stage`."""
     key = (species, level, stage)
     if key in _pool_cache: return _pool_cache[key]
+    moves = learnable(species, level, stage)
+    dmg = []
+    for mv in moves:
+        m = E.MOVES.get(mv)
+        if not m: continue
+        if m["effect"] in E.UNUSABLE_EFFECTS: continue
+        if not tm_allowed(mv, species, stage): continue
+        if m["power"] > 0 or m["effect"] in ("DRAGON_RAGE", "SONICBOOM",
+                                             "LEVEL_DAMAGE", "PSYWAVE", "SUPER_FANG"):
+            dmg.append(mv)
+    _pool_cache[key] = dmg
+    return dmg
+
+def setup_pool(species, level, stage, is_setup):
+    """The stat-boosting moves (tactics.is_setup) this species could know here."""
+    return sorted(mv for mv in learnable(species, level, stage)
+                  if mv in E.MOVES and is_setup(mv) and tm_allowed(mv, species, stage))
+
+def learnable(species, level, stage):
+    """Every move this species could know at this point, damaging or not:
+    level-up moves learned by `level`, plus TMs/HMs/tutor moves obtainable by `stage`."""
     moves = set(_levelup_pool(species, level, stage))
     tms = G.tm_moves_by_stage(stage)
     for item in E.TMHM.get(species, []):
@@ -125,17 +147,7 @@ def move_pool(species, level, stage):
         for t in E.TUTOR.get(species, []):
             mv = "MOVE_" + t
             if mv in E.MOVES: moves.add(mv)
-    dmg = []
-    for mv in moves:
-        m = E.MOVES.get(mv)
-        if not m: continue
-        if m["effect"] in E.UNUSABLE_EFFECTS: continue
-        if not tm_allowed(mv, species, stage): continue
-        if m["power"] > 0 or m["effect"] in ("DRAGON_RAGE", "SONICBOOM",
-                                             "LEVEL_DAMAGE", "PSYWAVE", "SUPER_FANG"):
-            dmg.append(mv)
-    _pool_cache[key] = dmg
-    return dmg
+    return moves
 
 def unrestricted_pool(species, level, stage):
     saved = dict(TM_OWNER); TM_OWNER.clear(); _pool_cache.clear()
@@ -217,15 +229,18 @@ def _turn_cost(off, hits):
     if e in E.CHARGE_EFFECTS:   return 2.0 * hits
     return hits
 
-def sweep(player, opp_mons, pool, badges, stage, terrain=None):
+def sweep(player, opp_mons, pool, badges, stage, terrain=None, items=None):
     """Walk the opposing party in order, tracking expected turns and cumulative
-    damage on a single player Pokemon that never switches or heals."""
+    damage on a single player Pokemon that never switches or heals. `items` is
+    the trainer's bag (src/data/trainers.h .items); trainer_items charges each
+    foe the Full Restores / potions the AI would spend on it."""
+    slots = TI.new_slots(items or [])
     hp = player["stats"]["hp"]
     remaining = float(hp)
     total_turns = 0.0
     per_opp = []
     _ob = obey_mult(player, badges)
-    for opp0 in opp_mons:
+    for oi, opp0 in enumerate(opp_mons):
         # entry abilities (Intimidate) set each side's opening stat stages
         pl, opp = E.with_entry_boosts(player, opp0)
         off = E.best_move(pl, opp, badges={"atk": badges.get("atk", False),
@@ -255,9 +270,15 @@ def sweep(player, opp_mons, pool, badges, stage, terrain=None):
                 t /= max(1e-6, 1.0 - 0.5 * b2)
             chip_in = c2
         t = t / (1.0 + chip * t)
+        # a heal hands back `xt` turns of work; the foe spends each heal turn
+        # healing, not attacking, so it gains only `xa` swings
+        xt, xa, uses = TI.drag(slots, t, opp["stats"]["hp"], len(opp_mons) - oi)
+        TI.spend(slots, uses)
+        heals = xt - xa
         # the opponent attacks on each turn it is alive; if the player is faster
         # it gets one fewer swing on the turn the opponent faints
-        swings = max(0.0, t - (1.0 if faster else 0.0))
+        swings = max(0.0, t - (1.0 if faster else 0.0) + xa)
+        t += xt
         taken = 0.0
         if thr:
             scale = act * ((1.0 - 0.5 * burnf)
@@ -291,6 +312,7 @@ def sweep(player, opp_mons, pool, badges, stage, terrain=None):
             "threatCritMax": (thr["critMax"] if thr else 0),
             "threatPct": (round(thr["avg"] / hp * 100, 1) if thr else 0.0),
             "takenHere": round(taken, 1),
+            "foeHeals": round(heals, 2),
         })
     taken_total = hp - remaining
     # how far down the opposing party it gets before its own HP runs out
@@ -311,23 +333,26 @@ def sweep(player, opp_mons, pool, badges, stage, terrain=None):
     }
 
 
-HEAL_ITEMS = {"Full Restore", "Hyper Potion", "Super Potion", "Potion", "Full Heal"}
-
-def heal_penalty(sw, items):
-    """Gym leaders and the Elite Four carry Full Restores and will use them.
-    Each one effectively adds another Pokemon's worth of work to the fight."""
-    n = sum(1 for i in items if i in HEAL_ITEMS)
-    if not n or not sw["perOpponent"]: return sw
-    per_turns = sw["turns"] / len(sw["perOpponent"])
-    per_taken = sw["damageTaken"] / len(sw["perOpponent"])
-    sw = dict(sw)
-    sw["turns"] += n * per_turns
-    sw["damageTaken"] += n * per_taken
-    sw["damageTakenPct"] = sw["damageTaken"] / sw["hp"] * 100
-    sw["survives"] = sw["damageTaken"] < sw["hp"]
-    sw["hpLeftPct"] = max(0.0, sw["hp"] - sw["damageTaken"]) / sw["hp"] * 100
-    sw["healItems"] = n
-    return sw
+def counter_survives(d):
+    """Whether a per-opponent counter actually WINS the 1v1 -- it KOs this foe
+    before the foe KOs it -- rather than just out-damaging it on paper. `turns` is
+    the player's expected hits to the KO; the foe's best move takes `threatPct`% of
+    the player's HP per hit, so it KOs in ceil(100/threatPct) of its own hits. The
+    faster side lands its finishing hit first on an equal count, the slower side
+    needs to finish strictly sooner. Without this gate the table ranks purely on
+    offense, so a mon that is one-shot before it can move (Rhydon into Lorelei's
+    Surf, 300%+ of its HP, slower) still surfaces as a "best counter" -- the exact
+    Elite-Four failure this fixes. A self-KO move never counts as surviving (the
+    EXPLOSION filter already keeps those out of the pool; this is belt-and-braces)."""
+    if E.MOVES.get(d.get("moveConst"), {}).get("effect") == "EXPLOSION":
+        return False
+    tp = d.get("threatPct", 0.0) or 0.0
+    if tp <= 0:
+        return True                       # the foe cannot damage this mon at all
+    opp_hits = math.ceil(100.0 / tp)      # foe's own hits needed to KO the player
+    # turns the foe spends using a Full Restore are turns it is not attacking
+    need = math.ceil(max(d.get("turns", 0.0) - d.get("foeHeals", 0.0), 1e-9))
+    return need <= opp_hits if d.get("faster") else need < opp_hits
 
 # ------------------------------------------------------------------ candidate pool
 def badges_for(stage):
@@ -606,13 +631,19 @@ def analyze(enc, allow_trade=False):
     evaluated = {}
     for sp in finalists:
         pm = player_mon(sp, level)
-        pool = move_pool(sp, level, stage)
+        # Drop Explosion/Self-Destruct from the pool the recommendation is built on:
+        # the sweep does not model the user fainting, so a self-KO move otherwise
+        # reads as a free nuke that keeps attacking, and the table would advise
+        # "lead Golem and Self-Destruct on Lapras" -- you lose your own mon. The
+        # section simulator still models the move (sections.py selfko) for tactics;
+        # it just isn't something to recommend leading with.
+        pool = [mv for mv in move_pool(sp, level, stage)
+                if E.MOVES.get(mv, {}).get("effect") != "EXPLOSION"]
         sw = _weighted_sweep(pm, opps, pool, badges) if weighted \
              else sweep(pm, opp_mons, pool, badges, stage,
-                        G.battle_terrain(enc.get("locationRaw") or "", enc["kind"]))
+                        G.battle_terrain(enc.get("locationRaw") or "", enc["kind"]),
+                        items=enc.get("items", []))
         if sw is None: continue
-        if not weighted:
-            sw = heal_penalty(sw, enc.get("items", []))
         rec = AVAIL[sp]
         evaluated[sp] = {
             "species": sp, "name": E.SPECIES[sp]["name"],
@@ -624,7 +655,7 @@ def analyze(enc, allow_trade=False):
             "hpLeftPct": round(sw["hpLeftPct"], 1),
             "survives": sw["survives"],
             "kos": sw["kos"],
-            "healItems": sw.get("healItems", 0),
+            "healItems": sum(1 for i in enc.get("items", []) if TI.is_hp_item(i)),
             "hp": sw["hp"],
             "stats": pm["stats"],
             "obtainedAt": rec["stage"],
@@ -653,8 +684,12 @@ def analyze(enc, allow_trade=False):
                 "pctPerHit": d["pctPerHit"], "turns": d["turns"], "ohko": d["ohko"],
                 "faster": d["faster"], "threat": d["threat"],
                 "threatPct": d["threatPct"], "threatMax": d["threatMax"],
+                "survives": counter_survives(d),
             })
-        rows.sort(key=lambda r: (r["turns"], r["threatPct"]))
+        # Survivors first: a pick that wins the 1v1 outranks one that merely hits
+        # hard before being KO'd. Within each group, fewest turns then least damage
+        # taken -- the old key, but no longer able to float a one-shot pick to #1.
+        rows.sort(key=lambda r: (not r["survives"], r["turns"], r["threatPct"]))
         rows = C.dedupe_ranked(rows)
         counters.append({
             "opponent": opp["name"], "level": opp["level"],

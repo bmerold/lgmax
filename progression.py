@@ -18,41 +18,54 @@ import engine as E
 STAGES = [
     dict(id=0,  name="Pallet Town",              chapter="Getting started", badges=0, level=5),
     dict(id=1,  name="Route 1 & Viridian City",  chapter="Getting started", badges=0, level=6),
-    dict(id=2,  name="Route 22 (early)",         chapter="Getting started", badges=0, level=6),
+    dict(id=2,  name="Route 22 (early)",         chapter="Getting started", badges=0, level=8),
     dict(id=3,  name="Route 2 & Viridian Forest",chapter="Getting started", badges=0, level=13),
     dict(id=4,  name="Pewter City — Brock",      chapter="Boulder Badge",   badges=0, level=13, gym="Brock"),
     dict(id=5,  name="Route 3 & Mt. Moon",       chapter="Boulder Badge",   badges=1, level=13),
     dict(id=6,  name="Route 4 & Cerulean City",  chapter="Boulder Badge",   badges=1, level=13),
     dict(id=7,  name="Nugget Bridge & Routes 24-25", chapter="Boulder Badge", badges=1, level=18),
-    dict(id=8,  name="Cerulean Gym — Misty",     chapter="Cascade Badge",   badges=1, level=18, gym="Misty"),
-    dict(id=9,  name="Routes 5-6 & Vermilion City", chapter="Cascade Badge",badges=2, level=18),
-    dict(id=10, name="S.S. Anne",                chapter="Cascade Badge",   badges=2, level=18),
-    dict(id=11, name="Vermilion Gym — Lt. Surge",chapter="Thunder Badge",   badges=2, level=18, gym="Lt. Surge"),
-    dict(id=12, name="Route 11 & Diglett's Cave",chapter="Thunder Badge",   badges=3, level=18),
+    dict(id=8,  name="Cerulean Gym — Misty",     chapter="Cascade Badge",   badges=1, level=20, gym="Misty"),
+    dict(id=9,  name="Routes 5-6 & Vermilion City", chapter="Cascade Badge",badges=2, level=20),
+    dict(id=10, name="S.S. Anne",                chapter="Cascade Badge",   badges=2, level=20),
+    dict(id=11, name="Vermilion Gym — Lt. Surge",chapter="Thunder Badge",   badges=2, level=20, gym="Lt. Surge"),
+    dict(id=12, name="Route 11 & Diglett's Cave",chapter="Thunder Badge",   badges=3, level=20),
     dict(id=13, name="Routes 9-10 & Rock Tunnel",chapter="Thunder Badge",   badges=3, level=21),
     dict(id=14, name="Lavender Town & Routes 7-8", chapter="Thunder Badge", badges=3, level=21),
     dict(id=15, name="Celadon City",             chapter="Thunder Badge",   badges=3, level=21),
     dict(id=16, name="Celadon Gym — Erika",      chapter="Rainbow Badge",   badges=3, level=21, gym="Erika"),
-    dict(id=17, name="Rocket Hideout",           chapter="Rainbow Badge",   badges=4, level=21),
-    dict(id=18, name="Pokémon Tower",            chapter="Rainbow Badge",   badges=4, level=21),
+    dict(id=17, name="Rocket Hideout",           chapter="Rainbow Badge",   badges=4, level=23),
+    dict(id=18, name="Pokémon Tower",            chapter="Rainbow Badge",   badges=4, level=23),
     dict(id=19, name="Routes 12-15 (Snorlax)",   chapter="Rainbow Badge",   badges=4, level=31),
     dict(id=20, name="Routes 16-18 (Cycling Road)", chapter="Rainbow Badge",badges=4, level=31),
     dict(id=21, name="Fuchsia City & Safari Zone", chapter="Rainbow Badge", badges=4, level=31),
-    dict(id=22, name="Fuchsia Gym — Koga",       chapter="Soul Badge",      badges=4, level=31, gym="Koga"),
-    dict(id=23, name="Saffron City & Silph Co.", chapter="Soul Badge",      badges=5, level=35),
-    dict(id=24, name="Saffron Gym — Sabrina",    chapter="Marsh Badge",     badges=5, level=35, gym="Sabrina"),
-    dict(id=25, name="Sea routes 19-21 & Seafoam Islands", chapter="Marsh Badge", badges=6, level=35),
-    dict(id=26, name="Cinnabar Island & Pokemon Mansion",  chapter="Marsh Badge", badges=6, level=35),
-    dict(id=27, name="Cinnabar Gym — Blaine",    chapter="Volcano Badge",   badges=6, level=35, gym="Blaine"),
-    dict(id=28, name="Sevii Islands 1-3",        chapter="Volcano Badge",   badges=7, level=35),
-    dict(id=29, name="Viridian Gym — Giovanni",  chapter="Earth Badge",     badges=7, level=35, gym="Giovanni"),
-    dict(id=30, name="Route 22 (late) & Route 23", chapter="Victory Road",  badges=8, level=35),
-    dict(id=31, name="Victory Road",             chapter="Victory Road",    badges=8, level=42),
-    dict(id=32, name="Elite Four & Champion",    chapter="Pokémon League",  badges=8, level=42),
+    dict(id=22, name="Fuchsia Gym — Koga",       chapter="Soul Badge",      badges=4, level=32, gym="Koga"),
+    dict(id=23, name="Saffron City & Silph Co.", chapter="Soul Badge",      badges=5, level=38),
+    dict(id=24, name="Saffron Gym — Sabrina",    chapter="Marsh Badge",     badges=5, level=38, gym="Sabrina"),
+    dict(id=25, name="Sea routes 19-21 & Seafoam Islands", chapter="Marsh Badge", badges=6, level=38),
+    dict(id=26, name="Cinnabar Island & Pokemon Mansion",  chapter="Marsh Badge", badges=6, level=38),
+    dict(id=27, name="Cinnabar Gym — Blaine",    chapter="Volcano Badge",   badges=6, level=38, gym="Blaine"),
+    dict(id=28, name="Sevii Islands 1-3",        chapter="Volcano Badge",   badges=7, level=38),
+    dict(id=29, name="Viridian Gym — Giovanni",  chapter="Earth Badge",     badges=7, level=38, gym="Giovanni"),
+    dict(id=30, name="Route 22 (late) & Route 23", chapter="Victory Road",  badges=8, level=38),
+    dict(id=31, name="Victory Road",             chapter="Victory Road",    badges=8, level=45),
+    # The League: Lorelei -> Bruno -> Agatha -> Lance -> Champion back to back. You
+    # heal and revive from the bag between members (each is fought at full HP) but
+    # PP carries across all five; the trainers' own Full Restores (two each,
+    # src/data/trainers.h) are charged by trainer_items. The bar is the run-wide one:
+    # no full wipe (faints are fine, >=1 Pokemon standing at the end of each fight),
+    # with League tactics (X items, bought heals, setup moves; tactics.py) and the
+    # team builder's swap pass. The full pass-2 solve clears every starter, trade
+    # mode and version at 55 once the trainers' Full Restores are charged on a foe a
+    # fainted member left damaged (it heals on its next action, per ShouldUseItem).
+    # Stages 0-31 keep the curve verified after the faint fix, raised only where a
+    # stage wiped: the per-foe battle planner is myopic, so lowering them reshuffles
+    # which section wipes rather than settling.
+    dict(id=32, name="Elite Four & Champion",    chapter="Pokémon League",  badges=8, level=55),
     dict(id=33, name="Post-game: Sevii Islands 4-7", chapter="Post-game",   badges=8, level=62),
     dict(id=34, name="Post-game: Cerulean Cave", chapter="Post-game",       badges=8, level=68),
 ]
 STAGE_BY_ID = {s["id"]: s for s in STAGES}
+
 MAX_STAGE = max(s["id"] for s in STAGES)
 # How far routing + team building run. The post-game (stage 33 Sevii 4-7, stage 34
 # Cerulean Cave) is DROPPED for now while the mid-game teams are stabilised -- the

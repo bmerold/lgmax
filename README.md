@@ -103,12 +103,15 @@ export LGMAX_POKEFIRERED=~/pokefirered      # optional; this is the default
 Python 3.10+, no third-party packages. `build.sh` runs the whole pipeline and finishes with
 `verify.py`, which must print **87 OKs**. The output is `app.html` — one self-contained file,
 no server needed. The per-starter solves run in parallel (one process each) and the build pins
-`PYTHONHASHSEED=0`, so it's byte-reproducible. Two slow stages reuse prior work when their
-inputs are unchanged: the map-geometry TSP skips with `LGMAX_REUSE_ROUTE=1` (set it only when
-`tour.py`/`world.py`/routing inputs are unchanged), and the grind itineraries auto-skip via an
-input hash (reused unless the grind code or its data changed; `LGMAX_FORCE_TRAINING=1` forces a
-rebuild). An edit to the app, guards or section solver reuses both, turning a rebuild into the
-~2-minute path.
+`PYTHONHASHSEED=0`, so it's byte-reproducible. The map-geometry TSP skips with
+`LGMAX_REUSE_ROUTE=1` (set it only when `tour.py`/`world.py`/routing inputs are unchanged). The
+grind simulator (`training.py`) is **opt-in**: a regular build reuses the last per-version
+snapshot (`data/training_<v>.json`) and it re-simulates only with `LGMAX_TRAINING=1`.
+
+The build checkpoints after every step (`data/.ckpt/`). Stop it any way you like and
+`./build.sh --resume` re-runs only the interrupted step and what follows; a plain `./build.sh`
+clears the checkpoints and starts fresh. Resume trusts the checkpoints, so after editing code a
+finished step depends on, do a fresh build.
 
 `./deploy.sh` publishes the current `app.html` to
 **https://lgmax.arcane-collectibles.com/** (GitHub Pages, `gh-pages` branch, kept at a single

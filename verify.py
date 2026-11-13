@@ -1297,6 +1297,113 @@ _wipes = [(sk, int(st), sec["unanswered"])
 check("every stage clears without a full party wipe at its recommended level",
       not _wipes, str(sorted(_wipes, key=lambda x: -x[2])[:6]))
 
+# A member that faints before finishing its share deals only what it landed; the
+# foe stays in and the next member picks it up (sections.run_section). The sim
+# once credited a fainted mon with the KO -- Golem "beating" a Blastoise whose
+# Surf one-shots it before it moves -- which made "no full wipe" nearly unfailable.
+# Lock in: (1) a member that faints never also lands its share, except by its own
+# Self-Destruct/Explosion; (2) a foe left standing by a fainted member is always
+# picked up by the next step against it, or the fight is a recorded wipe.
+_ghost_ko, _dropped = [], []
+for sk, per in raw["sections"].items():
+    for st, sec in per.items():
+        for e in (sec or {}).get("log", []):
+            pending = None
+            for x in e.get("steps", []):
+                if pending and x.get("opp") != pending:
+                    _dropped.append((sk, st, e.get("enc"), pending))
+                pending = None
+                if x.get("faint") and x.get("landed") and not x.get("selfKO"):
+                    _ghost_ko.append((sk, st, e.get("enc"), x.get("opp"), x.get("by")))
+                if x.get("by") and x.get("landed") is False:
+                    pending = x.get("opp")
+            if pending:
+                _dropped.append((sk, st, e.get("enc"), pending))
+check("no fainted member is credited with a KO it never landed", not _ghost_ko,
+      str(_ghost_ko[:4]))
+check("a foe a fainted member leaves standing is always picked up or a wipe",
+      not _dropped, str(_dropped[:4]))
+
+# League tactics (tactics.py): the player's X items, bought heals and setup moves
+# are for the Elite Four / Champion only, everything bought must be on sale at a
+# mart (the decomp's `pokemart` lists) in a town the run has reached by then, and
+# a setup move used must be in that member's moveset. Reachability here comes
+# from the trainer graph (towns with a trainer at or before the League stage),
+# independently of the route-step walk tactics.buyable_by uses, so a slip in
+# either shows up as a disagreement instead of agreeing with itself.
+import tactics as TAC
+_league_kinds = {"elite4", "champion"}
+_tac_outside, _tac_unsold, _tac_unknown = [], set(), []
+_trainer_maps = {e.get("locationRaw") or "" for e in json.load(open(f"{OUT}/encounters.json"))
+                 if e.get("kind") != "wild" and (e.get("stage") or 99) <= TAC.LEAGUE_STAGE}
+_towns = {mp.split("_")[0] for mp in _trainer_maps}
+# a town with no trainers (Two Island) is reached when the route stops there
+_towns |= {(x.get("map") or "").split("_")[0]
+           for st in json.load(open(f"{OUT}/route.json"))["stages"]
+           if st["stage"] <= TAC.LEAGUE_STAGE for x in st["steps"]}
+def _mart_reached(mp):
+    """In a town with a trainer by the League, or warping straight into a map
+    that has one (the Indigo Plateau Center's door into Lorelei's room)."""
+    if mp.split("_")[0] in _towns: return True
+    mj = os.path.join(E.REPO, "data/maps", mp, "map.json")
+    if not os.path.exists(mj): return False
+    dests = {w["dest_map"] for w in json.load(open(mj)).get("warp_events", [])}
+    return any(("MAP_" + re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", t).upper()) in dests
+               for t in _trainer_maps)
+_sold = {TAC.name(i) for mp, items in TAC.MARTS.items() if _mart_reached(mp)
+         for i in items}
+_setup_names = {E.MOVES[m]["name"] for m in E.MOVES if TAC.is_setup(m)}
+for sk, per in raw["sections"].items():
+    for st, sec in per.items():
+        if not sec: continue
+        moves_of = {t["name"]: {mv["name"] for mv in t.get("moves", [])} for t in sec.get("team", [])}
+        for nm in ((sec.get("leagueKit") or {}).get("items") or {}):
+            if nm not in _sold: _tac_unsold.add(nm)
+        for e in sec.get("log", []):
+            for x in e.get("steps", []):
+                if not x.get("tactics"): continue
+                if e.get("kind") not in _league_kinds:
+                    _tac_outside.append((sk, st, e.get("enc")))
+                for part in x["tactics"].split(", "):
+                    nm = part.rsplit(" ×", 1)[0]
+                    if nm in _setup_names and nm not in moves_of.get(x.get("by"), set()):
+                        _tac_unknown.append((sk, st, x.get("by"), nm))
+check("the bag and setup moves are only used in League fights", not _tac_outside,
+      str(_tac_outside[:4]))
+check("every League item bought is sold at a mart the route reaches", not _tac_unsold,
+      str(sorted(_tac_unsold)))
+check("every setup move used is in that member's moveset", not _tac_unknown,
+      str(_tac_unknown[:4]))
+
+# ------------------------------------------------------------------ trainer items
+# Trainers spend their bag (src/data/trainers.h .items) per the AI's ShouldUseItem
+# (src/battle_ai_switch_items.c), and the simulators charge for it via
+# trainer_items. Lorelei's two Full Restores once went entirely unmodeled in the
+# section sim, so the League level assumed the Elite Four never heal. Lock in:
+#  (1) every item any trainer carries is one trainer_items prices (an HP item) or
+#      a status-only cure the 1v1 model deliberately leaves out -- a new item kind
+#      can't be silently ignored;
+#  (2) the graph carries each trainer's bag through intact;
+#  (3) the Elite Four stage actually spends Full Restores in every starter/mode.
+import trainer_items as TI
+_tr_items = json.load(open(f"{OUT}/trainers.json"))
+_STATUS_ONLY = {"Full Heal"}
+_unpriced = sorted({E.ITEMS.get(i, {}).get("name", i) for t in _tr_items.values()
+                    for i in t["items"] if i != "ITEM_NONE"}
+                   - {n for n in TI.EFFECTS if TI.is_hp_item(n)} - _STATUS_ONLY)
+check("every trainer item is priced by the trainer-AI item model", not _unpriced,
+      str(_unpriced))
+_bag_drift = [e["id"] for e in json.load(open(f"{OUT}/encounters.json"))
+              if e.get("trainerConst") in _tr_items
+              and len(e.get("items", [])) != sum(
+                  1 for i in _tr_items[e["trainerConst"]]["items"] if i != "ITEM_NONE")]
+check("trainer bags survive the graph round-trip", not _bag_drift, str(_bag_drift[:6]))
+_e4_stage = str(max(int(st) for per in raw["sections"].values() for st in per))
+_e4_noitems = [sk for sk, per in raw["sections"].items()
+               if per.get(_e4_stage) and per[_e4_stage].get("foeItemUses", 0) <= 0]
+check("the Elite Four spend their Full Restores in the section sim", not _e4_noitems,
+      str(_e4_noitems))
+
 # ------------------------------------------------------------------ in-game trades
 # Each in-game-trade stop carries a checkbox for the species you must obtain to
 # hand over. That give-away species must be the ROM's requestedSpecies, not the

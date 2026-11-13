@@ -68,6 +68,11 @@ JSON in `data/`. `tour.py` runs before `sections.py`, so `sections.py` may read 
   `PYTHONHASHSEED=0` and are byte-reproducible; `LGMAX_WORKERS` caps the pool and
   `LGMAX_REUSE_ROUTE=1` reuses `data/route.json` (skip `tour.py` only when routing
   inputs are unchanged).
+- **The grind simulator is opt-in.** `training.py` runs only with `LGMAX_TRAINING=1`;
+  every other build reuses `data/training_<v>.json`. Don't run it unless the user asks.
+- **The build checkpoints per step** (`data/.ckpt/<v>.<n>.<step>`). `./build.sh --resume`
+  continues after the last finished step; a plain `./build.sh` starts fresh. Resume
+  only when no code a finished step depends on has changed since.
 - **The sync bundle shape is a second cross-file contract.** `app_template.html`'s `syncBundle`
   (`{v, done, play, starter, trading, dex, ts}`) and `sync/worker.js`'s `merge` must agree. The
   rules that keep two devices from clobbering each other: `done` is always **unioned**, `dex`

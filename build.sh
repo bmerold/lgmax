@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 # Full pipeline: decomp -> analysis -> a single self-contained page.
 # Takes 6-8 minutes. Run it detached if your shell has a timeout.
+#
+#   ./build.sh            fresh build (clears checkpoints, runs every step)
+#   ./build.sh --resume   pick up after the last step that finished (LGMAX_RESUME=1 too)
+#   LGMAX_TRAINING=1 ./build.sh   also re-run the grind simulator (training.py)
+#
+# Pausing: stop the build any way you like (Ctrl-C, kill). Every step writes a
+# checkpoint when it finishes, so `--resume` skips straight to the step that was
+# interrupted and re-runs only that one and what follows. (Ctrl-Z / SIGSTOP still
+# suspends in place, and SIGCONT carries on.) Resume trusts the checkpoints: if you
+# edit code a finished step depends on, do a fresh build instead.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -18,8 +28,67 @@ export LGMAX_POKEFIRERED
   exit 1
 }
 
+[ "${1:-}" = "--resume" ] && LGMAX_RESUME=1
+
 mkdir -p data
 [ -f data/species.json ] || python3 extract.py      # decomp -> data/*.json (version-agnostic)
+
+# ---- checkpoints -------------------------------------------------------------
+# One marker per finished step under data/.ckpt/ (data/ is gitignored). The
+# stages hand off through shared files (data/route.json, sections.json,
+# payload.json, ...) that the next version overwrites, and the build runs
+# versions in order, so "every step before the first missing marker finished
+# last" is exactly the state those shared files are in -- resume needs nothing
+# more. A step killed mid-write never gets its marker, so it re-runs whole.
+CKPT=data/.ckpt
+if [ -n "${LGMAX_RESUME:-}" ]; then
+  echo "resuming: $(ls "$CKPT" 2>/dev/null | wc -l | tr -d ' ') step(s) already done"
+else
+  rm -rf "$CKPT"
+fi
+mkdir -p "$CKPT"
+
+step() {   # step <name> <command...>: run unless its checkpoint exists
+  local name="$1"; shift
+  if [ -f "$CKPT/$name" ]; then
+    echo "[skip] $name (checkpoint)"
+    return 0
+  fi
+  echo "[run ] $name"
+  "$@"
+  touch "$CKPT/$name"
+}
+
+route_step() {   # tour.py is the slow stage; LGMAX_REUSE_ROUTE=1 reuses the last route
+  if [ -n "${LGMAX_REUSE_ROUTE:-}" ] && [ -f "data/route_${V}.json" ]; then
+    cp "data/route_${V}.json" data/route.json
+    echo "reusing data/route_${V}.json (LGMAX_REUSE_ROUTE set)"
+  else
+    python3 tour.py
+    cp data/route.json "data/route_${V}.json"
+  fi
+}
+
+# The grind simulator (training.py) is OPT-IN: it runs only with LGMAX_TRAINING=1.
+# Its inputs are species/exp/encounter data, not the route or the section solve,
+# and it is the slowest stage, so a regular build reuses the last per-version
+# snapshot (data/training_<v>.json). The two versions share data/training.json,
+# so the snapshot is restored before the downstream stages read it.
+training_step() {
+  if [ -n "${LGMAX_TRAINING:-}" ]; then
+    [ -f "data/training_${V}.json" ] && cp "data/training_${V}.json" data/training.json
+    LGMAX_FORCE_TRAINING=1 python3 training.py
+    cp data/training.json "data/training_${V}.json"
+  elif [ -f "data/training_${V}.json" ]; then
+    cp "data/training_${V}.json" data/training.json
+    echo "reusing data/training_${V}.json (set LGMAX_TRAINING=1 to re-simulate)"
+  else
+    echo "no data/training_${V}.json yet: run once with LGMAX_TRAINING=1" >&2
+    return 1
+  fi
+}
+
+snapshot() { cp "$1" "$2"; }
 
 # One game, two versions. extract.py tags every wild table FireRed/LeafGreen/Both;
 # the rest of the pipeline picks a version with LGMAX_VERSION (lg|fr) and drops the
@@ -31,37 +100,16 @@ mkdir -p data
 for V in $LGMAX_VERSIONS; do
   echo "===================== building $V ====================="
   export LGMAX_VERSION="$V"
-  python3 build_graph.py  # wild graph for this version (filters the other's tables)
-  # tour.py is the slow stage; its route is version-specific (catch stops differ).
-  # LGMAX_REUSE_ROUTE=1 reuses data/route_<v>.json when iterating on the engine only.
-  if [ -n "${LGMAX_REUSE_ROUTE:-}" ] && [ -f "data/route_${V}.json" ]; then
-    cp "data/route_${V}.json" data/route.json
-    echo "reusing data/route_${V}.json (LGMAX_REUSE_ROUTE set)"
-  else
-    python3 tour.py
-    cp data/route.json "data/route_${V}.json"
-  fi
-  python3 sections.py     # solves every section, battles in ROUTE order
-  # Grind calculator. Its inputs are the species/exp/encounter data, NOT the route or
-  # the section solve, so a routing-only change never needs it rebuilt. The two
-  # versions share one data/training.json, though, so snapshot per version and restore
-  # before the run -- otherwise each version busts the other's reuse hash and both
-  # rebuild every time. training.py then reuses the restored snapshot when its inputs
-  # are unchanged. LGMAX_SKIP_TRAINING=1 reuses the snapshot outright (iterating on
-  # routing/sections, which the grind model ignores); it still runs if none exists.
-  [ -f "data/training_${V}.json" ] && cp "data/training_${V}.json" data/training.json
-  if [ -n "${LGMAX_SKIP_TRAINING:-}" ] && [ -f "data/training_${V}.json" ]; then
-    echo "reusing data/training_${V}.json (LGMAX_SKIP_TRAINING set)"
-  else
-    python3 training.py   # grind calculator (version-keyed input hash)
-  fi
-  cp data/training.json "data/training_${V}.json"
-  python3 optimize.py     # per-encounter rankings
-  python3 economy.py      # money: prize income vs Game Corner / stone costs
-  python3 render_maps.py  # map PNGs (incremental; this version's used maps)
-  python3 compact.py      # array-encoded payload for this version
-  cp data/payload.json "data/payload_${V}.json"
-  python3 verify.py       # guard rails for this version; all must print OK
+  step "$V.1.graph"    python3 build_graph.py   # wild graph (filters the other version's tables)
+  step "$V.2.route"    route_step               # route is version-specific (catch stops differ)
+  step "$V.3.sections" python3 sections.py      # solves every section, battles in ROUTE order
+  step "$V.4.training" training_step            # grind calculator (opt-in, see above)
+  step "$V.5.optimize" python3 optimize.py      # per-encounter rankings
+  step "$V.6.economy"  python3 economy.py       # money: prize income vs Game Corner / stone costs
+  step "$V.7.maps"     python3 render_maps.py   # map PNGs (incremental; this version's used maps)
+  step "$V.8.compact"  python3 compact.py       # array-encoded payload for this version
+  step "$V.9.snapshot" snapshot data/payload.json "data/payload_${V}.json"
+  step "$V.10.verify"  python3 verify.py        # guard rails for this version; all must print OK
 done
 unset LGMAX_VERSION
 

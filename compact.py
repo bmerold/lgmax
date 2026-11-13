@@ -59,13 +59,19 @@ def main():
 
     def counter_row(b):
         # [name, types, move, moveType, eff, min, max, critMax, turns, ohko,
-        #  faster, threat, threatPct, pctPerHit]
+        #  faster, threat, threatPct, pctPerHit, starterLine, alts, tm,
+        #  requiresTrade, survives]
+        # survives (index 18): does this pick WIN the 1v1 (KO the foe before being
+        # KO'd), or is it ranked here only on paper offense while getting one-shot?
+        # The rows are already ordered survivors-first (optimize.counter_survives);
+        # the flag lets the app flag the losing picks so a reader never leads with one.
         return [S(b["name"]), [S(x) for x in b["types"]], S(b["move"]),
                 S(b["moveType"]), b["eff"], b["dmgMin"], b["dmgMax"], b["critMax"],
                 r2(b["turns"]), r2(b["ohko"]), 1 if b["faster"] else 0,
                 S(b["threat"]), r1(b["threatPct"]), r1(b["pctPerHit"]),
                 S(b.get("starterLine")), [S(a) for a in b.get("alts", [])],
-                S(b.get("tm")), 1 if b.get("requiresTrade") else 0]
+                S(b.get("tm")), 1 if b.get("requiresTrade") else 0,
+                1 if b.get("survives") else 0]
 
     out_encs = []
     for e in graph:
@@ -132,22 +138,25 @@ def main():
 
     def step_row(x):
         # [opp, lvl, by, move, moveType, eff, turns, switched, hpLeft, min, max,
-        #  selfKO, n, handover, worstTaken, ohkoRisk, faint]
+        #  selfKO, n, handover, worstTaken, ohkoRisk, faint, tactics]
+        # tactics: League-only bag/setup use on this foe ("X Special ×2"), or -1
         return [S(x["opp"]), x["lvl"], S(x.get("by")), S(x.get("move")),
                 S(x.get("moveType")), x.get("eff", 1), x.get("turns", 0),
                 1 if x.get("switched") else 0, x.get("hpLeft", 0),
                 x.get("dmgMin", 0), x.get("dmgMax", 0), 1 if x.get("selfKO") else 0,
                 x.get("n", 0), 1 if x.get("handover") else 0,
                 x.get("worstTaken", 0), 1 if x.get("ohkoRisk") else 0,
-                1 if x.get("faint") else 0]
+                1 if x.get("faint") else 0, S(x.get("tactics"))]
 
     def log_row(l):
-        # [encName, id, kind, location, steps, healedAfter, wildCount]
+        # [encName, id, kind, location, steps, healedAfter, wildCount, patchedAfter]
+        # patchedAfter: HP healed/revived from the bag after this fight, PP NOT
+        # restored (between Elite Four members; sections.Member.patch_up)
         return [S(l["enc"]), l["id"], S(l["kind"]), S(l["location"]),
                 [step_row(x) for x in l["steps"]],
                 S(l["healedAfter"]) if isinstance(l.get("healedAfter"), str)
                     else (1 if l.get("healedAfter") else 0),
-                l.get("count", 0)]
+                l.get("count", 0), 1 if l.get("patchedAfter") else 0]
 
     def merge_walks(log):
         """Interleaving scatters a map's wild battles between the trainers, which
