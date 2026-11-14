@@ -465,6 +465,11 @@ def main():
                        for p in sec.get("partyPlan", [])],
                 "bench": [bench_row(b) for b in sec["bench"]],
                 "legs": leg_rows(sec, int(stage)),
+                # least-training objective: who has to be ground up to field this
+                # party -- [name, fromLevel, toLevel, grindTurns, returning 0/1]
+                "tr": [[S(b["name"]), b["from"], b["to"], b["turns"],
+                        1 if b["returning"] else 0]
+                       for b in sec.get("training", [])],
             }
         out_sections[_mode][starter] = rows
 

@@ -928,8 +928,9 @@ details.notes[open] summary::after{content:"−"}
       <h2 id="ob-title">LeafGreen Maximizer</h2>
       <p class="ob-sub">The fastest completionist run through Kanto — every fight solved with the
         game's own damage math, every item and catch laid out on a single route.</p>
-      <p class="ob-rule">Ruleset: no in-battle items · no grinding (one level per section) · fewest
-        turns to win. Every fact comes from the game's code, never a wiki.</p>
+      <p class="ob-rule">Ruleset: one level per section · parties chosen to need the least training,
+        then the fewest turns · no in-battle items outside the League. Every fact comes from the
+        game's code, never a wiki.</p>
       <ul class="ob-how">
         <li><b>Play</b> — follow the walk step by step, the map and your party in view.</li>
         <li><b>The guide</b> — the fights for each area with the party that clears them; tick things
@@ -1457,7 +1458,7 @@ function renderMast(){
   // Level targets: the no-grind level you arrive at each gym with, as a strip.
   const tEl = document.getElementById("mastTargets");
   if (tEl) tEl.innerHTML = LVLTGT.length
-    ? `<span class="mt-l">Level targets (no grinding)</span>` + LVLTGT.map(t =>
+    ? `<span class="mt-l">Level targets</span>` + LVLTGT.map(t =>
         `<span class="mt-g" title="The run reaches ${esc(str(t[0]))} at about Lv ${t[1]}"><b>${esc(str(t[0]))}</b> Lv ${t[1]}</span>`).join("")
     : "";
   const sc = CHOICES().find(c => c.id === "starter");
@@ -2057,7 +2058,7 @@ function grindCard(d, L, id){
   const btn = (v, lbl, tip) => `<button class="gtm${grindTM === v ? " on" : ""}" data-grindtm="${v}" title="${esc(tip)}">${lbl}</button>`;
   return `<section class="card grind-card">
     <div class="card-h"><h2>Behind on levels? Fastest places to grind</h2>
-      <span class="note">only for catching up if you've fallen behind the level targets — the run itself never grinds</span></div>
+      <span class="note">for the training this section calls for, or for catching up if you've fallen behind the level targets</span></div>
     <div class="grind-toggle" role="group" aria-label="TM policy">
       ${btn("none", "No TMs", "level-up and HM moves only")}${
         btn("renew", "Renewable TMs", "also restockable Dept.-store / Game Corner TMs")}${
@@ -2179,6 +2180,25 @@ function renderSecPanel(id, leg){
     </section>`;
   }
 
+  // tr: [name, fromLevel, toLevel, grindTurns, returning] -- the party is chosen to
+  // need as little of this as possible (sections.py least-training objective)
+  if (d.tr && d.tr.length){
+    const tot = d.tr.reduce((a, t) => a + t[3], 0);
+    prep += `<section class="card"><div class="card-h"><h2>Train before this section</h2>
+        <span class="note">~${Math.round(tot)} turns of wild battles in all</span></div>
+      <div class="ctab-wrap"><table class="ctab"><thead><tr>
+        <th>Pokémon</th><th>Level</th><th>Grind</th><th></th>
+      </tr></thead><tbody>
+        ${d.tr.map(([name, from, to, turns, back]) => `<tr><td><b>${esc(str(name))}</b></td>
+          <td class="mono">Lv ${from} → ${to}</td>
+          <td class="mono">~${Math.round(turns)} turns</td>
+          <td class="dim">${back ? "back from the bench" : "new to the party"}</td></tr>`).join("")}
+      </tbody></table></div>
+      <p class="note kitnote">The rest of the party either fought through the last section and kept
+      pace, or joins already at this level. "Fastest places to grind" below shows where each
+      of these levels quickest.</p></section>`;
+  }
+
   if (d.keep && d.keep.length){
     const soon = d.keep.filter(k => k[4] <= 3), later = d.keep.filter(k => k[4] > 3);
     const row = k => {
@@ -2200,9 +2220,9 @@ function renderSecPanel(id, leg){
         ${later.length ? `<tr class="keep-sep"><td colspan="5">further out</td></tr>` : ""}
         ${later.map(row).join("")}
       </tbody></table></div>
-      <p class="note kitnote">This model never grinds — every Pokémon is at its section's level
-      the moment it is used. That only holds if it stayed in your rotation, so these are the ones
-      not to leave in the box.</p></section>`;
+      <p class="note kitnote">A Pokémon keeps pace by fighting in your rotation — the plan only
+      charges training to newcomers and to ones coming back off the bench. Keep these in use so
+      they don't fall behind.</p></section>`;
   }
 
   if (!L.b){
@@ -2997,8 +3017,9 @@ function notesHTML(e, heals){
   return `<details class="notes"><summary>How these numbers were produced</summary><div class="notes-b">
     <h4>Your Pokémon</h4>
     <ul>
-      <li>Level <strong>${lv}</strong> — what a player reaches here by beating the trainers
-        along the way, with no grinding. Every candidate is compared at that same level.</li>
+      <li>Level <strong>${lv}</strong> — what a Pokémon that fought the trainers along the way
+        reaches here. Every candidate is compared at that same level; one that didn't fight its
+        way here is listed under "Train before this section".</li>
       <li>Average specimen: 15 IVs across the board, no EV training, neutral nature.</li>
       <li>Best damaging move available at this point — level-up moves learned by level ${lv},
         plus any TM or HM you could already be holding${e.st >= 28 ? ", plus Two Island move tutors" : ""}.

@@ -86,9 +86,12 @@ filtering them.
 
 ## The ruleset
 
-- **Objective:** fewest expected turns to KO, tie-broken by damage taken.
-- **Levels:** natural playthrough, no grinding. One player level per section.
-- **No in-battle items** on the player's side, ever. Trainer Full Restores *are* counted.
+- **Objective:** no wipes, then fewest faints, then the least training plus the fewest expected
+  turns (training priced in turns; see "Least training"), tie-broken by damage taken.
+- **Levels:** one player level per section. A Pokémon that fought the previous section has kept
+  pace; a newcomer or one back from the bench is ground up, and the guide lists that grind.
+- **No in-battle items** on the player's side outside the League (X items, heals and Revives
+  between Elite Four members). Trainer Full Restores *are* counted.
 - Player specimen: 15 IVs, 0 EVs, neutral nature.
 - LeafGreen only. Trade evolutions are available behind the trading toggle.
 
@@ -145,6 +148,29 @@ amended commit so the page never piles up in history).
 
 `sections.py` runs before `optimize.py` because it writes `data/commitments.json`, which the
 encounter rankings read so the two agree about the run's one-time choices.
+
+## Least training
+
+The guide assumes a Pokémon that fought last section has kept pace, but a newcomer, or one
+coming back off the bench, has to be ground up. Each section's party is chosen to minimise
+battle turns plus that grind (in the same turns, priced by the grind simulator's best wild
+spots), so a new Pokémon joins only when it pays for its training, and every section lists
+exactly who to train and from what level.
+
+## The matchup space (experimental)
+
+`matchups.py` computes every one-on-one fight in the game once: each obtainable species
+(both versions) at each level in a band around each trainer Pokémon, with each damaging
+move it can ever learn, plus each of the foe's moves back at it. An entry is the two
+integers the damage formula yields before the random roll (normal and critical), from
+which the 16 rolls are exact. Version, starter and trades are filters over this table,
+not separate simulations.
+
+```bash
+python3 matchups.py                 # build data/matchups.bin.gz (~90 s, all cores)
+python3 mq.py validate              # the table reproduces the simulator, cell for cell
+python3 mq.py solo rattata --version lg   # min level for one line to clear each stage
+```
 
 ## Some things the ROM settled
 

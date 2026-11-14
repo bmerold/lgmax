@@ -31,6 +31,7 @@ import trainer_items as TI
 import measure as MEAS
 import tactics as TAC
 import route_order as R
+import training_cost as TC
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 _MAX_STAGE = max(s["id"] for s in P.STAGES)
@@ -1863,6 +1864,66 @@ def run_section(team, battles, badges, heal_after_idx, tm_value=None,
             "team": team}
 
 
+# ------------------------------------------------------------------ objective
+# What a party is optimized for. "turns" (the default) is the original: clear the
+# section with the fewest faints, then the fewest turns. "training" adds each
+# member's grind bill (training_cost.join_cost, in turns) for the levels it is
+# BEHIND the section: a Pokemon fielded last section is caught up by the fights
+# it took part in and pays nothing; a newcomer pays from its obtain level, and one
+# returning from the bench pays from the level it was last fielded at.
+OBJECTIVE = os.environ.get("LGMAX_OBJECTIVE", "training")
+OBJECTIVES = ("turns", "training")
+# Look-ahead solves of the whole run under the training objective: each re-solve
+# spreads a line's training bill over the sections the previous solve fielded it
+# in (Objective.plan). The best solve by run_cost is kept, so the first (myopic)
+# one is a floor the look-ahead can only improve on.
+LOOKAHEAD_PASSES = 3
+
+# Faints stay a veto under the least-training objective (ranked before turns, as
+# in the fewest-turns rule). Pricing them in turns was tried and rejected
+# (2026-11-14, LeafGreen, all six starter/trade runs): at 30 and at 100 turns a
+# faint, the solver fielded leaner parties that saved little training but tripled
+# faints, and the drained parties they handed the next section left 1-2 runs with
+# a wipe. A future price would have to see the carry into the next section.
+
+class Objective:
+    """How parties are ranked: fewest unanswered, then fewest faints, then fewest
+    turns. Inactive (roster=None) that is the original rule bit for bit; active it
+    adds each member's training bill (training_cost.Roster.owed) to the turns.
+
+    `plan` (look-ahead) maps a line root to the stages the previous solve of the
+    run fielded it in. A member's bill is spread over the sections from here on
+    that it serves, so a Pokemon that carries the back half of the game is cheap
+    to bring in -- and cheapest at the earliest stage it starts serving, when its
+    level (and so its grind) is lowest. `weight` 0 ranks exactly as the
+    fewest-turns rule (the wipe fallback in _solve_run) while the bill is still
+    tracked and reported."""
+    def __init__(self, stage=None, level=None, avail=None, roster=None, plan=None,
+                 weight=1.0):
+        self.active = roster is not None
+        self.stage, self.level, self.avail = stage, level, avail
+        self.roster, self.plan, self.weight = roster, plan or {}, weight
+        self._memo = {}
+
+    def member(self, sp):
+        if not self.active: return 0.0
+        if sp not in self._memo:
+            raw = self.roster.owed(sp, self.level, self.avail)[0]
+            serves = sum(1 for st in self.plan.get(C.line_root(sp), ()) if st >= self.stage)
+            self._memo[sp] = self.weight * raw / max(1, serves)
+        return self._memo[sp]
+
+    def bill(self, team):
+        return sum(self.member(m.species) for m in team)
+
+    def total(self, res, team):
+        return res["turns"] + self.bill(team)
+
+    def score(self, res, team):
+        return (res["failed"], res["faints"], round(self.total(res, team), 2))
+
+TURNS_ONLY = Objective()
+
 # How many sections of this run each species earns a place in, measured on the
 # unconstrained first pass. Used only to break ties: when several Pokemon clear
 # a section equally well, name the one you are already carrying rather than a
@@ -1872,7 +1933,7 @@ USAGE = {}
 def set_usage(counts):
     USAGE.clear(); USAGE.update(counts or {})
 
-def prune_team(team, chosen, battles, badges, heal_idx, carry, stage):
+def prune_team(team, chosen, battles, badges, heal_idx, carry, stage, obj=TURNS_ONLY):
     """Drop any member whose removal costs nothing: the greedy seed can end up with
     no job once the specialists join (a solo-strong opener whose every fight gets
     taken over), and the party the page shows should be exactly the bodies the
@@ -1881,11 +1942,11 @@ def prune_team(team, chosen, battles, badges, heal_idx, carry, stage):
     while pruned and len(team) > 1:
         pruned = False
         base = run_section(team, battles, badges, heal_idx, carry=carry, stage=stage)
-        bkey = (base["failed"], base["faints"], round(base["turns"], 2))
+        bkey = score(base, obj, team)
         for m in list(team):
             rest = [x for x in team if x is not m]
             r = run_section(rest, battles, badges, heal_idx, carry=carry, stage=stage)
-            if (r["failed"], r["faints"], round(r["turns"], 2)) <= bkey:
+            if score(r, obj, rest) <= bkey:
                 team.remove(m)
                 if m.species in chosen: chosen.remove(m.species)
                 pruned = True
@@ -1893,7 +1954,8 @@ def prune_team(team, chosen, battles, badges, heal_idx, carry, stage):
 
 SWAP_ROUNDS = 3      # bound on swap-pass sweeps (each is |team| x |candidates| sims)
 
-def swap_pass(team, chosen, members, battles, badges, heal_idx, carry, stage, moon_used):
+def swap_pass(team, chosen, members, battles, badges, heal_idx, carry, stage, moon_used,
+              obj=TURNS_ONLY):
     """Local search over the greedy party: replace one member at a time with the
     candidate that most improves score() (fewest unanswered, then faints, then
     turns), honoring the same legality as the greedy build (one per evolution
@@ -1902,7 +1964,7 @@ def swap_pass(team, chosen, members, battles, badges, heal_idx, carry, stage, mo
     team, chosen, history = list(team), list(chosen), []
     if len(team) < 2:
         return team, chosen, history
-    cur = score(run_section(team, battles, badges, heal_idx, carry=carry))
+    cur = score(run_section(team, battles, badges, heal_idx, carry=carry), obj, team)
     for _ in range(SWAP_ROUNDS):
         improved = False
         for i in range(len(team)):
@@ -1918,29 +1980,45 @@ def swap_pass(team, chosen, members, battles, badges, heal_idx, carry, stage, mo
                 if C.conflicts(sp, roots, groups): continue
                 if not moon_ok(sp, stage, moon_held): continue
                 cand = Member(pm, mvs, pool, ob)
-                k = score(run_section(others + [cand], battles, badges, heal_idx,
-                                      carry=carry))
+                res = run_section(others + [cand], battles, badges, heal_idx, carry=carry)
+                k = score(res, obj, others + [cand])
                 if k < cur and (best is None or k < best[0]):
-                    best = (k, sp, cand)
+                    best = (k, sp, cand, res)
             if best:
-                k, sp, cand = best
+                k, sp, cand, res = best
                 team = others[:i] + [cand] + others[i:]
                 chosen = [c for c in chosen if c != out.species] + [sp]
+                # battle turns, like the greedy rows (k[2] also carries the bill)
                 history.append({"swapped": out.name, "for": cand.name,
-                                "turns": k[2], "faints": k[1], "failed": k[0]})
+                                "turns": round(res["turns"], 2), "faints": k[1],
+                                "failed": k[0]})
                 cur, improved = k, True
         if not improved:
             break
     return team, chosen, history
 
-def pick_key(res, sp):
-    """Ordering for 'which Pokemon should join the party next'."""
-    return (res["failed"], res["faints"], round(res["turns"], 2),
+
+def training_bill(team, level, avail, roster):
+    """The per-member grind the chosen party needs, for the guide."""
+    if roster is None:
+        return []
+    out = []
+    for m in team:
+        t, frm, back = roster.owed(m.species, level, avail)
+        if t > 0:
+            out.append({"species": m.species, "name": m.name, "from": frm, "to": level,
+                        "turns": round(t, 1), "returning": back})
+    return out
+
+def pick_key(res, sp, obj=TURNS_ONLY, team=()):
+    """Ordering for 'which Pokemon should join the party next' (obj.score, then
+    the HP and familiarity tie-breaks)."""
+    return obj.score(res, team) + (
             round(res.get("hpLost", 0.0), 3), -USAGE.get(sp, 0),
             E.SPECIES[sp]["name"])
 
-def score(res):
-    return (res["failed"], res["faints"], round(res["turns"], 2))
+def score(res, obj=TURNS_ONLY, team=()):
+    return obj.score(res, team)
 
 # ------------------------------------------------------------------ solve one section
 SCARCE = {}       # move const -> supply record; filled in from tms.py
@@ -2210,7 +2288,8 @@ def moon_ok(species, stage, moon_used):
     return species in moon_used or len(moon_used) < moon_budget(stage)
 
 def solve_section(stage, encs, starter, avail, tm_value=None, carry=None, moon_used=None,
-                  level_override=None, heal_override=None):
+                  level_override=None, heal_override=None, train_roster=None, plan=None,
+                  bill_weight=1.0):
     st = P.STAGE_BY_ID[stage]
     # level_override lets the recommended-level calculator try a candidate level
     # without touching the progression curve; badges stay stage-based.
@@ -2341,6 +2420,8 @@ def solve_section(stage, encs, starter, avail, tm_value=None, carry=None, moon_u
             mvs = league_moveset(pm, mvs, stage, opponents, badges)
         members[sp] = (pm, mvs, pool, obey_factor(sp, level, badges, avail))
 
+    obj = Objective(stage, level, avail, train_roster, plan, bill_weight)
+
     # ---- greedy team build
     team, chosen, history = [], [], []
     held_roots, held_groups = set(), set()
@@ -2359,15 +2440,18 @@ def solve_section(stage, encs, starter, avail, tm_value=None, carry=None, moon_u
                 continue
             trial = team + [Member(pm, mvs, pool, ob)]
             res = run_section(trial, battles, badges, heal_idx, carry=carry)
-            k = pick_key(res, sp)
+            k = pick_key(res, sp, obj, trial)
             if best is None or k < best:
                 best, bestsp, bestres = k, sp, res
         if bestsp is None: break
         if prev is not None:
             # stop once the party already clears the section and another body
-            # no longer meaningfully speeds it up
+            # no longer meaningfully speeds it up (net of what it costs to train,
+            # and with faints priced rather than vetoed under that objective)
             cleared = prev["failed"] == 0 and prev["faints"] == 0
-            gain = (prev["turns"] - bestres["turns"]) / max(1e-9, prev["turns"])
+            before = obj.total(prev, team)
+            after = obj.total(bestres, team + [Member(*members[bestsp])])
+            gain = (before - after) / max(1e-9, before)
             still_broken = bestres["failed"] < prev["failed"] or bestres["faints"] < prev["faints"]
             if cleared and gain < MIN_GAIN and not still_broken:
                 break
@@ -2387,7 +2471,7 @@ def solve_section(stage, encs, starter, avail, tm_value=None, carry=None, moon_u
     # legal candidate in every slot and keep strict improvements (swap_pass).
     greedy_sps = [m.species for m in team]
     swapped, _, swaps = swap_pass(team, chosen, members, battles, badges, heal_idx,
-                                    carry, stage, moon_used)
+                                    carry, stage, moon_used, obj)
     swapped_sps = [m.species for m in swapped]
 
     def finish(sps):
@@ -2395,7 +2479,7 @@ def solve_section(stage, encs, starter, avail, tm_value=None, carry=None, moon_u
         (team, chosen, roots, groups, hm_plan, score, HM_HELD after)."""
         t = [Member(*members[sp]) for sp in sps]
         ch = list(sps)
-        prune_team(t, ch, battles, badges, heal_idx, carry, stage)
+        prune_team(t, ch, battles, badges, heal_idx, carry, stage, obj)
         roots = {C.line_root(m.species) for m in t}
         groups = {g for g in (C.exclusive_group(m.species) for m in t) if g}
         # HM coverage: the party has to be able to CROSS the section, not just win
@@ -2407,7 +2491,7 @@ def solve_section(stage, encs, starter, avail, tm_value=None, carry=None, moon_u
                                  moon_used=moon_used)
         for m in extra:
             t.append(m); ch.append(m.species)
-        sc = score(run_section(t, battles, badges, heal_idx, carry=carry))
+        sc = score(run_section(t, battles, badges, heal_idx, carry=carry), obj, t)
         return t, ch, roots, groups, plan, sc, {k: set(v) for k, v in HM_HELD.items()}
 
     # The swap pass scores battles only, so it can trade away the one member that
@@ -2438,7 +2522,8 @@ def solve_section(stage, encs, starter, avail, tm_value=None, carry=None, moon_u
         res = run_section([Member(pm, mvs, pool, ob)], battles, badges,
                           heal_idx, carry=carry)
         if res["failed"]: continue      # can't clear it, so not an alternative
-        bench.append(((res["faints"], round(res["turns"], 2),
+        # ranked the way the party is chosen: battle turns plus the training bill
+        bench.append(((res["faints"], round(res["turns"] + obj.member(sp), 2),
                        round(res.get("hpLost", 0.0), 3), -USAGE.get(sp, 0),
                        E.SPECIES[sp]["name"]), sp, res))
     bench.sort(key=lambda t: t[0])
@@ -2493,6 +2578,8 @@ def solve_section(stage, encs, starter, avail, tm_value=None, carry=None, moon_u
         "moveJoins": {E.MOVES[mv]["name"]: j for mv, j in MOVE_JOIN.items()},
         "stage": stage, "starter": starter, "level": level,
         "badges": badges["count"],
+        "objective": "training" if train_roster is not None else "turns",
+        "training": training_bill(final["team"], level, avail, train_roster),
         "battles": len(trainer_battles),
         "noBattles": not trainer_battles,
         "wildBattles": len(wild_only),
@@ -2834,22 +2921,124 @@ def _set_solve_inputs(sections, avail):
     global _SECTIONS_GRAPH, _AVAIL_TABLE
     _SECTIONS_GRAPH, _AVAIL_TABLE = sections, avail
 
-def _solve_all_stages(starter, tm_value):
-    """Every stage for one starter, threading carry-over and the Moon-Stone budget
-    exactly as the serial loop did."""
-    result, carry, moon_used = {}, None, set()
+def _solve_run(starter, tm_value, roster=None, plan=None):
+    """Every stage for one starter, threading carry-over, the Moon-Stone budget
+    and (least-training objective) the Roster of who is trained to what level.
+
+    Wipe fallback (training objective only): a party chosen to save training can
+    be leaner, and at a stage that starts without a heal (cold_stage_starts) the
+    next section inherits its drained HP/PP -- LeafGreen/Squirtle's stage-30 party
+    left Victory Road with two unanswerable foes. When a stage wipes, re-solve it
+    ranking by battles alone (bill_weight 0, still billed); if it still wipes and
+    starts cold, also re-solve the stage before it that way and keep whichever
+    pair leaves fewer unanswered foes. Least training therefore never costs a
+    wipe the fewest-turns rule would avoid at the same point."""
+    result = {}
+    state = {"carry": None, "moon": set()}
+    stages = sorted(st["id"] for st in P.STAGES if st["id"] <= P.ROUTE_MAX_STAGE)
+    snaps = {}
+
+    def snapshot():
+        return (state["carry"], set(state["moon"]),
+                roster.copy() if roster is not None else None,
+                {k: set(v) for k, v in HM_HELD.items()})
+
+    def restore(sn):
+        state["carry"], state["moon"] = sn[0], set(sn[1])
+        if roster is not None:
+            roster.last, roster.kept = dict(sn[2].last), set(sn[2].kept)
+        HM_HELD.clear(); HM_HELD.update({k: set(v) for k, v in sn[3].items()})
+
+    def run(stage, weight):
+        res = solve_section(
+            stage, _SECTIONS_GRAPH.get(stage, []), starter, _AVAIL_TABLE,
+            tm_value, carry=state["carry"] if stage in cold_stage_starts() else None,
+            moon_used=state["moon"], train_roster=roster, plan=plan, bill_weight=weight)
+        state["carry"] = (res or {}).get("carryOut") or state["carry"]
+        team = [t["species"] for t in (res or {}).get("team", [])]
+        state["moon"].update(sp for sp in team if sp in MOON_EVOS)
+        if roster is not None and res:
+            roster.field(team, res["level"])
+        return res
+
+    def unans(*rs):
+        return sum((r or {}).get("unanswered", 0) for r in rs)
+
     # stop at the routing cap -- the post-game stages are dropped while they're
     # switched off (progression.ROUTE_MAX_STAGE), so there's no route for them to
     # build a team against.
-    for stage in sorted(st["id"] for st in P.STAGES if st["id"] <= P.ROUTE_MAX_STAGE):
-        result[stage] = solve_section(
-            stage, _SECTIONS_GRAPH.get(stage, []), starter, _AVAIL_TABLE,
-            tm_value, carry=carry if stage in cold_stage_starts() else None,
-            moon_used=moon_used)
-        carry = (result[stage] or {}).get("carryOut") or carry
-        for t in (result[stage] or {}).get("team", []):
-            if t["species"] in MOON_EVOS: moon_used.add(t["species"])
+    for i, stage in enumerate(stages):
+        snaps[stage] = snapshot()
+        result[stage] = run(stage, 1.0)
+        if roster is None or not unans(result[stage]):
+            continue
+        restore(snaps[stage])
+        result[stage] = run(stage, 0.0)
+        if not unans(result[stage]) or i == 0 or stage not in cold_stage_starts():
+            continue
+        prev = stages[i - 1]
+        kept = (result[prev], result[stage], snapshot())
+        restore(snaps[prev])
+        new_prev = run(prev, 0.0)
+        sn = snapshot()
+        new_stage = run(stage, 1.0)
+        if unans(new_stage):
+            restore(sn)
+            new_stage = run(stage, 0.0)
+        if unans(new_prev, new_stage) < unans(kept[0], kept[1]):
+            result[prev], result[stage] = new_prev, new_stage
+        else:
+            result[prev], result[stage] = kept[0], kept[1]
+            restore(kept[2])
     return result
+
+def run_plan(result):
+    """line root -> the stages a solved run fields it in (the look-ahead input)."""
+    plan = defaultdict(list)
+    for stage, sec in result.items():
+        for t in (sec or {}).get("team", []):
+            plan[C.line_root(t["species"])].append(stage)
+    return dict(plan)
+
+def run_cost(result):
+    """A whole run under the training objective, ranked the way a section's
+    party is: wipes, then faints, then battle turns + the (undiscounted)
+    training bill."""
+    secs = [sec for sec in result.values() if sec]
+    return (sum(sec.get("unanswered", 0) for sec in secs),
+            sum(sec.get("faints", 0) for sec in secs),
+            round(sum(sec.get("turns", 0.0) + sum(b["turns"] for b in sec.get("training", []))
+                      for sec in secs), 1))
+
+def _solve_all_stages(starter, tm_value):
+    """One starter's run under OBJECTIVE. Training: a myopic solve, then up to
+    LOOKAHEAD_PASSES-1 re-solves that each read the previous run's plan; the
+    cheapest run wins, and the look-ahead stops at the first pass that doesn't
+    beat the best so far (each is a full pass-2 solve).
+
+    Pass 1 (tm_value collecting TM demand) always runs the fewest-turns rule: it
+    decides the run's one-time choices (which fossil, which Eevee, who gets each
+    single-use TM) on even footing, and those must not drift with the party
+    objective. Under the training rule they did -- FireRed/Bulbasaur committed
+    away the Omanyte that alone answers the stage-30 rival's L53 Charizard, and
+    the run wiped there. So least training changes only who is in each party."""
+    if OBJECTIVE != "training" or tm_value is not None:
+        return _solve_run(starter, tm_value)
+    best = best_cost = best_held = None
+    plan = None
+    for _ in range(LOOKAHEAD_PASSES):
+        reset_hm_held()
+        res = _solve_run(starter, None, roster=TC.Roster(), plan=plan)
+        c = run_cost(res)
+        if best is not None and c >= best_cost:
+            break
+        best, best_cost = res, c
+        best_held = {k: set(v) for k, v in HM_HELD.items()}
+        nxt = run_plan(res)
+        if nxt == plan: break
+        plan = nxt
+    HM_HELD.clear(); HM_HELD.update(best_held)
+    return best
 
 def reset_solve_caches():
     """Clear the per-run memoization that must not leak between independent starter

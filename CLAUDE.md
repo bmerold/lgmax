@@ -70,6 +70,21 @@ JSON in `data/`. `tour.py` runs before `sections.py`, so `sections.py` may read 
   inputs are unchanged).
 - **The grind simulator is opt-in.** `training.py` runs only with `LGMAX_TRAINING=1`;
   every other build reuses `data/training_<v>.json`. Don't run it unless the user asks.
+- **Parties are chosen for least training** (`sections.OBJECTIVE`, default `"training"`;
+  `LGMAX_OBJECTIVE=turns` restores fewest-turns). Each member is billed the grind turns
+  (`training_cost.py`: obtain level from the map scripts, turns/level from the cached
+  `data/training_<v>.json`) for the levels it is behind; a member fielded last section pays
+  nothing. Pass 2 re-solves each run `LOOKAHEAD_PASSES` times, spreading a line's bill over the
+  sections the previous solve used it in, and keeps the cheapest run. Who owes what lives in one
+  place, `training_cost.Roster` (solver, guide and the verify guard's rule all match it). Faints
+  stay a veto (pricing them in turns caused wipes); a stage that wipes is re-solved ranking by
+  battles alone (`_solve_run`'s fallback). Pass 1 always runs the fewest-turns rule, so the
+  one-time choices (fossil, Eevee, TM owners) never drift with the party objective.
+- **The matchup space is standalone (not in build.sh yet).** `matchups.py` tabulates every
+  one-on-one fight (species × level × move vs every trainer Pokémon, plus the foe's four moves
+  back) independent of version/starter/trades into `data/matchups.bin.gz` (~90 s). `mq.py`
+  rebuilds `sections.profile`/`threat` from it — `python3 mq.py validate` must report 0
+  mismatches after any engine change — and answers queries (`mq.py solo <species>`).
 - **The build checkpoints per step** (`data/.ckpt/<v>.<n>.<step>`). `./build.sh --resume`
   continues after the last finished step; a plain `./build.sh` starts fresh. Resume
   only when no code a finished step depends on has changed since.

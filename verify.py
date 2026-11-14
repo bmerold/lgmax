@@ -1375,6 +1375,53 @@ check("every League item bought is sold at a mart the route reaches", not _tac_u
 check("every setup move used is in that member's moveset", not _tac_unknown,
       str(_tac_unknown[:4]))
 
+# ------------------------------------------------------------------ training bill
+# The least-training objective (sections.Objective) picks parties that need as
+# little grinding as possible, and each section lists who must be ground up.
+# The rule, checked here with its own bookkeeping (not the solver's Roster):
+#  (1) the objective in force is the least-training one (the shipped default);
+#  (2) nobody who was in the previous party-bearing section's party is billed --
+#      they kept pace by fighting (the bug this guard was written for billed
+#      every member the level gap, every section);
+#  (3) everyone else who is behind IS billed: a newcomer from its obtain level,
+#      a returner from the level it was last fielded at, priced by training_cost;
+#      and nobody is billed twice or for a member not in the party.
+import training_cost as TC
+_tr_objective, _tr_kept_billed, _tr_wrong = [], [], []
+for sk, per_stage in secs.items():
+    last_level, prev_party = {}, set()
+    for st in sorted(per_stage, key=int):
+        sec = per_stage[st]
+        if not sec or not sec.get("team"): continue
+        if sec.get("objective") != "training":
+            _tr_objective.append((sk, st, sec.get("objective")))
+        billed = {b["name"]: b for b in sec.get("training", [])}
+        want = {}
+        for t in sec["team"]:
+            root = C.line_root(t["species"])
+            if root in prev_party:
+                if t["name"] in billed:
+                    _tr_kept_billed.append((sk, st, t["name"]))
+                continue
+            back = root in last_level
+            frm = last_level[root] if back else TC.obtained_level(t["species"], av)
+            cost = TC.join_cost(t["species"], sec["level"], frm, av)
+            if cost > 0:
+                want[t["name"]] = (frm, sec["level"], round(cost, 1), back)
+        got = {n: (b["from"], b["to"], b["turns"], b["returning"]) for n, b in billed.items()
+               if C.line_root(NAME_TO_SPECIES.get(n, n)) not in prev_party}
+        if got != want or len(billed) != len(sec.get("training", [])):
+            _tr_wrong.append((sk, st, sorted(set(got.items()) ^ set(want.items()))[:3]))
+        prev_party = {C.line_root(t["species"]) for t in sec["team"]}
+        for r in prev_party:
+            last_level[r] = sec["level"]
+check("parties are chosen for least training (the default objective)", not _tr_objective,
+      str(_tr_objective[:4]))
+check("no member who fought in the previous section is billed training",
+      not _tr_kept_billed, str(_tr_kept_billed[:4]))
+check("each section's training bill is exactly its newcomers and returners",
+      not _tr_wrong, str(_tr_wrong[:3]))
+
 # ------------------------------------------------------------------ trainer items
 # Trainers spend their bag (src/data/trainers.h .items) per the AI's ShouldUseItem
 # (src/battle_ai_switch_items.c), and the simulators charge for it via
