@@ -18,12 +18,12 @@ the working contract for changing the code.
    to lock in any bug a playthrough uncovers. Never
    weaken a guard to make it pass; fix the cause.
 3. **Change → rebuild → verify → then commit.** Most edits require the full pipeline. Run
-   `./build.sh` (6–8 min; runs the stages below and ends with `verify.py`). Commit and push only
+   `./build.sh` (10–15 min; runs the stages below and ends with `verify.py`). Commit and push only
    when the user asks; deploy the live site with `./deploy.sh`.
 
 ## Pipeline order (build.sh)
 
-`extract.py` → `build_graph.py` → `tour.py` → `sections.py` → `optimize.py` → `economy.py` → `render_maps.py` →
+`extract.py` → (once, both versions) `wild_matchups.py` → `training.py` → per version: `build_graph.py` → `tour.py` → `sections.py` → `optimize.py` → `economy.py` → `render_maps.py` →
 `compact.py` → inject into `app_template.html` → `verify.py`. Each stage reads the previous stage's
 JSON in `data/`. `tour.py` runs before `sections.py`, so `sections.py` may read `data/route.json`.
 
@@ -68,8 +68,13 @@ JSON in `data/`. `tour.py` runs before `sections.py`, so `sections.py` may read 
   `PYTHONHASHSEED=0` and are byte-reproducible; `LGMAX_WORKERS` caps the pool and
   `LGMAX_REUSE_ROUTE=1` reuses `data/route.json` (skip `tour.py` only when routing
   inputs are unchanged).
-- **The grind simulator is opt-in.** `training.py` runs only with `LGMAX_TRAINING=1`;
-  every other build reuses `data/training_<v>.json`. Don't run it unless the user asks.
+- **The grind simulator runs once for both versions**, before the per-version loop
+  (`sections.py` prices training from its output). Its fights come from the version-free wild
+  tables; a version is only a filter (its areas, availability, trades), and an area both
+  versions share is searched once. It writes `data/training_<v>.json` and skips itself when
+  its inputs are unchanged; `LGMAX_TRAINING=1` forces a re-run. It must not read
+  `build_graph` outputs from `data/` (they don't exist yet on a fresh build) — it gets them
+  from a per-version subprocess.
 - **Parties are chosen for least training** (`sections.OBJECTIVE`, default `"training"`;
   `LGMAX_OBJECTIVE=turns` restores fewest-turns). Each member is billed the grind turns
   (`training_cost.py`: obtain level from the map scripts, turns/level from the cached
@@ -85,6 +90,13 @@ JSON in `data/`. `tour.py` runs before `sections.py`, so `sections.py` may read 
   back) independent of version/starter/trades into `data/matchups.bin.gz` (~90 s). `mq.py`
   rebuilds `sections.profile`/`threat` from it — `python3 mq.py validate` must report 0
   mismatches after any engine change — and answers queries (`mq.py solo <species>`).
+  The wild half (in build.sh, skipped when unchanged): `wild_matchups.py` →
+  `data/wild_matchups.bin.gz` (~100–180 s), queried by
+  `grind_space.py` (`validate` must report 0 mismatches). `training.py` reads its fights from
+  it when present (it re-checks a sample against the engine first and refuses stale tables;
+  `LGMAX_GRIND_ENGINE=1` forces the engine). Engine changes rebuild the wild tables (input hash).
+  `best_grind` visits areas by an exact floor (1 turn per fight, no heal trips) and stops
+  when none can win; keep that bound true if the time model changes.
 - **The build checkpoints per step** (`data/.ckpt/<v>.<n>.<step>`). `./build.sh --resume`
   continues after the last finished step; a plain `./build.sh` starts fresh. Resume
   only when no code a finished step depends on has changed since.

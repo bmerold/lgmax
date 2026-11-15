@@ -108,8 +108,9 @@ Python 3.10+, no third-party packages. `build.sh` runs the whole pipeline and fi
 no server needed. The per-starter solves run in parallel (one process each) and the build pins
 `PYTHONHASHSEED=0`, so it's byte-reproducible. The map-geometry TSP skips with
 `LGMAX_REUSE_ROUTE=1` (set it only when `tour.py`/`world.py`/routing inputs are unchanged). The
-grind simulator (`training.py`) is **opt-in**: a regular build reuses the last per-version
-snapshot (`data/training_<v>.json`) and it re-simulates only with `LGMAX_TRAINING=1`.
+grind simulator (`training.py`) runs once for both versions from the wild matchup tables,
+and both it and the tables skip themselves when their inputs are unchanged
+(`LGMAX_TRAINING=1` forces a re-run).
 
 The build checkpoints after every step (`data/.ckpt/`). Stop it any way you like and
 `./build.sh --resume` re-runs only the interrupted step and what follows; a plain `./build.sh`
@@ -139,7 +140,9 @@ amended commit so the page never piles up in history).
 | `economy.py` | prize-money income by stage vs the run's purchases and their affordability |
 | `world.py` | the game as one walkable graph: every tile, ledge, spin floor, warp, ferry and elevator, stage-gated |
 | `tour.py` | the completionist route: a gated travelling-salesman pass that collects every item, fights every trainer, catches every new species |
-| `training.py` | the grind calculator: fastest wild spot per species per level, real-time-modelled, survival-gated, in-journey and post-game |
+| `wild_matchups.py` | every fight against a wild Pokémon, version-free (with and without badge boosts) |
+| `grind_space.py` | the per-area grind sweep rebuilt from the wild tables |
+| `training.py` | the grind calculator: fastest wild spot per species per level, real-time-modelled, survival-gated, in-journey and post-game; one pass for both versions |
 | `render_maps.py` | renders each section's maps to PNG from the decomp's tilesets/layouts, and pins every trainer and interacted NPC to the tile its object event stands on |
 | `sections.py` | two-pass per-section party optimizer + choice evaluation |
 | `compact.py` | array-encoded payload (~25 MB → ~5 MB) |
@@ -170,6 +173,22 @@ not separate simulations.
 python3 matchups.py                 # build data/matchups.bin.gz (~90 s, all cores)
 python3 mq.py validate              # the table reproduces the simulator, cell for cell
 python3 mq.py solo rattata --version lg   # min level for one line to clear each stage
+```
+
+The wild half (`wild_matchups.py`) does the same for every wild slot in both versions: each
+species × level × move against each wild Pokémon at the level the grind simulator fights it,
+and its moves back. A wild foe has no story stage, so each entry stores the damage with and
+without the badge boost, and the query picks by the run's badges and the move's category.
+`grind_space.py` rebuilds the grind simulator's per-area sweep from it, and `training.py`
+prices both versions in one pass from these tables (a version only filters which areas
+exist, when each species can be held and which are trades) (checking a sample against the engine
+first). It also skips any area whose floor (every fight one turn, no Center trips) can't
+beat the best found so far, which keeps the same winner. Together these turn the grind
+simulation from hours into minutes.
+
+```bash
+python3 wild_matchups.py            # build data/wild_matchups.bin.gz (~100 s, all cores)
+python3 grind_space.py validate     # the table sweep == optimize._weighted_sweep
 ```
 
 ## Some things the ROM settled

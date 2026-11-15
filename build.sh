@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Full pipeline: decomp -> analysis -> a single self-contained page.
-# Takes 6-8 minutes. Run it detached if your shell has a timeout.
+# Takes 10-15 minutes (less when the wild tables and grind are unchanged). Run it detached if your shell has a timeout.
 #
 #   ./build.sh            fresh build (clears checkpoints, runs every step)
 #   ./build.sh --resume   pick up after the last step that finished (LGMAX_RESUME=1 too)
-#   LGMAX_TRAINING=1 ./build.sh   also re-run the grind simulator (training.py)
+#   LGMAX_TRAINING=1 ./build.sh   force the grind simulator (training.py) to re-run
 #
 # Pausing: stop the build any way you like (Ctrl-C, kill). Every step writes a
 # checkpoint when it finishes, so `--resume` skips straight to the step that was
@@ -69,23 +69,22 @@ route_step() {   # tour.py is the slow stage; LGMAX_REUSE_ROUTE=1 reuses the las
   fi
 }
 
-# The grind simulator (training.py) is OPT-IN: it runs only with LGMAX_TRAINING=1.
-# Its inputs are species/exp/encounter data, not the route or the section solve,
-# and it is the slowest stage, so a regular build reuses the last per-version
-# snapshot (data/training_<v>.json). The two versions share data/training.json,
-# so the snapshot is restored before the downstream stages read it.
-training_step() {
+# The grind simulator (training.py) runs ONCE for both versions, before the
+# per-version loop: its fights come from the version-free wild matchup tables
+# (wild_matchups.py), and a version is only a filter (which areas exist, when a
+# species can first be held, which are trades). Both steps skip themselves when
+# their inputs are unchanged; LGMAX_TRAINING=1 forces the grind to re-run.
+# sections.py prices training from data/training_<v>.json, so this comes first.
+training_all() {
   if [ -n "${LGMAX_TRAINING:-}" ]; then
-    [ -f "data/training_${V}.json" ] && cp "data/training_${V}.json" data/training.json
     LGMAX_FORCE_TRAINING=1 python3 training.py
-    cp data/training.json "data/training_${V}.json"
-  elif [ -f "data/training_${V}.json" ]; then
-    cp "data/training_${V}.json" data/training.json
-    echo "reusing data/training_${V}.json (set LGMAX_TRAINING=1 to re-simulate)"
   else
-    echo "no data/training_${V}.json yet: run once with LGMAX_TRAINING=1" >&2
-    return 1
+    python3 training.py
   fi
+}
+# The downstream stages read data/training.json; restore this version's copy.
+training_step() {
+  cp "data/training_${V}.json" data/training.json
 }
 
 snapshot() { cp "$1" "$2"; }
@@ -97,13 +96,15 @@ snapshot() { cp "$1" "$2"; }
 # folds the two into one payload (shared map art kept single-copy). LGMAX_VERSIONS
 # overrides the set to build (e.g. "lg" to rebuild LeafGreen alone).
 : "${LGMAX_VERSIONS:=lg fr}"
+step "0.wild"     python3 wild_matchups.py   # wild matchup tables (version-free)
+step "0.training" training_all               # grind itineraries, both versions
 for V in $LGMAX_VERSIONS; do
   echo "===================== building $V ====================="
   export LGMAX_VERSION="$V"
   step "$V.1.graph"    python3 build_graph.py   # wild graph (filters the other version's tables)
   step "$V.2.route"    route_step               # route is version-specific (catch stops differ)
   step "$V.3.sections" python3 sections.py      # solves every section, battles in ROUTE order
-  step "$V.4.training" training_step            # grind calculator (opt-in, see above)
+  step "$V.4.training" training_step            # this version's grind itineraries
   step "$V.5.optimize" python3 optimize.py      # per-encounter rankings
   step "$V.6.economy"  python3 economy.py       # money: prize income vs Game Corner / stone costs
   step "$V.7.maps"     python3 render_maps.py   # map PNGs (incremental; this version's used maps)

@@ -210,13 +210,17 @@ def best_scalar(attacker, defender, pool, badges):
 
 # ------------------------------------------------------------------ sweep model
 _AVAIL_CACHE = {}
-def obey_mult(player, badges):
+def obey_mult(player, badges, avail=None):
     """Traded Pokemon above the badge obedience cap spend real turns ignoring
-    you (`IsMonDisobedient`). Nothing you caught yourself is affected."""
-    if not _AVAIL_CACHE:
-        _AVAIL_CACHE.update(P.full_availability())
-    rec = _AVAIL_CACHE.get(player["species"])
-    if not rec or not rec.get("source", "").startswith("In-game trade"):
+    you (`IsMonDisobedient`). Nothing you caught yourself is affected. `avail`
+    names another version's availability (training.py prices both in one
+    process); by default it is this process's version."""
+    if avail is None:
+        if not _AVAIL_CACHE:
+            _AVAIL_CACHE.update(P.full_availability())
+        avail = _AVAIL_CACHE
+    rec = avail.get(player["species"])
+    if not rec or not (rec.get("source") or "").startswith("In-game trade"):
         return 1.0
     odds = E.obedience_odds(player["level"], badges.get("count", 0))
     return 1.0 / odds if odds > 0 else 99.0
@@ -708,11 +712,13 @@ def analyze(enc, allow_trade=False):
         if dbl: out["double"] = dbl
     return out
 
-def _weighted_sweep(player, opps, pool, badges):
-    """Wild areas: one encounter at a time, weighted by how often each shows up."""
+def _weighted_sweep(player, opps, pool, badges, obey=None):
+    """Wild areas: one encounter at a time, weighted by how often each shows up.
+    `obey` overrides the disobedience multiplier (training.py prices both
+    versions in one process, and which Pokemon are trades is version data)."""
     hp = player["stats"]["hp"]
     turns = 0.0; taken = 0.0; per = []
-    _ob = obey_mult(player, badges)
+    _ob = obey if obey is not None else obey_mult(player, badges)
     for opp0, weight in opps:
         pl, opp = E.with_entry_boosts(player, opp0)   # Intimidate at entry
         off = E.best_move(pl, opp, badges={"atk": badges["atk"], "spatk": badges["spatk"]},

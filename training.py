@@ -265,7 +265,19 @@ def _wild_areas(encounters, stage):
             and e.get("stage", 99) <= stage and not _ungrindable(e)]
 
 
+_OPPS_CACHE = {}
 def _area_opponents(node):
+    """The area's wild slots and the XP one KO yields, computed once per area
+    (they depend on nothing but the encounter table). Keyed by the node OBJECT,
+    not its id string: the two versions give one map different slots. The node
+    is held in the cache so its id() can't be reused."""
+    hit = _OPPS_CACHE.get(id(node))
+    if hit is None or hit[0] is not node:
+        hit = _OPPS_CACHE[id(node)] = (node, _area_opponents_uncached(node))
+    return hit[1]
+
+
+def _area_opponents_uncached(node):
     """The wild slots as (mon, slot-chance) plus the chance-weighted XP one KO
     yields -- both averaged over the encounter table so the grind ratio is
     scale-free. Returns (opps, xp_per) or ([], 0) if the area has no fightable
@@ -281,7 +293,36 @@ def _area_opponents(node):
     return opps, xp_per
 
 
-def _alt_grind_moves(player, opps, pool, badges):
+# The fights come from the wild matchup tables (wild_matchups.py) when main()
+# finds them: the same numbers optimize._weighted_sweep computes, as lookups
+# (`grind_space.py validate` checks the two agree). Without the tables, or with
+# LGMAX_GRIND_ENGINE=1, every fight is simulated by the engine, as before.
+_WILD = None
+
+
+def _sweep(player, node, opps, pool, badges, obey):
+    """One wild area's weighted sweep, from the tables or the engine."""
+    if _WILD is None:
+        return O._weighted_sweep(player, opps, pool, badges, obey)
+    return _WILD.sweep(_WILD.sp_index[player["species"]], player["level"],
+                       _WILD.opps_of(node), pool, badges, obey)
+
+
+def _move_rate(player, ref, node, ref_i, mv, badges):
+    """best_move's ranking key for one move against the area's likeliest slot
+    (expected damage per turn spent), or None when the move does nothing."""
+    ab = {"atk": badges["atk"], "spatk": badges["spatk"]}
+    if _WILD is not None:
+        fi = _WILD.opps_of(node)[ref_i][0]
+        got = _WILD.offense(_WILD.sp_index[player["species"]], player["level"], mv, fi, ab)
+        return got[0] if got else None
+    p = E.move_profile(player, ref, mv, ab)
+    if not p or p.get("immune"):
+        return None
+    return p["avgPerTurn"] / p.get("turnsPerUse", 1.0)
+
+
+def _alt_grind_moves(player, opps, pool, badges, node=None):
     """Higher-PP attacking moves worth trying as a single-move grind set: the
     top-N damaging moves in the pool plus the one with the most PP, ranked
     against the likeliest wild slot. PP is engine.MOVES[m]["pp"]; damage-per-turn
@@ -290,17 +331,17 @@ def _alt_grind_moves(player, opps, pool, badges):
     (damage desc, then const) so the byte-reproducible build stays stable."""
     if not opps:
         return []
-    ref0, _ = max(opps, key=lambda ow: ow[1])   # the slot you meet most often
-    pl, ref = E.with_entry_boosts(player, ref0)
-    ab = {"atk": badges["atk"], "spatk": badges["spatk"]}
+    # the slot you meet most often (the first, on a tie, as max() picks it)
+    ref_i = max(range(len(opps)), key=lambda i: opps[i][1])
+    # the tables carry entry abilities already; the engine needs them applied
+    pl, ref = (player, None) if _WILD is not None else E.with_entry_boosts(player, opps[ref_i][0])
     scored = []
     for mv in pool:
         if mv not in E.MOVES:
             continue
-        p = E.move_profile(pl, ref, mv, ab)
-        if not p or p.get("immune") or p.get("avgPerTurn", 0) <= 0:
+        rate = _move_rate(pl, ref, node, ref_i, mv, badges)
+        if rate is None or rate <= 0:
             continue
-        rate = p["avgPerTurn"] / p.get("turnsPerUse", 1.0)
         scored.append((rate, E.MOVES[mv]["pp"], mv))
     if not scored:
         return []
@@ -361,7 +402,7 @@ def _score_sweep(res, species, level, xp_per, node, stage):
             "_pp_bound": sustain_pp < sustain_hp, "_heal_trips": heal_trips}
 
 
-def area_grind(species, level, stage, pool, node, badges, pp_aware=True):
+def area_grind(species, level, stage, pool, node, badges, pp_aware=True, obey=None):
     """Least EFFECTIVE grind time to gain one full level in one wild area, or None
     if this mon can't clear its encounters. The max-damage move set is the
     baseline; when it's PP-limited AND pays a Center round-trip, also score a few
@@ -374,7 +415,9 @@ def area_grind(species, level, stage, pool, node, badges, pp_aware=True):
     if not opps or xp_per <= 0:
         return None
     player = E.make_mon(species, level)
-    base = O._weighted_sweep(player, opps, pool, badges)
+    if obey is None:
+        obey = O.obey_mult(player, badges)
+    base = _sweep(player, node, opps, pool, badges, obey)
     if base is None or not base.get("turns"):
         return None
     # Quick reject: if even the max-damage set (fewest turns, least damage taken)
@@ -383,8 +426,8 @@ def area_grind(species, level, stage, pool, node, badges, pp_aware=True):
         return None
     best = _score_sweep(base, species, level, xp_per, node, stage)
     if pp_aware and best["_heal_trips"] > 0 and best["_pp_bound"]:
-        for mv in _alt_grind_moves(player, opps, pool, badges):
-            alt = O._weighted_sweep(player, opps, [mv], badges)
+        for mv in _alt_grind_moves(player, opps, pool, badges, node):
+            alt = _sweep(player, node, opps, [mv], badges, obey)
             if alt is None or not alt.get("turns"):
                 continue
             cand = _score_sweep(alt, species, level, xp_per, node, stage)
@@ -401,20 +444,71 @@ def area_grind(species, level, stage, pool, node, badges, pp_aware=True):
     return best
 
 
-def best_grind(species, level, stage, toggle, encounters, badges):
+# Float headroom on the floor test, so an area whose effective time rounds a
+# hair under its floor is still visited (the skip must never change the winner).
+FLOOR_SLACK = 1e-9
+
+
+def best_grind(species, level, stage, toggle, encounters, badges, obey=None):
     """The reachable wild area with the least EFFECTIVE grind time (fights plus
     heal round-trips), or None. Ranking by effective time is what folds
     sustainability into the recommendation."""
+    return best_grind_versions(species, level, stage, toggle, {"_": encounters},
+                               badges, obey)["_"]
+
+
+def best_grind_versions(species, level, stage, toggle, area_lists, badges, obey=None):
+    """best_grind for several versions at once: {version: area list} -> {version:
+    result or None}. Each version keeps its own winner (least effective time, the
+    earliest area in ITS list on a tie), but an area both versions share -- the
+    same node object, i.e. the same slots -- is fought once. The version is only
+    a filter over which areas exist."""
+    out = {v: None for v in area_lists}
     pool = build_pool(species, level, stage, toggle)
     if not pool:
-        return None
-    best = None
-    for node in _wild_areas(encounters, stage):
-        got = area_grind(species, level, stage, pool, node, badges)
-        if got and (best is None or got["eff_sec"] < best["eff_sec"]):
-            best = got
-    if not best:
-        return None
+        return out
+    # Visit the areas cheapest-floor first and stop once no remaining area can
+    # win: an area's effective time is at least its fights at ONE turn per slot
+    # and no heal trips (every KO takes >= 1 turn; battles per level is XP alone).
+    # A battle's turns are the chance-weighted sum over the slots, and the
+    # rounded chances need not add to exactly 1, so the floor uses their real
+    # sum. The winner is the same as scanning every area in order, so this only
+    # skips hopeless areas.
+    xp_needed = exp_to_next(E.SPECIES[species].get("growthRate", "MEDIUM_FAST"), level)
+    where = {}                                 # id(node) -> [node, {version: index}]
+    for v, areas in area_lists.items():
+        for idx, node in enumerate(_wild_areas(areas, stage)):
+            where.setdefault(id(node), [node, {}])[1][v] = idx
+    cands = []
+    for node, idxs in where.values():
+        opps, xp_per = _area_opponents(node)
+        if xp_per <= 0:
+            continue
+        min_turns = sum(w for _m, w in opps)
+        floor = xp_needed / xp_per * (find_seconds(node) + min_turns * SEC_PER_TURN
+                                      + SEC_PER_FIGHT)
+        cands.append((floor, min(idxs.values()), node, idxs))
+    cands.sort(key=lambda c: (c[0], c[1]))
+    best = {}                                  # version -> (eff_sec, index, result)
+    for floor, _i, node, idxs in cands:
+        if len(best) == len(area_lists) and \
+                floor > max(b[0] for b in best.values()) * (1 + FLOOR_SLACK):
+            break
+        if all(v in best and floor > best[v][0] * (1 + FLOOR_SLACK) for v in idxs):
+            continue                           # can't win for any version that has it
+        got = area_grind(species, level, stage, pool, node, badges, obey=obey)
+        if not got:
+            continue
+        for v, idx in idxs.items():
+            if v not in best or (got["eff_sec"], idx) < best[v][:2]:
+                best[v] = (got["eff_sec"], idx, got)
+    for v, (_e, _i, got) in best.items():
+        out[v] = _grind_result(got)
+    return out
+
+
+def _grind_result(best):
+    """The emitted fields of one area's grind."""
     n = best["node"]
     return {
         "area": n.get("location") or n.get("name"), "method": n.get("method"),
@@ -463,12 +557,15 @@ def stage_for_level(level):
     return best
 
 
-# Set before forking so every worker inherits it (fork start method); the grind
-# math is pure and keyed by (attacker, defender), so workers never contend.
-_ENCOUNTERS = None
-# species const -> full_availability record; the earliest stage the run could hold
-# the species (set in main() before the fork, like _ENCOUNTERS).
-_AVAIL = None
+# One pass prices BOTH versions. The fights are version-free (the wild matchup
+# tables); a version is a filter: which areas exist (its encounter tables), when
+# each species can first be held, and which are in-game trades (obedience). Every
+# other grind input -- story stages, badges, HM/rod gates, TM timing -- is the
+# same in FireRed and LeafGreen, so it is shared. Set in main() before forking.
+VERSIONS = ("lg", "fr")
+# version -> {"areas": [wild nodes, encounters.json order], "avail": {species:
+# {"stage", "source"}}}
+_VERS = None
 
 # The two itineraries we build per species (the app shows one at a time):
 #   journey  -- while playing through: assume your progress tracks this mon's level
@@ -482,34 +579,53 @@ _AVAIL = None
 GRIND_MODES = ("journey", "postgame")
 
 
-def _first_stage(species):
+def _first_stage(species, avail):
     """The earliest stage the run could hold this species (full_availability); the
     journey itinerary is floored here so an underleveled late-catch (Super-Rod
     Staryu, stage 19) isn't sent to grind somewhere it couldn't have been yet."""
-    global _AVAIL
-    if _AVAIL is None:
-        _AVAIL = P.full_availability()
-    rec = _AVAIL.get(species)
+    rec = avail.get(species)
     return rec["stage"] if rec else 0
 
 
-def _grind_stage(species, level, mode):
+def _grind_stage(species, level, mode, avail):
     """The progression stage that gates areas/badges/TMs for this mode at a level."""
     if mode == "postgame":
         return P.MAX_STAGE
-    return max(stage_for_level(level), _first_stage(species))
+    return max(stage_for_level(level), _first_stage(species, avail))
 
 
-def _clamped(species, level, mode):
-    """All three TM policies at one level for one mode, clamped so more move freedom
-    never yields a slower spot (the engine can over-pick a recharge move like Hyper
-    Beam; a broader pool can always fall back to a narrower moveset)."""
-    stage = _grind_stage(species, level, mode)
-    badges = O.badges_for(stage)
-    r = {tg: best_grind(species, level, stage, tg, _ENCOUNTERS, badges) for tg in TOGGLES}
+def _obey(species, level, badges, avail):
+    """optimize.obey_mult against one version's availability."""
+    return O.obey_mult({"species": species, "level": level}, badges, avail)
+
+
+def _clamp(r):
+    """More move freedom never yields a slower spot (the engine can over-pick a
+    recharge move like Hyper Beam; a broader pool can always fall back to a
+    narrower moveset)."""
     r["renew"] = _faster(r["none"], r["renew"])
     r["any"] = _faster(r["renew"], r["any"])
     return r
+
+
+def _clamped_versions(species, level, mode, versions):
+    """All three TM policies at one level for one mode, per version. Versions that
+    agree on the grind stage and obedience share one search over their areas."""
+    groups = {}
+    for v in versions:
+        avail = _VERS[v]["avail"]
+        stage = _grind_stage(species, level, mode, avail)
+        ob = _obey(species, level, O.badges_for(stage), avail)
+        groups.setdefault((stage, ob), []).append(v)
+    out = {}
+    for (stage, ob), vs in sorted(groups.items()):
+        badges = O.badges_for(stage)
+        lists = {v: _VERS[v]["areas"] for v in vs}
+        per_tg = {tg: best_grind_versions(species, level, stage, tg, lists, badges, ob)
+                  for tg in TOGGLES}
+        for v in vs:
+            out[v] = _clamp({tg: per_tg[tg][v] for tg in TOGGLES})
+    return out
 
 
 def _segments(per):
@@ -551,104 +667,220 @@ def _segments(per):
 
 
 def species_itinerary(species):
-    """Both leveling itineraries for one species -> {mode: {toggle: [segment...]}}.
-    The journey and post-game modes differ only in how far the run is assumed to
-    have progressed (see GRIND_MODES)."""
-    return {mode: _segments({lv: _clamped(species, lv, mode) for lv in ITIN_LEVELS})
-            for mode in GRIND_MODES}
+    """Both leveling itineraries for one species in every version that has it ->
+    {version: {mode: {toggle: [segment...]}}}. The journey and post-game modes
+    differ only in how far the run is assumed to have progressed (GRIND_MODES)."""
+    versions = [v for v in VERSIONS if species in _VERS[v]["avail"]]
+    per = {v: {mode: {} for mode in GRIND_MODES} for v in versions}
+    for lv in ITIN_LEVELS:
+        if _WILD is not None:
+            _WILD.clear()     # its memo is per player level
+        for mode in GRIND_MODES:
+            for v, r in _clamped_versions(species, lv, mode, versions).items():
+                per[v][mode][lv] = r
+    return {v: {mode: _segments(per[v][mode]) for mode in GRIND_MODES} for v in versions}
 
 
 def _worker(species_list):
     return [(sp, species_itinerary(sp)) for sp in species_list]
 
 
+def _all_areas():
+    """Every distinct wild node across the versions, each once."""
+    seen, out = set(), []
+    for v in VERSIONS:
+        for node in _VERS[v]["areas"]:
+            if id(node) not in seen:
+                seen.add(id(node)); out.append(node)
+    return out
+
+
 def _prefill_heals():
     """Compute each wild area's nearest-Center round-trip once, before forking, so
     the workers inherit a warm cache instead of each rebuilding the world graph."""
-    for node in _wild_areas(_ENCOUNTERS, P.MAX_STAGE):
+    for node in _wild_areas(_all_areas(), P.MAX_STAGE):
         folder = _folder_of(node)
         if folder and folder not in _HEAL_CACHE:
             heal_roundtrip(folder, node.get("stage", 0))
+
+
+# A version's grind inputs, from a clean interpreter (the engine binds the
+# version at import): its wild nodes exactly as build_graph writes them to
+# encounters.json (deduplicated by id, sorted by stage then name -- the trainer
+# nodes interleaved there don't change the wild nodes' relative order) and its
+# availability.
+_VERSION_CODE = """
+import json, build_graph as G, progression as P
+seen, wild = set(), []
+for e in G.build_wild_encounters():
+    if e["id"] not in seen:
+        seen.add(e["id"]); wild.append(e)
+wild.sort(key=lambda e: (e["stage"], e["name"]))
+av = {k: {"stage": r["stage"], "source": r.get("source")} for k, r in P.full_availability().items()}
+items = {k: {"stage": v[0], "where": v[1]} for k, v in G.item_stage_table().items()}
+print(json.dumps({"areas": wild, "avail": av, "items": items}))
+"""
+
+
+def _version_inputs():
+    import subprocess, sys
+    raw = {}
+    for v in VERSIONS:
+        env = dict(_os.environ, LGMAX_VERSION=v, PYTHONHASHSEED="0")
+        res = subprocess.run([sys.executable, "-c", _VERSION_CODE], env=env, check=True,
+                             capture_output=True, text=True,
+                             cwd=_os.path.dirname(_os.path.abspath(__file__)))
+        raw[v] = res.stdout.strip().splitlines()[-1]
+    return raw
+
+
+def _share_nodes(raw):
+    """Parse each version's inputs, making an area both versions list with the
+    identical slots ONE node object -- best_grind_versions fights it once."""
+    canon, out = {}, {}
+    for v, text in raw.items():
+        d = _json.loads(text)
+        areas = []
+        for node in d["areas"]:
+            key = _json.dumps(node, sort_keys=True)
+            areas.append(canon.setdefault(key, node))
+        out[v] = {"areas": areas, "avail": d["avail"], "items": d["items"]}
+    return out
+
+
+def _shared_item_stages():
+    """TM timing, which build_pool reads: identical in both versions (the same
+    map scripts give the same TMs at the same story points), so one table serves
+    the shared pass. Taken from the version inputs rather than
+    data/itemStages.json, which build_graph writes only later in a fresh build."""
+    first = _VERS[VERSIONS[0]]["items"]
+    if any(_VERS[v]["items"] != first for v in VERSIONS):
+        raise SystemExit("training: TM timing differs between versions -- the shared "
+                         "grind pass assumes it doesn't")
+    return first
 
 
 # Build avoidance: the grind itineraries are the heaviest stage, but they only
 # depend on the wild tables, the engine/XP data, this grind code, and the pinned
 # decomp (world.py walks its maps for the heal round-trips) -- NOT on the route,
 # the party solve, the payload packer, the app or the guards. So hash exactly those
-# inputs; if data/training.json carries the same hash, reuse it and skip the rebuild.
+# inputs; if every data/training_<v>.json carries the same hash, reuse them.
 # LGMAX_FORCE_TRAINING=1 forces a fresh run.
-def _inputs_hash():
+def _inputs_hash(raw):
     import hashlib, subprocess
     h = hashlib.sha256()
     here = _os.path.dirname(_os.path.abspath(__file__))
+    # every local module the grind imports (tour.py's Center doors drive the heal
+    # round-trips; optimize pulls in trainer_items/tactics). sections.py,
+    # training_cost.py and measure.py are left out: they read this stage's output
+    # (mq imports sections only for its own validate), they don't feed it.
     for mod in ("training.py", "optimize.py", "engine.py", "abilities.py",
+                "grind_space.py", "wild_matchups.py", "mq.py", "matchups.py",
                 "progression.py", "build_graph.py", "constraints.py", "hms.py",
-                "tms.py", "world.py", "walking.py"):
+                "tms.py", "world.py", "walking.py", "tour.py", "boulders.py",
+                "route_order.py", "trainer_items.py", "tactics.py"):
         p = _os.path.join(here, mod)
         if _os.path.exists(p):
             h.update(mod.encode()); h.update(open(p, "rb").read())
-    for d in ("encounters.json", "species.json", "moves.json", "levelUpLearnsets.json",
-              "tmhmLearnsets.json", "tmhmMoves.json", "tutorLearnsets.json",
-              "evolutions.json", "typeChart.json", "expTables.json", "items.json",
-              "itemStages.json"):
+    # extract.py's outputs only: build_graph's (encounters, item stages) are in the
+    # version inputs below, and they don't exist yet when a fresh build gets here
+    for d in ("species.json", "moves.json", "levelUpLearnsets.json",
+              "tmhmLearnsets.json", "tutorLearnsets.json", "wild.json",
+              "evolutions.json", "typeChart.json", "expTables.json", "items.json"):
         p = f"{_OUT}/{d}"
         if _os.path.exists(p):
             h.update(d.encode()); h.update(open(p, "rb").read())
     # world.py reads the decomp maps directly for the Center round-trips; pin them
     # cheaply by the decomp's git revision rather than hashing every blockdata file.
     try:
-        rev = subprocess.run(["git", "-C", _os.environ.get("LGMAX_POKEFIRERED", ""),
+        rev = subprocess.run(["git", "-C", E.REPO,
                               "rev-parse", "HEAD"], capture_output=True, text=True,
                              timeout=5).stdout.strip()
         h.update(rev.encode())
     except Exception:
         pass
-    # the game version changes the catchable pool (and thus every grind spot)
-    h.update(_os.environ.get("LGMAX_VERSION", "lg").encode())
+    # each version's wild areas and availability (its catchable pool and trades)
+    for v in VERSIONS:
+        h.update(v.encode()); h.update(raw[v].encode())
     h.update(repr((TOGGLES, ITIN_LEVELS[0], ITIN_LEVELS[-1], GRIND_MODES)).encode())
     return h.hexdigest()
 
 
+def _load_wild():
+    """The wild matchup tables, checked against the engine before they are
+    trusted (a table built before an engine change would silently grind on the
+    old numbers). None -> simulate every fight with the engine."""
+    if _os.environ.get("LGMAX_GRIND_ENGINE") or not _os.path.exists(f"{_OUT}/wild_matchups.bin.gz"):
+        print("training: simulating every wild fight with the engine")
+        return None
+    import grind_space as GS, wild_matchups as W, sys
+    if not W.up_to_date():
+        raise SystemExit("training: the wild matchup tables are out of date -- "
+                         "rebuild them (python3 wild_matchups.py)")
+    ws = GS.WildSpace()
+    # validate with THIS module (run as __main__, `import training` would load a
+    # second copy without the shared TM timing main() set)
+    if not GS.validate(WILD_CHECK_SAMPLES, ws=ws, areas=_all_areas(),
+                       grind=sys.modules[__name__]):
+        raise SystemExit("training: the wild matchup tables disagree with the engine -- "
+                         "rebuild them (python3 wild_matchups.py)")
+    print("training: wild fights from the matchup tables (data/wild_matchups.bin.gz)")
+    ws.clear()
+    return ws
+
+
+# Random area sweeps re-checked against the engine before the tables are used.
+WILD_CHECK_SAMPLES = 300
+
+
+def _out_path(v):
+    return f"{_OUT}/training_{v}.json"
+
+
 def main():
-    global _ENCOUNTERS, _AVAIL
+    global _VERS, _WILD, _ITEM_STAGE
     import multiprocessing as _mp
     import concurrent.futures as _cf
-    want = _inputs_hash()
-    out_path = f"{_OUT}/training.json"
-    if not _os.environ.get("LGMAX_FORCE_TRAINING") and _os.path.exists(out_path):
+    raw = _version_inputs()
+    want = _inputs_hash(raw)
+    if not _os.environ.get("LGMAX_FORCE_TRAINING"):
         try:
-            if _json.load(open(out_path)).get("inputsHash") == want:
-                print("training: inputs unchanged, reusing data/training.json "
+            if all(_json.load(open(_out_path(v))).get("inputsHash") == want for v in VERSIONS):
+                print("training: inputs unchanged, reusing data/training_<v>.json "
                       "(set LGMAX_FORCE_TRAINING=1 to rebuild)")
                 return
         except Exception:
             pass
-    _ENCOUNTERS = _json.load(open(f"{_OUT}/encounters.json"))
+    _VERS = _share_nodes(raw)
+    _ITEM_STAGE = _shared_item_stages()
+    _WILD = _load_wild()
     _prefill_heals()
-    _AVAIL = P.full_availability()   # shared to the fork workers; floors grind stage
-    species = sorted(sp for sp in _AVAIL if sp in E.SPECIES)
+    species = sorted({sp for v in VERSIONS for sp in _VERS[v]["avail"] if sp in E.SPECIES})
     workers = int(_os.environ.get("LGMAX_WORKERS") or (_os.cpu_count() or 4))
     workers = max(1, min(workers, len(species)))
-    # fork so the loaded engine/encounter tables are shared; one species per task
+    # fork so the loaded tables and areas are shared; several species per task
     n_chunks = workers * 4
     chunks = [species[i::n_chunks] for i in range(n_chunks)]
     chunks = [c for c in chunks if c]
     ctx = _mp.get_context("fork")
     with _cf.ProcessPoolExecutor(max_workers=workers, mp_context=ctx) as ex:
         parts = list(ex.map(_worker, chunks))
-    itin = {}
+    itin = {v: {} for v in VERSIONS}
     for part in parts:
-        for sp, tg_segs in part:
-            itin[E.SPECIES[sp]["name"]] = tg_segs
-    # range is the levels the guide covers: from the first grind level to the cap
-    # you can reach (the last grind level, 99, takes you to 100)
-    out = {"itineraries": itin, "range": [ITIN_LEVELS[0], ITIN_LEVELS[-1] + 1],
-           "inputsHash": want}
-    with open(f"{_OUT}/training.json", "w") as f:
-        _json.dump(out, f, separators=(",", ":"))
-    n_segs = sum(len(segs) for sp in itin.values()
-                 for modes in sp.values() for segs in modes.values())
-    print(f"training: {len(itin)} species x {len(GRIND_MODES)} modes, {n_segs} itinerary segments")
+        for sp, by_v in sorted(part):
+            for v, modes in by_v.items():
+                itin[v][E.SPECIES[sp]["name"]] = modes
+    for v in VERSIONS:
+        # range is the levels the guide covers: from the first grind level to the
+        # cap you can reach (the last grind level, 99, takes you to 100)
+        out = {"itineraries": dict(sorted(itin[v].items())),
+               "range": [ITIN_LEVELS[0], ITIN_LEVELS[-1] + 1], "inputsHash": want}
+        with open(_out_path(v), "w") as f:
+            _json.dump(out, f, separators=(",", ":"))
+        n_segs = sum(len(segs) for sp in itin[v].values()
+                     for modes in sp.values() for segs in modes.values())
+        print(f"training {v}: {len(itin[v])} species x {len(GRIND_MODES)} modes, "
+              f"{n_segs} itinerary segments")
 
 
 if __name__ == "__main__":
