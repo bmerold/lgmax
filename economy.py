@@ -20,6 +20,7 @@ stage the run can afford it — the Game Corner is the one real money sink, so
 import json, os, re
 import engine as E
 import progression as P
+P.use_evo_timing()     # the evolution-timing plan sections.py solved under
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 COIN_YEN = 20                       # Game Corner counter: 50 coins per ¥1000

@@ -10,7 +10,7 @@ the working contract for changing the code.
    trainer parties, encounter tables, map geometry, item scripts, mechanics — all parsed from
    `$LGMAX_POKEFIRERED` (default `~/pokefirered`). If the ROM disagrees with received wisdom, the
    ROM wins, and a comment should cite the source file (e.g. `src/data/…` or a map's `scripts.inc`).
-2. **`verify.py` is the safety net — it must print all OKs after every rebuild.** It encodes 87
+2. **`verify.py` is the safety net — it must print all OKs after every rebuild.** It encodes 90+
    executable invariants (route coverage/continuity, no illegal party, sight-line/aggro legality,
    Fly/Teleport/Dig legality,
    move/TM/HM legality, Moon-Stone accounting, prize-money/affordability, Teleport-carrier
@@ -23,7 +23,7 @@ the working contract for changing the code.
 
 ## Pipeline order (build.sh)
 
-`extract.py` → (once, both versions) `wild_matchups.py` → `training.py` → per version: `build_graph.py` → `tour.py` → `sections.py` → `optimize.py` → `economy.py` → `render_maps.py` →
+`extract.py` → (once, both versions) `wild_matchups.py` → `training.py` → per version: `build_graph.py` → `tour.py` → `evo_timing.py` → `sections.py` → `league_sets.py` → `optimize.py` → `economy.py` → `render_maps.py` →
 `compact.py` → inject into `app_template.html` → `verify.py`. Each stage reads the previous stage's
 JSON in `data/`. `tour.py` runs before `sections.py`, so `sections.py` may read `data/route.json`.
 
@@ -85,6 +85,20 @@ JSON in `data/`. `tour.py` runs before `sections.py`, so `sections.py` may read 
   stay a veto (pricing them in turns caused wipes); a stage that wipes is re-solved ranking by
   battles alone (`_solve_run`'s fallback). Pass 1 always runs the fewest-turns rule, so the
   one-time choices (fossil, Eevee, TM owners) never drift with the party objective.
+- **Two approaches, one curve each.** The guide ships the maximalist solve (every section's
+  best party, on the shared curve) and the **core approach** (`core.py`, sections.py pass 3,
+  `sections.json["core"]["options"]`, payload `coreOptions`, the app's Approach picker + "Pick
+  your six"). Each run offers up to `CORE_OPTIONS` distinct sixes that clear the League, picked
+  backwards from it with every route HM learnable inside each and no legendary bird; each makes
+  its own Eevee/fossil/Dojo choice (`core_commitments`) and is solved in full, and the player
+  picks one (app `approach` = `"max"` or `"core:<i>"`, synced as an opaque string). A core is seated in every section once held (`solve_section(core=…)` — never pruned,
+  swapped, or evicted for an HM carrier; it gives up a move instead). Its levels come from
+  `core.CoreLedger` (trainer XP actually earned, pooled to the laggard), not the curve; a
+  section the six can't clear at that level gets the cheaper of a specialist or a grind, and
+  nothing else. Fly is required only once a core member can carry it. The user approved
+  "one curve per approach"; the maximalist curve stays shared across all its combinations.
+  `LGMAX_APPROACHES="max"` skips pass 3. The core guards live in verify.py
+  ("the core approach" block); core runs also pass every party guard as `core/<mode>/<starter>`.
 - **The matchup space is standalone (not in build.sh yet).** `matchups.py` tabulates every
   one-on-one fight (species × level × move vs every trainer Pokémon, plus the foe's four moves
   back) independent of version/starter/trades into `data/matchups.bin.gz` (~90 s). `mq.py`
@@ -101,13 +115,34 @@ JSON in `data/`. `tour.py` runs before `sections.py`, so `sections.py` may read 
   continues after the last finished step; a plain `./build.sh` starts fresh. Resume
   only when no code a finished step depends on has changed since.
 - **The sync bundle shape is a second cross-file contract.** `app_template.html`'s `syncBundle`
-  (`{v, done, play, starter, trading, dex, ts}`) and `sync/worker.js`'s `merge` must agree. The
+  (`{v, done, play, starter, trading, approach, dex, ts}`) and `sync/worker.js`'s `merge` must agree. The
   rules that keep two devices from clobbering each other: `done` is always **unioned**, `dex`
   (manual Dex overrides, `{species: bool}`) is a **per-key union with the newer `ts` winning a
-  conflict**, and `play`/`starter`/`trading` are taken from the **newer `ts`**. Change one side and
+  conflict**, and `play`/`starter`/`trading`/`approach` are taken from the **newer `ts`**. Change one side and
   change the other — and adding a field means redeploying the Worker (`cd sync && npx wrangler
   deploy`), or the server drops it. `syncTouch` is gated by `syncReady`/`syncApplying` so boot and
   merge-driven re-renders don't bump the clock — don't remove those guards.
+
+- **Evolution timing is opt-in per stage.** `evo_timing.py` decides which evolutions to hold
+  back for a pre-evolution move (weighing the weaker form's boss fights against the move) and
+  writes `data/evo_timing_<v>.json`; `progression.use_evo_timing()` adopts it. `sections.py`,
+  `economy.py`, `compact.py` and `verify.py` call it; the route and the grind simulator must not
+  (they run before the plan exists). Read LEVEL evolutions through `P.evolve_level`, never the raw
+  `param`, or a held line evolves early. A held evolution is the line's source even where the
+  evolved form is catchable (`full_availability`).
+- **Moves a Pokémon learns itself are never TM-gated.** `optimize.own_moves` (level-up as it
+  actually levelled, plus tutors) bypasses the one-copy TM owner rule; an Alakazam's level-up
+  Psychic must not depend on who holds TM29. A pre-evolution learns its evolution-level moves
+  before evolving (`_levelup_pool`'s `in_battle`).
+- **Game Corner TMs are a store** (`tms.GAME_CORNER_STORE`): the prize room sets no flag, so
+  Thunderbolt, Ice Beam, Flamethrower, Shadow Ball and Iron Tail are unlimited from Celadon;
+  `economy.py` prices each copy.
+- **The League tab** (`league_sets.py`, ~20 min/version, cached on an inputs hash;
+  `LGMAX_FORCE_LEAGUE=1` reruns, `LGMAX_LEAGUE=0` skips) lists legal sixes that clear the Elite
+  Four: a generous 1v1 screen (best learnable move, pre-evolution moves, birds allowed, one-copy TMs
+  handed out once) then the full League sim raised until it clears. Payload `leagueSets` rows are
+  positional (`[names, clearLevel, faints, turns, screenLevel, tms, flags]`, see compact.py) and
+  read by index in `renderLeague`. It is League-only: a six there need not be route-viable.
 
 ## Quality workflow
 

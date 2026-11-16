@@ -315,7 +315,12 @@ def base_availability():
 # In FRLG a Kanto Pokémon whose evolution lands OUTSIDE the Kanto dex (#152+)
 # cannot evolve until Prof. Oak upgrades the Pokédex to National after the
 # Elite Four -- so Crobat, Blissey and the like are post-game.
-NATIONAL_DEX_STAGE = 32     # you have the National Dex once the League is beaten
+# The upgrade is scripted in Oak's lab after the Hall of Fame (data/maps/
+# PalletTown_ProfessorOaksLab/scripts.inc: special EnableNationalPokedex), and
+# src/evolution_scene.c cancels any evolution past SPECIES_MEW until then -- so
+# the first stage with it is the one AFTER the League (32), not the League itself:
+# at 32 a Golbat still fights the Elite Four as a Golbat.
+NATIONAL_DEX_STAGE = 33
 import re as _re
 def _national_dex():
     txt = open(f"{__import__('engine').REPO}/include/constants/pokedex.h").read()
@@ -329,9 +334,53 @@ def _national_dex():
     return out
 NAT_DEX = _national_dex()
 
+# ------------------------------------------------------------------ evolution timing
+# A Pokemon can be held back from evolving (cancel a level-up evolution with B;
+# simply don't use the stone or trade) to learn a move its pre-evolution gets
+# sooner -- Gastly learns Shadow Ball at L36, Haunter only at L45. evo_timing.py
+# decides, per version, which holds are worth their weaker stats and writes
+# data/evo_timing_<v>.json: {"<from>><to>": {"level": L, "move": MOVE_X, ...}}.
+# The plan applies only once a stage opts in with use_evo_timing(): the route and
+# the grind simulator run before it exists and must not read a stale one.
+EVO_DELAYS = {}
+
+def evo_timing_path():
+    import os as _os
+    here = _os.path.dirname(_os.path.abspath(__file__))
+    return _os.path.join(here, "data", f"evo_timing_{__import__('engine').VERSION}.json")
+
+def use_evo_timing(plan=None):
+    """Adopt the evolution-timing plan (the file evo_timing.py wrote, or `plan`)."""
+    import json as _json, os as _os
+    EVO_DELAYS.clear()
+    if plan is None:
+        path = evo_timing_path()
+        plan = _json.load(open(path)) if _os.path.exists(path) else {}
+    EVO_DELAYS.update(plan)
+    return dict(EVO_DELAYS)
+
+def evo_delay(frm, to):
+    """The level `frm` is held to before evolving into `to`, or None."""
+    d = EVO_DELAYS.get(f"{frm}>{to}")
+    return d["level"] if d else None
+
+def evolve_level(frm, to, param):
+    """The level a LEVEL evolution actually happens at under the timing plan."""
+    d = evo_delay(frm, to)
+    return max(param, d) if d and isinstance(param, int) else param
+
+def level_evolved(species, level, avail):
+    """True when `species` would already have levelled into its next form by
+    `level` (a LEVEL evolution, at the level the timing plan lets it happen,
+    into a form this version has): a form held at that level is not this one."""
+    return any(e.get("method") == "LEVEL" and isinstance(e.get("param"), int)
+               and evolve_level(species, e["to"], e["param"]) <= level and e["to"] in avail
+               for e in E.EVOS.get(species, []))
+
 def full_availability():
     """Propagate evolutions forward. Returns species -> record with the earliest
-    stage the player could actually have that species in hand."""
+    stage the player could actually have that species in hand (under the
+    evolution-timing plan, when one is in use)."""
     avail = base_availability()
     changed = True
     while changed:
@@ -348,7 +397,7 @@ def full_availability():
                 if method in ("LEVEL", "LEVEL_ATK_LT_DEF", "LEVEL_ATK_GT_DEF",
                               "LEVEL_ATK_EQ_DEF", "LEVEL_SILCOON", "LEVEL_CASCOON",
                               "LEVEL_NINJASK", "LEVEL_SHEDINJA"):
-                    need = param if isinstance(param, int) else 0
+                    need = evolve_level(src, tgt, param) if isinstance(param, int) else 0
                     stage = _stage_reaching_level(max(need, src_rec["stage"] and 0), need,
                                                   src_rec["stage"])
                     note = f"Evolve {E.SPECIES[src]['name']} at L{need}"
@@ -380,16 +429,35 @@ def full_availability():
                 else:
                     continue
                 if stage is None: continue
+                # a held-back evolution waits until the pre-evolution has learned
+                # the move it is held for (a stone/trade one needs the level too)
+                hold = EVO_DELAYS.get(f"{src}>{tgt}")
+                if hold and method != "LEVEL" and not method.startswith("LEVEL_"):
+                    st2 = _stage_reaching_level(None, hold["level"], src_rec["stage"])
+                    if st2 is None: continue
+                    stage = max(stage, st2)
+                if hold:
+                    mv = E.MOVES.get(hold["move"], {}).get("name", hold["move"])
+                    note = (f"Evolve {E.SPECIES[src]['name']} at L{hold['level']}, held back "
+                            f"until it learns {mv}" if method == "LEVEL"
+                            else f"{note} once it knows {mv} (L{hold['level']})")
                 # cross-generation evolutions wait for the National Dex
                 if NAT_DEX.get(tgt, 0) > 151:
                     stage = max(stage, NATIONAL_DEX_STAGE)
                     note = (note or f"Evolve {E.SPECIES[src]['name']}") + \
                            " — needs the National Dex (post-Elite Four)"
                 cur = avail.get(tgt)
-                if cur is None or stage < cur["stage"]:
+                # a held evolution is the line's source by plan, even where the
+                # evolved form could be caught sooner: a wild Haunter never has
+                # the Shadow Ball the held Gastly brings (evo_timing.py weighed it)
+                forced = hold and cur is not None and cur.get("holdTo") is None
+                if cur is None or stage < cur["stage"] or forced:
                     avail[tgt] = {"stage": stage, "source": note, "kind": "evolution",
                                   "from": src, "requiresTrade": requires_trade,
                                   "evoMethod": method, "evoParam": param}
+                    if hold:
+                        avail[tgt]["holdTo"] = hold["level"]
+                        avail[tgt]["holdMove"] = hold["move"]
                     changed = True
     for rec in avail.values():
         rec.setdefault("requiresTrade", False)

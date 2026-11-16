@@ -647,6 +647,8 @@ def _segments(per):
                 s["tplLo"] = min(s["tplLo"], v["turnsPerLevel"])
                 s["tplHi"] = max(s["tplHi"], v["turnsPerLevel"])
                 s["battles"] = max(s["battles"], v["battles"])
+                s["secLo"] = min(s["secLo"], round(v["effSec"]))
+                s["secHi"] = max(s["secHi"], round(v["effSec"]))
                 s["sustainLo"] = min(s["sustainLo"], v["sustain"])
                 s["sustainHi"] = max(s["sustainHi"], v["sustain"])
                 s["mons"] = v["mons"]           # breakdown at the top of the range
@@ -657,11 +659,14 @@ def _segments(per):
                              "method": v["method"], "move": v["move"],
                              "tplLo": v["turnsPerLevel"], "tplHi": v["turnsPerLevel"],
                              "battles": v["battles"], "sustainLo": v["sustain"],
+                             # real seconds per level: finding, fighting, heal trips
+                             "secLo": round(v["effSec"]), "secHi": round(v["effSec"]),
                              "sustainHi": v["sustain"], "mons": v["mons"],
                              "roundTrip": v["roundTrip"], "center": v["center"]})
         out[tg] = [{k: s[k] for k in
                     ("from", "to", "area", "method", "move", "tplLo", "tplHi",
-                     "battles", "sustainLo", "sustainHi", "mons", "roundTrip", "center")}
+                     "battles", "sustainLo", "sustainHi", "mons", "roundTrip", "center",
+                     "secLo", "secHi")}
                    for s in segs]
     return out
 

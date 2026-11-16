@@ -3,7 +3,7 @@
  *
  * A single anonymous "sync key" is the whole identity: no login, no email, no
  * personal data. The key names a row in KV that holds one JSON progress bundle
- * (the checked-off stops, the play position, starter + trading choice). Enter
+ * (the checked-off stops, the play position, starter + trading + approach). Enter
  * the same key on another device and both stay in step.
  *
  * GET  /?key=KEY        -> the stored bundle, or {} if the key is new
@@ -12,7 +12,7 @@
  *
  * The PUT does a read-merge-write so two devices saving at once cannot clobber
  * each other: the done-list is unioned (progress only ever grows), and the
- * play position / starter / trading are taken from whichever bundle carries the
+ * play position / starter / trading / approach are taken from whichever bundle carries the
  * newer timestamp. That keeps the store monotonic without any locking.
  */
 
@@ -58,6 +58,9 @@ function merge(stored, incoming) {
     play: newer.play || s.play || null,
     starter: newer.starter || s.starter || null,
     trading: typeof newer.trading === "boolean" ? newer.trading : !!s.trading,
+    // the guide's approach ("max" | "core:<six>"), an opaque string taken from the newer bundle like
+    // starter/trading
+    approach: newer.approach || s.approach || null,
     version: newer.version || s.version || null,
     // Dex overrides: union of species keys, the newer device winning a conflict.
     dex: { ...(older.dex || {}), ...(newer.dex || {}) },

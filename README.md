@@ -144,7 +144,8 @@ amended commit so the page never piles up in history).
 | `grind_space.py` | the per-area grind sweep rebuilt from the wild tables |
 | `training.py` | the grind calculator: fastest wild spot per species per level, real-time-modelled, survival-gated, in-journey and post-game; one pass for both versions |
 | `render_maps.py` | renders each section's maps to PNG from the decomp's tilesets/layouts, and pins every trainer and interacted NPC to the tile its object event stands on |
-| `sections.py` | two-pass per-section party optimizer + choice evaluation |
+| `sections.py` | two-pass per-section party optimizer + choice evaluation; pass 3 solves the core approach |
+| `core.py` | the core approach: one fixed six chosen backwards from the League, levelled by an XP ledger, specialists only where it can't clear |
 | `compact.py` | array-encoded payload (~25 MB → ~5 MB) |
 | `verify.py` | **87 guard rails; all must pass after every rebuild** |
 | `setup_study.py` | standalone: does setting up beat hit-and-switch? (it does not) |

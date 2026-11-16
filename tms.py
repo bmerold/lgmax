@@ -17,9 +17,12 @@ import engine as E
 REPO = E.REPO
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 
-# Game Corner TMs can be re-bought, but at thousands of coins each. A normal
-# playthrough buys one; treat them as scarce and surface the price instead.
-GAME_CORNER_COPIES = 1
+# Game Corner TMs can be re-bought: the prize-room script
+# (data/maps/CeladonCity_GameCorner_PrizeRoom/scripts.inc) sets no flag on a TM
+# purchase, only `removecoins`, so Ice Beam, Thunderbolt, Flamethrower, Shadow Ball
+# and Iron Tail are a store from Celadon on -- as many copies as the coins buy.
+# economy.py prices each copy (¥20 a coin), so they are not scarce here.
+GAME_CORNER_STORE = ("shop", "Game Corner")
 
 # The thirsty girl on the Celadon Dept. Store roof trades one TM per drink.
 # Her script hands the item through a variable (`setvar VAR_0x8009, ITEM_TM16`)
@@ -131,7 +134,7 @@ def extract():
         if item in corner:
             sources.append({"kind": "Game Corner", "where": f"Celadon Game Corner, {corner[item]} coins",
                             "stage": 15, "cost": corner[item]})
-            copies += GAME_CORNER_COPIES
+            copies = None            # re-buyable for coins (see GAME_CORNER_STORE)
             repeatable = True
             cost = corner[item]
         if item in unlimited:
@@ -168,13 +171,13 @@ def scarce_moves(supply):
             # Before that stage the run holds exactly its finite copies (the
             # Cerulean TM28, the S.S. Anne TM31...), so they are scarce until
             # then and free afterwards.
-            pre = [s for s in rec["sources"] if s["kind"] != "shop"]
-            if not pre: continue      # shop-only: the stage gate already covers it
+            pre = [s for s in rec["sources"] if s["kind"] not in GAME_CORNER_STORE]
+            if not pre: continue      # store-only: the stage gate already covers it
             out[rec["move"]] = {"item": item, "copies": len(pre),
                                 "earliest": rec["earliest"], "name": rec["name"],
                                 "repeatable": True, "coinCost": rec["coinCost"],
                                 "shopStage": min(s["stage"] for s in rec["sources"]
-                                                 if s["kind"] == "shop")}
+                                                 if s["kind"] in GAME_CORNER_STORE)}
             continue
         out[rec["move"]] = {"item": item, "copies": rec["copies"],
                             "earliest": rec["earliest"], "name": rec["name"],

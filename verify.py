@@ -8,6 +8,9 @@ thing the game hands you once, and no other-starter Pokemon in a run.
 import json, os, sys, collections, re
 import engine as E
 import progression as P
+# the evolution-timing plan (evo_timing.py) shapes availability and move pools
+# from sections.py on, so the guards read the same plan
+P.use_evo_timing()
 import constraints as C
 import world as WORLD
 
@@ -93,26 +96,81 @@ for r in recs.values():
 check("no ranked list repeats an evolution line", dupe_lists == 0, f"{dupe_lists} lists")
 
 # ------------------------------------------------------------------ section parties
-_raw_secs = json.load(open(f"{OUT}/sections.json"))["sections"]
-# sections are now solved once per trade mode; flatten to "<mode>/<starter>"
+_raw_all = json.load(open(f"{OUT}/sections.json"))
+_raw_secs = _raw_all["sections"]
+# sections are now solved once per trade mode; flatten to "<mode>/<starter>".
+# The core approach's runs (core.py) ride along as "core/<mode>/<starter>", so
+# every party guard below holds for them too.
 secs = {f"{m}/{s}": per for m, by in _raw_secs.items() for s, per in by.items()}
+_core_raw = (_raw_all.get("core") or {}).get("options") or {}
+# keyed "core<i>/<mode>/<starter>" so the starter stays the last path part
+CORE_RUNS = {f"core{i}/{m}/{s}": o["result"] for m, by in _core_raw.items()
+             for s, opts in by.items() for i, o in enumerate(opts)}
+CORE_TEAMS = {f"core{i}/{m}/{s}": o["team"] for m, by in _core_raw.items()
+              for s, opts in by.items() for i, o in enumerate(opts)}
+secs.update(CORE_RUNS)
 NAME_TO_SPECIES = {v["name"]: k for k, v in E.SPECIES.items()}
+
+def _level_grown(sp, st, level):
+    """A core run levels by its own experience, so a LEVEL evolution is held as
+    soon as the core's level reaches it -- possibly before the availability
+    table (derived from the maximalist curve) says. Legal when every LEVEL step
+    of the chain is met and the line's base is obtainable by then."""
+    pre = {e["to"]: f for f, evs in E.EVOS.items() for e in evs}
+    cur = sp
+    while cur in pre:
+        e = next(e for e in E.EVOS[pre[cur]] if e["to"] == cur)
+        if e["method"] == "LEVEL" and isinstance(e["param"], int):
+            if P.evolve_level(pre[cur], cur, e["param"]) > level: return False
+        elif cur not in av or av[cur]["stage"] > st:
+            return False
+        cur = pre[cur]
+        if cur in av and av[cur]["stage"] <= st and av[cur].get("kind") != "evolution":
+            return True
+    return cur in av and av[cur]["stage"] <= st
 wrong_starter, dupe_party, unavailable = [], 0, []
 for starter, per_stage in secs.items():
     for st, sec in per_stage.items():
         if not sec: continue
         sps = [NAME_TO_SPECIES.get(t["name"]) for t in sec["team"]]
+        lv_by = {NAME_TO_SPECIES.get(t["name"]): t.get("level", sec["level"]) for t in sec["team"]}
         for sp in sps:
             if sp is None: continue
             own = C.starter_of(sp)
             if own and own != starter.split("/")[-1]:
                 wrong_starter.append((starter, int(st), E.SPECIES[sp]["name"]))
             if sp not in av: unavailable.append(E.SPECIES[sp]["name"])
-            elif av[sp]["stage"] > int(st):
+            elif av[sp]["stage"] > int(st) and not (
+                    starter in CORE_RUNS and _level_grown(sp, int(st), lv_by[sp])):
                 unavailable.append(f"{E.SPECIES[sp]['name']}@{st}")
         roots = [C.line_root(s) for s in sps if s]
         if len(roots) != len(set(roots)): dupe_party += 1
 check("no other-starter Pokemon in a party", not wrong_starter, str(wrong_starter[:5]))
+# FRLG cancels every evolution past Mew until Oak's post-League National Dex
+# upgrade (src/evolution_scene.c), so no Crobat/Steelix/Scizor/Bellossom/Blissey
+# may stand in a party up to and including the League. Checked against the dex
+# numbers directly, not the availability table that once got it wrong.
+_natdex_early = sorted({(starter, int(st), t["name"]) for starter, per_stage in secs.items()
+                        for st, sec in per_stage.items() if sec and int(st) < P.NATIONAL_DEX_STAGE
+                        for t in sec["team"]
+                        if P.NAT_DEX.get(NAME_TO_SPECIES.get(t["name"]), 0) > 151})
+_natdex_core = sorted({(k, E.SPECIES[t]["name"]) for k, team in CORE_TEAMS.items() for t in team
+                       if P.NAT_DEX.get(t, 0) > 151})
+# The playtime estimate adds the grind: every training row and every level-up
+# Pokedex evolution the run's parties don't reach must carry real seconds
+# (training.py's secLo/secHi via training_cost.grind_seconds), or the estimate
+# silently drops it (sections.price_dex_evos).
+_untimed = []
+for _run, _per in secs.items():
+    for _st, _sec in _per.items():
+        if not _sec: continue
+        _untimed += [(_run, int(_st), b["name"]) for b in _sec.get("training", [])
+                     if b["to"] > b["from"] and not b.get("sec")]
+        _untimed += [(_run, int(_st), r["to"]) for r in _sec.get("dexEvos", [])
+                     if "sec" not in r]
+check("every grind the playtime estimate counts carries a time", not _untimed, str(_untimed[:4]))
+check("no post-National-Dex evolution (Crobat, Steelix, ...) before the League is beaten",
+      not _natdex_early and not _natdex_core, str((_natdex_early + _natdex_core)[:5]))
 check("no party repeats an evolution line", dupe_party == 0, f"{dupe_party} parties")
 check("every party member is obtainable by that section",
       not unavailable, str(sorted(set(unavailable))[:6]))
@@ -163,6 +221,9 @@ check("parties match the declared commitments", not mismatch, str(mismatch[:4]))
 # ------------------------------------------------------------------ single-use TMs
 supply = raw.get("tmSupply", {})
 plans = {f"{m}/{s}": p for m, by in raw.get("tmPlans", {}).items() for s, p in by.items()}
+# each core option spends the single-use TMs on its own six (sections._worker_core_solve)
+plans.update({f"core{i}/{m}/{s}": o["tmPlan"] for m, by in _core_raw.items()
+              for s, opts in by.items() for i, o in enumerate(opts)})
 import tms as TMOD
 scarce = TMOD.scarce_moves(supply)
 MOVE_BY_NAME = {m["name"]: k for k, m in E.MOVES.items()}
@@ -286,7 +347,13 @@ for starter, per_stage in raw["sections"].items():
     for st, sec in per_stage.items():
         if not sec: continue
         for t in sec["team"]:
-            if C.outgrown(t["species"], int(st), av):
+            if starter in CORE_RUNS:
+                # a core levels by its own experience: it has outgrown a form
+                # only once its own level reaches the LEVEL evolution
+                grown = P.level_evolved(t["species"], t.get("level", sec["level"]), av)
+            else:
+                grown = C.outgrown(t["species"], int(st), av)
+            if grown:
                 stale.append((starter, int(st), t["name"]))
 check("no section recommends a form it would have levelled out of",
       not stale, str(stale[:4]))
@@ -327,6 +394,14 @@ for starter, per_stage in raw["sections"].items():
     for st, sec in per_stage.items():
         if not sec: continue
         want = set(HM.moves_here(int(st)))
+        # the core approach walks until one of its six can carry Fly (the
+        # approved rule; core.solve_core_run's skip_hms), so Fly is demanded of
+        # a core section only once a core member on it can learn it
+        if starter in CORE_RUNS:
+            _croots = {C.line_root(t) for t in CORE_TEAMS[starter]}
+            if not any(HM.can_learn(t["species"], "MOVE_FLY") for t in sec["team"]
+                       if C.line_root(t["species"]) in _croots):
+                want.discard("MOVE_FLY")
         plan = sec.get("hms", [])
         got = {p["move"] for p in plan}
         if want != got:
@@ -378,6 +453,153 @@ for _sk, _per in raw["sections"].items():
                     _hm_early.append((_sk, int(_st), _m["species"], _mv["name"]))
 check("no party carries an HM move before that HM is usable",
       not _hm_early, str(_hm_early[:4]))
+
+# ------------------------------------------------------------------ the core approach
+# core.py: one fixed six per run, seated in every section once held, with a
+# specialist or extra grinding only where the six alone could not clear.
+import hms as HMG
+import training_cost as TC
+_core_bad, _core_left, _core_spec, _core_raise, _core_fall, _core_base = [], [], [], [], [], []
+_route_hms = sorted({mv for st in P.STAGES if st["id"] <= P.ROUTE_MAX_STAGE
+                     for mv in HMG.moves_here(st["id"])})
+def _chain(sp):
+    pre = {e["to"]: f for f, evs in E.EVOS.items() for e in evs}
+    out = [sp]
+    while out[0] in pre: out.insert(0, pre[out[0]])
+    return out
+for _sk, _team in CORE_TEAMS.items():
+        _s = _sk.split("/")[-1]
+        _roots = {C.line_root(t) for t in _team}
+        if (len(_team) != 6 or C.starter_of(_team[0]) != _s
+                or any(t in _birds for t in _team)
+                or not all(any(HMG.can_learn(f, mv) for t in _team for f in _chain(t))
+                           for mv in _route_hms)):
+            _core_bad.append(_sk)
+        seen, prev_lv = set(), 0
+        for _st in sorted(CORE_RUNS.get(_sk, {}), key=int):
+            _sec = CORE_RUNS[_sk][_st]
+            if not _sec or not _sec.get("team"): continue
+            here = {C.line_root(NAME_TO_SPECIES[t["name"]]) for t in _sec["team"]}
+            # a traded line over the badge obedience cap sits a section out
+            # (core.over_obey_cap); any other absence is a dropped core line
+            benched = set((_sec.get("approach") or {}).get("obeyBench", []))
+            if seen - here - benched:
+                _core_left.append((_sk, int(_st), sorted(seen - here - benched)))
+            seen |= here & _roots
+            ap = _sec.get("approach") or {}
+            alone = ap.get("coreAlone", 0)
+            core_here = [NAME_TO_SPECIES[t["name"]] for t in _sec["team"]
+                         if C.line_root(NAME_TO_SPECIES[t["name"]]) in _roots]
+            for sp in ap.get("specialists", []):
+                carries = [h["move"] for h in _sec.get("hms", []) if h.get("species") == sp]
+                needed = any(not any(HMG.can_learn(c, mv) for c in core_here) for mv in carries)
+                if not alone and not needed:
+                    _core_spec.append((_sk, int(_st), E.SPECIES[sp]["name"]))
+            if _sec["level"] > ap.get("ledgerLevel", _sec["level"]) and not alone:
+                _core_raise.append((_sk, int(_st)))
+            # each line fights at the level its own XP reached (a newcomer: the
+            # level it was caught at); grinding one above that is only for a
+            # section the six couldn't clear. A shared level once billed five
+            # members a grind to the leader's level every section.
+            _led = ap.get("ledger") or {}
+            for t in _sec["team"]:
+                _r = C.line_root(NAME_TO_SPECIES[t["name"]])
+                if _r not in _roots: continue
+                _have = _led.get(_r, TC.obtained_level(NAME_TO_SPECIES[t["name"]], av))
+                if t["level"] > _have and not alone:
+                    _core_base.append((_sk, int(_st), t["name"], _have, t["level"]))
+            if _sec["level"] < prev_lv: _core_fall.append((_sk, int(_st)))
+            prev_lv = _sec["level"]
+# LGMAX_APPROACHES="max" skips pass 3 (sections.py), so the core must exist only
+# when it was asked for -- the same switch sections.py reads
+_core_built = "core" in os.environ.get("LGMAX_APPROACHES", "max core").split()
+check("each core is six lines: the starter's, no bird, every route HM learnable inside it",
+      (bool(CORE_TEAMS) or not _core_built) and not _core_bad, str(_core_bad[:4]))
+_core_n = collections.Counter("/".join(k.split("/")[1:]) for k in CORE_TEAMS)
+check("every run offers at least two League-viable cores to choose from",
+      not _core_built or (len(_core_n) == len(_raw_secs) * len(next(iter(_raw_secs.values())))
+                          and min(_core_n.values()) >= 2),
+      str(dict(_core_n)))
+check("a core line, once in the party, stays in every later party",
+      not _core_left, str(_core_left[:4]))
+check("a specialist joins the core only where the six alone can't clear (or carry an HM)",
+      not _core_spec, str(_core_spec[:4]))
+check("the core grinds past its own experience only where it couldn't clear",
+      not _core_raise, str(_core_raise[:4]))
+check("the core's level never falls", not _core_fall, str(_core_fall[:4]))
+check("a core line fights at its own XP's level, ground higher only where the six couldn't clear",
+      not _core_base, str(_core_base[:4]))
+# Where the six can't hold a field move yet, one helper keeps the job: a run
+# must not rotate a new carrier in each section (Squirtle runs once cycled
+# Raticate, Beedrill, Nidoking, Dugtrio through Cut, one line each).
+_core_rot = []
+for _sk, _team in CORE_TEAMS.items():
+    _roots = {C.line_root(t) for t in _team}
+    helper_lines, helped = set(), set()
+    for _sec in CORE_RUNS[_sk].values():
+        for h in (_sec or {}).get("hms", []):
+            # a helper is a body brought in TO carry it (core.solve_core_run's
+            # rule); a specialist fielded for a fight that already knows Cut is
+            # not a rotated carrier
+            if h.get("species") and C.line_root(h["species"]) not in _roots \
+                    and h.get("how") in ("carrier", "swap"):
+                helper_lines.add(C.line_root(h["species"])); helped.add(h["move"])
+    if len(helper_lines) > len(helped):
+        _core_rot.append((_sk, len(helper_lines), sorted(helped)))
+check("a core run keeps one HM helper per field move it can't carry, not a new one each section",
+      not _core_rot, str(_core_rot[:3]))
+
+# Every line of an offered six earns its seat in the League it was picked for: a
+# line never sent in there (or only by Explosion) still eats a sixth of the
+# pooled XP and every grind bill (core.league_idle; a Weezing once rode along).
+import tactics as TAC
+_league_kinds_core = {"elite4", "champion"}
+_core_idle = []
+for _sk, _team in CORE_TEAMS.items():
+    _lsec = CORE_RUNS[_sk].get(str(TAC.LEAGUE_STAGE)) or {}
+    _hit = {C.line_root(s["bySpecies"]) for e in _lsec.get("log", [])
+            if e.get("kind") in _league_kinds_core
+            for s in e.get("steps", []) if s.get("landed") and not s.get("selfKO")}
+    _idle = sorted(C.line_root(t) for t in _team if C.line_root(t) not in _hit)
+    if _idle: _core_idle.append((_sk, _idle))
+check("every line of an offered six lands a League KO (no passengers)",
+      not _core_idle, str(_core_idle[:4]))
+
+# ------------------------------------------------------------------ the League tab
+# league_sets.py's sixes are a list the player picks a team from, so each must be
+# one the game allows: six distinct lines, no starter but the one whose Champion
+# it faces, one fossil and one Dojo prize, the Moon Stones the route holds, and
+# no one-copy TM handed to more members than there are copies.
+_lsp = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data",
+                    f"league_sets_{E.VERSION}.json")
+if os.path.exists(_lsp):
+    import tms as _TMS_L
+    _sc = _TMS_L.scarce_moves(_TMS_L.extract())
+    _name_to_move = {E.MOVES[m]["name"]: m for m in _sc if m in E.MOVES}
+    _moon_evos = {"SPECIES_NIDOKING", "SPECIES_NIDOQUEEN", "SPECIES_CLEFABLE", "SPECIES_WIGGLYTUFF"}
+    _moon_cap = sum(1 for st in json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                                           "data", "route.json")))["stages"]
+                    if st["stage"] <= TAC.LEAGUE_STAGE
+                    for s in st["steps"] if "Moon Stone" in str(s.get("what", ""))
+                    and s.get("kind") in ("item", "hidden"))     # sections.moon_budget's count
+    _ls_bad, _ls_empty = [], []
+    for _st, _blk in json.load(open(_lsp))["starters"].items():
+        if not _blk["sixes"]: _ls_empty.append(_st)
+        for _r in _blk["sixes"]:
+            _six = _r["species"]
+            _roots = [C.line_root(t) for t in _six]
+            _groups = [g for g in (C.exclusive_group(t) for t in _six) if g and g != "starter"]
+            _why = []
+            if len(_six) != 6 or len(set(_roots)) != 6: _why.append("lines")
+            if any(C.starter_of(t) not in (None, _st) for t in _six): _why.append("starter")
+            if len(_groups) != len(set(_groups)): _why.append("exclusive")
+            if sum(1 for t in _six if t in _moon_evos) > max(_moon_cap, 0): _why.append("moon")
+            for _mv, _hs in (_r.get("tms") or {}).items():
+                _c = _sc.get(_name_to_move.get(_mv), {}).get("copies")
+                if _c is not None and len(_hs) > _c: _why.append(f"{_mv} x{len(_hs)}")
+            if _why: _ls_bad.append((_st, _r["six"], _why))
+    check("every League-tab six is legal (lines, starter, fossil/Dojo, Moon Stones, TM copies)",
+          not _ls_bad and not _ls_empty, str((_ls_empty, _ls_bad[:3])))
 
 # ------------------------------------------------------------------ walk order
 # The completionist route decides the order battles happen in, and the
@@ -1389,6 +1611,12 @@ check("every setup move used is in that member's moveset", not _tac_unknown,
 import training_cost as TC
 _tr_objective, _tr_kept_billed, _tr_wrong = [], [], []
 for sk, per_stage in secs.items():
+    # The core approach (core.py) bills its six against the XP ledger, not the
+    # roster: a core member owes the levels between where its own experience had
+    # it (approach.ledger; a line joining here: its obtain level) and the section
+    # level -- fighting last section doesn't make it free. Specialists follow
+    # the roster rule below, kept pace and all.
+    croots = {C.line_root(t) for t in CORE_TEAMS.get(sk, [])}
     last_level, prev_party = {}, set()
     for st in sorted(per_stage, key=int):
         sec = per_stage[st]
@@ -1397,8 +1625,16 @@ for sk, per_stage in secs.items():
             _tr_objective.append((sk, st, sec.get("objective")))
         billed = {b["name"]: b for b in sec.get("training", [])}
         want = {}
+        ledger = (sec.get("approach") or {}).get("ledger", {})
         for t in sec["team"]:
             root = C.line_root(t["species"])
+            if root in croots:
+                back = root in ledger
+                frm = ledger[root] if back else TC.obtained_level(t["species"], av)
+                cost = TC.join_cost(t["species"], t["level"], frm, av)
+                if cost > 0:
+                    want[t["name"]] = (frm, t["level"], round(cost, 1), back)
+                continue
             if root in prev_party:
                 if t["name"] in billed:
                     _tr_kept_billed.append((sk, st, t["name"]))
@@ -1409,10 +1645,10 @@ for sk, per_stage in secs.items():
             if cost > 0:
                 want[t["name"]] = (frm, sec["level"], round(cost, 1), back)
         got = {n: (b["from"], b["to"], b["turns"], b["returning"]) for n, b in billed.items()
-               if C.line_root(NAME_TO_SPECIES.get(n, n)) not in prev_party}
+               if C.line_root(NAME_TO_SPECIES.get(n, n)) not in prev_party - croots}
         if got != want or len(billed) != len(sec.get("training", [])):
             _tr_wrong.append((sk, st, sorted(set(got.items()) ^ set(want.items()))[:3]))
-        prev_party = {C.line_root(t["species"]) for t in sec["team"]}
+        prev_party = {C.line_root(t["species"]) for t in sec["team"]} - croots
         for r in prev_party:
             last_level[r] = sec["level"]
 check("parties are chosen for least training (the default objective)", not _tr_objective,

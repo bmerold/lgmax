@@ -89,6 +89,17 @@ training_step() {
 
 snapshot() { cp "$1" "$2"; }
 
+# The League-sets analysis (league_sets.py) reuses its last result when nothing it
+# reads has changed; LGMAX_LEAGUE=0 skips it (the app's League tab then shows the
+# last result, if any).
+league_step() {
+  if [ "${LGMAX_LEAGUE:-1}" = "0" ]; then
+    echo "league sets: skipped (LGMAX_LEAGUE=0)"
+  else
+    python3 league_sets.py
+  fi
+}
+
 # One game, two versions. extract.py tags every wild table FireRed/LeafGreen/Both;
 # the rest of the pipeline picks a version with LGMAX_VERSION (lg|fr) and drops the
 # other's exclusives, so the route, teams, trades, Game Corner and Dex all differ.
@@ -103,7 +114,9 @@ for V in $LGMAX_VERSIONS; do
   export LGMAX_VERSION="$V"
   step "$V.1.graph"    python3 build_graph.py   # wild graph (filters the other version's tables)
   step "$V.2.route"    route_step               # route is version-specific (catch stops differ)
+  step "$V.2b.evotiming" python3 evo_timing.py # which evolutions to hold back for a move
   step "$V.3.sections" python3 sections.py      # solves every section, battles in ROUTE order
+  step "$V.3b.league"  league_step              # League-clearing sixes (cached; ~20 min when inputs change)
   step "$V.4.training" training_step            # this version's grind itineraries
   step "$V.5.optimize" python3 optimize.py      # per-encounter rankings
   step "$V.6.economy"  python3 economy.py       # money: prize income vs Game Corner / stone costs

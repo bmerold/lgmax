@@ -422,6 +422,14 @@ tr.loses{opacity:.62}
 .train-head{display:flex;gap:10px;align-items:center;padding:2px 16px 8px}
 .train-head img{width:44px;height:44px;image-rendering:pixelated}
 .tr-head{font-size:16px;font-weight:600}
+.core-pick{flex-wrap:wrap;align-items:flex-start}
+.core-opts{display:flex;flex-direction:column;gap:6px;min-width:0;flex:1}
+.core-opt{display:flex;flex-direction:column;gap:2px;text-align:left;padding:8px 10px;border-radius:8px;
+  border:1px solid var(--line);background:var(--surface);color:var(--ink);cursor:pointer;font:inherit}
+.core-opt b{font-size:13px}
+.core-opt span{font-size:11.5px;color:var(--ink-2)}
+.core-opt em{font-style:normal;font-weight:700;color:var(--accent)}
+.core-opt[aria-pressed="true"]{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
 .it-tbl{margin-top:0}
 .it-tbl .it-lv{white-space:nowrap;font-family:var(--mono);font-variant-numeric:tabular-nums}
 .tr-none{font-size:13px;color:var(--ink-3);font-style:italic;padding:4px 16px 10px}
@@ -853,6 +861,27 @@ textarea.sync-code{width:100%;height:60px;resize:vertical;font-family:var(--mono
 .ctab .r{text-align:right}
 .linehint{font-size:11px;color:var(--ink-3);margin-top:2px}
 .ctab-wrap{overflow-x:auto}
+/* League tab: the sixes that clear the Elite Four (league_sets.py) */
+.lg-filters{display:flex;flex-direction:column;gap:12px;padding:14px 16px}
+.lg-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.lg-row > .lg-lab{font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3);
+  min-width:9ch}
+.lg-row input[type=range]{width:min(220px,100%)}
+.chip.inc{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+.chip.exc{text-decoration:line-through;color:var(--ink-3);border-style:dashed}
+.chip .cnt{opacity:.65;margin-left:4px;font-variant-numeric:tabular-nums}
+.lg-tab th[data-sort]{cursor:pointer;user-select:none;white-space:nowrap}
+.lg-tab th[data-sort][aria-sort="ascending"]::after{content:" ▲"}
+.lg-tab th[data-sort][aria-sort="descending"]::after{content:" ▼"}
+.lg-tab td{font-variant-numeric:tabular-nums}
+.lg-six{display:flex;flex-wrap:wrap;gap:2px 10px}
+.lg-mon{display:inline-flex;align-items:center;gap:3px;white-space:nowrap}
+.lg-mon img{width:28px;height:28px;image-rendering:pixelated;margin:-4px 0}
+.lg-lv{font-family:var(--display);font-size:16px;font-weight:600}
+.lg-flag{display:inline-block;font-size:10px;letter-spacing:.05em;text-transform:uppercase;
+  border:1px solid var(--line-strong);padding:1px 5px;margin:1px 2px 1px 0;color:var(--ink-2)}
+.lg-tms{font-size:11.5px;color:var(--ink-2)}
+.lg-more{align-self:center}
 
 /* ---------- notes ---------- */
 details.notes{background:var(--surface);border:1px solid var(--line);border-radius:var(--r)}
@@ -904,6 +933,15 @@ details.notes[open] summary::after{content:"−"}
           </div>
           <span class="rec-tag" id="tradeNote"></span>
         </div>
+        <div class="starter" id="approachPick">
+          <span class="starter-l">Approach</span>
+          <div class="starter-btns" id="approachBtns">
+            <button class="sbtn" data-approach="max" aria-pressed="true">Maximalist</button>
+            <button class="sbtn" data-approach="core" aria-pressed="false">Core six</button>
+          </div>
+          <span class="rec-tag" id="approachNote"></span>
+        </div>
+        <div class="starter core-pick" id="corePick" hidden></div>
         <div class="mast-stats" id="mastStats"></div>
         <div class="mast-prog" id="mastProg"></div>
         <div class="mast-targets" id="mastTargets"></div>
@@ -919,6 +957,7 @@ details.notes[open] summary::after{content:"−"}
       <button class="navb" data-view="cho" aria-current="false">Choices</button>
       <button class="navb" data-view="dex" aria-current="false">Dex</button>
       <button class="navb" data-view="money" aria-current="false">Money</button>
+      <button class="navb" data-view="league" aria-current="false">League</button>
       <button class="navb sync-navb" id="syncBtn" title="carry your progress between devices">⇄ Sync</button>
     </nav>
   </header>
@@ -979,6 +1018,7 @@ details.notes[open] summary::after{content:"−"}
           <button data-view="cho">choices</button>
           <button data-view="dex">dex</button>
           <button data-view="money">money</button>
+          <button data-view="league">league</button>
           <button data-view="enc">encounters</button>
         </span>
         <button id="drawerClose">✕</button></div>
@@ -1038,6 +1078,10 @@ details.notes[open] summary::after{content:"−"}
     <main class="panel" id="moneyPanel"></main>
   </div>
 
+  <div id="view-league" hidden>
+    <main class="panel" id="leaguePanel"></main>
+  </div>
+
   <div id="view-dex" hidden>
     <div id="dexHead">
       <div id="dexCount"></div>
@@ -1088,6 +1132,32 @@ let S = _vd().pool, STAGES = _vd().stages, ENC = _vd().encounters;
 let trading = false;
 const tradeKey = () => trading ? "yes" : "no";
 let SECTIONS_BY = _vd().sections, CHOICES_BY = _vd().choices;
+/* How the guide plays the run. "max": every section gets its own best party
+   (any line, any time). "core": one fixed six chosen backwards from the League
+   (core.py), levelled by the experience it earns, with a specialist only where
+   the six can't clear a section. Same route, same commitments; only the parties,
+   levels and TM owners differ. */
+// "max" | "core:<six>" naming the six by its members ("Charizard+Golem+…"), so a
+// rebuild that reorders or drops offered sixes never silently swaps your team;
+// a legacy "core:<index>" still reads as a position
+let approach = "max";
+let CORE_OPTS = _vd().coreOptions || {};
+/* coreOptions[mode][starter][i] = {s: section rows, team: [name idx], tm: TM plan,
+   c: {group: option name}, sum: [lines, training, battle, faints, unanswered, leagueLv,
+   sectionsNeedingAnHmHelper]}
+   (compact.py) -- the League-viable sixes offered for this run, best first. */
+const coreList = () => (CORE_OPTS[tradeKey()] || {})[starter] || [];
+const coreSig = o => o.team.map(str).join("+");
+const coreIdx = () => {
+  if (!approach.startsWith("core:")) return -1;
+  const key = approach.slice(5);
+  if (/^\d+$/.test(key)) return +key;
+  const i = coreList().findIndex(o => coreSig(o) === key);
+  return i >= 0 ? i : 0;                 // that six isn't offered here: the best one
+};
+const coreApproach = i => { const L = coreList(); return L.length ? "core:" + coreSig(L[Math.min(i, L.length - 1)]) : "core:0"; };
+const coreOpt = () => { const i = coreIdx(), L = coreList(); return i >= 0 && L.length ? L[Math.min(i, L.length - 1)] : null; };
+const coreOn = () => !!coreOpt();
 /* Map images rendered straight from the decomp's tilesets and layouts,
    keyed by map folder name: [width px, height px, base64 png, pretty name]. */
 const MAPART = DATA.mapart || {};
@@ -1168,8 +1238,15 @@ let ECON = _vd().economy || {};
    in stage order. The run never grinds, so each is "be at least this by here". */
 let LVLTGT = _vd().levelTargets || [];
 /* The next gym at or after a section's stage: what level you should be by then. */
+/* Level targets as the current approach plays them: the shared curve for the
+   maximalist guide, the core's own ledger level (its section level) for the core. */
+function levelTargets(){
+  if (!coreOn()) return LVLTGT;
+  const secs = SECTIONS()[starter] || {};
+  return LVLTGT.map(t => [t[0], (secs[String(t[2])] || {}).lv || t[1], t[2]]);
+}
 function nextGym(stage){
-  for (const t of LVLTGT){ if (t[2] >= stage) return {leader: str(t[0]), level: t[1], stage: t[2]}; }
+  for (const t of levelTargets()){ if (t[2] >= stage) return {leader: str(t[0]), level: t[1], stage: t[2]}; }
   return null;
 }
 const TPICS = DATA.tpics || {};
@@ -1184,10 +1261,12 @@ let COMMITTED_BY = _vd().commitments || {};
 /* TMs are consumed when taught (HMs are not), so most are a one-shot decision
    for the whole playthrough. TM_PLANS says where each one should go. */
 let TM_PLANS_BY = _vd().tmPlans || {}, TM_SUPPLY = _vd().tmSupply || {};
-const SECTIONS = () => SECTIONS_BY[tradeKey()] || {};
+const SECTIONS = () => coreOn() ? {[starter]: coreOpt().s} : (SECTIONS_BY[tradeKey()] || {});
 const CHOICES  = () => CHOICES_BY[tradeKey()] || [];
-const COMMITTED = () => COMMITTED_BY[tradeKey()] || {};
-const TM_PLANS = () => TM_PLANS_BY[tradeKey()] || {};
+const COMMITTED = () => coreOn() ? coreOpt().c : (COMMITTED_BY[tradeKey()] || {});
+const TM_PLANS = () => coreOn() ? {[starter]: coreOpt().tm} : (TM_PLANS_BY[tradeKey()] || {});
+/* The chosen six's names for this run under the core approach. */
+const CORE_TEAM = () => coreOn() ? coreOpt().team.map(str) : [];
 /* With trading off, the four trade evolutions simply do not exist for the run,
    so they are filtered out of every ranked list rather than built twice. */
 const tradeOK = flag => trading || !flag;
@@ -1224,7 +1303,7 @@ let starter = "Bulbasaur", view = "play";
 /* The top-level views, one <div id="view-*"> each. Kept as one list so every
    place that shows/hides views agrees — a stale copy that omitted "cat"/"train"
    left those tabs blank when reached via the Play drawer. */
-const VIEWS = ["enc", "sec", "tm", "cat", "train", "cho", "play", "dex", "money"];
+const VIEWS = ["enc", "sec", "tm", "cat", "train", "cho", "play", "dex", "money", "league"];
 let selected = null, selectedSec = 18, selectedLeg = 0, tab = "team";
 /* grind-calculator TM policy: none / renewable-only / any single-use */
 let grindTM = "renew";
@@ -1356,12 +1435,13 @@ function toggleChk(c){
 /* the "||"-joined species keys for a catch stop, for a toggle-all checkbox */
 const allSpeciesKeys = s => catchNames(s).map(n => speciesKey(s, n)).join("||");
 const saveUi = () => { try { localStorage.setItem("lgmax-ui",
-  JSON.stringify({view, starter, trading, version: VER, sec: selectedSec, leg: selectedLeg, enc: selected, grindTM, grindMode, pickSpecies})); } catch (e) {} };
+  JSON.stringify({view, starter, trading, approach, version: VER, sec: selectedSec, leg: selectedLeg, enc: selected, grindTM, grindMode, pickSpecies})); } catch (e) {} };
 try {
   const u = JSON.parse(localStorage.getItem("lgmax-ui") || "null");
   if (u){
     if (STARTERS.includes(u.starter)) starter = u.starter;
     trading = !!u.trading;
+    if (u.approach === "max" || /^core:.+$/.test(u.approach || "")) approach = u.approach;
     if (typeof u.sec === "number") selectedSec = u.sec;
     if (typeof u.leg === "number") selectedLeg = u.leg;
     if (VIEWS.includes(u.view)) view = u.view;
@@ -1422,8 +1502,10 @@ function renderRunProgress(){
 /* Rough playtime for pacing, not a stopwatch, assuming the fast way to play --
    BATTLE SCENE OFF and text speed FAST: running-speed walking + ~5s per battle
    turn + ~10s fixed per fight (encounter load, faint/XP, exit). Measured against
-   real play; the three constants are the obvious knobs; excludes grinding (the
-   run never grinds). */
+   real play; the three constants are the obvious knobs. Grinding is priced by the
+   grind simulator itself (training.py: finding each wild battle, fighting it, the
+   Center round-trips), shipped as seconds on each training row (tr[5]) and each
+   Pokedex evolution row (de[4]). */
 const SEC_PER_STEP = 0.28, SEC_PER_TURN = 5, SEC_PER_FIGHT = 10;
 const estSeconds = (steps, turns, fights) =>
   steps * SEC_PER_STEP + turns * SEC_PER_TURN + fights * SEC_PER_FIGHT;
@@ -1434,11 +1516,23 @@ function fmtDur(sec){
   return "~" + h + "h" + (r ? " " + r + "m" : "");
 }
 function legSeconds(L){ return L ? estSeconds(L.st || 0, L.t || 0, L.b || 0) : 0; }
-function runSeconds(){
-  let turns = 0, fights = 0;
-  for (const s of STAGES) legsOf(secData(s.id)).forEach(L => { if (L){ turns += L.t || 0; fights += L.b || 0; } });
-  return estSeconds(ROUTE.total || 0, turns, fights);
+/* grind seconds for one section: the party's training (tr) and the Pokedex
+   evolutions it calls for (de, 0 when the run's own parties reach them; the
+   starters you didn't pick are already dropped by sectionEvos) */
+const trainSeconds = d => ((d && d.tr) || []).reduce((a, t) => a + (t[5] || 0), 0);
+const dexEvoSeconds = d => sectionEvos(d).reduce((a, it) =>
+  a + Math.max(0, ...it.options.map(r => r[4] || 0)), 0);
+function runTime(){
+  let turns = 0, fights = 0, train = 0, dex = 0;
+  for (const s of STAGES){
+    const d = secData(s.id);
+    legsOf(d).forEach(L => { if (L){ turns += L.t || 0; fights += L.b || 0; } });
+    train += trainSeconds(d); dex += dexEvoSeconds(d);
+  }
+  const walk = estSeconds(ROUTE.total || 0, turns, fights);
+  return {walk, train, dex, total: walk + train + dex};
 }
+function runSeconds(){ return runTime().total; }
 function renderMast(){
   const list = ENC.filter(forStarter);
   const n = k => list.filter(e => e.k === k).length;
@@ -1449,8 +1543,8 @@ function renderMast(){
     [n("wild"), "wild areas"],
     [totalSections(), "sections"],
     [(ROUTE.total || 0).toLocaleString(), "steps to 100%"],
-    [fmtDur(runSeconds()), "est. playtime",
-     `Rough estimate with battle scene OFF and fast text: ${SEC_PER_STEP}s per step (running), ${SEC_PER_TURN}s per battle turn, ${SEC_PER_FIGHT}s fixed per fight. No grinding, since the run never grinds.`]
+    (() => { const rt = runTime(); return [fmtDur(rt.total), "est. playtime",
+     `Rough estimate with battle scene OFF and fast text. Walkthrough ${fmtDur(rt.walk)} (${SEC_PER_STEP}s per step running, ${SEC_PER_TURN}s per battle turn, ${SEC_PER_FIGHT}s fixed per fight) + training the team ${fmtDur(rt.train)} + levelling Pokédex evolutions ${fmtDur(rt.dex)} (grind time from the best wild spot at each level, including finding battles and Center trips).`]; })()
   ];
   document.getElementById("mastStats").innerHTML = rows
     .map(([v, l, t]) => `<div class="mstat"${t ? ` title="${esc(t)}"` : ""}><b>${v}</b><span>${l}</span></div>`).join("");
@@ -1458,7 +1552,7 @@ function renderMast(){
   // Level targets: the no-grind level you arrive at each gym with, as a strip.
   const tEl = document.getElementById("mastTargets");
   if (tEl) tEl.innerHTML = LVLTGT.length
-    ? `<span class="mt-l">Level targets</span>` + LVLTGT.map(t =>
+    ? `<span class="mt-l">Level targets</span>` + levelTargets().map(t =>
         `<span class="mt-g" title="The run reaches ${esc(str(t[0]))} at about Lv ${t[1]}"><b>${esc(str(t[0]))}</b> Lv ${t[1]}</span>`).join("")
     : "";
   const sc = CHOICES().find(c => c.id === "starter");
@@ -1467,6 +1561,29 @@ function renderMast(){
   document.getElementById("tradeNote").textContent = trading
     ? "Alakazam, Machamp, Golem and Gengar in play"
     : "no trade evolutions";
+  const ap = document.getElementById("approachNote");
+  if (ap) ap.textContent = coreOn()
+    ? "Your six: " + CORE_TEAM().join(", ")
+    : "the best party for every section";
+  document.querySelectorAll("[data-approach]").forEach(x =>
+    x.setAttribute("aria-pressed", String(x.dataset.approach === (coreOn() ? "core" : "max"))));
+  renderCorePick();
+}
+/* The core approach's choice of six: every League-viable core offered for this
+   run, with what it costs over the whole run, so the player picks the team they
+   want to raise from the start. */
+function renderCorePick(){
+  const el = document.getElementById("corePick"); if (!el) return;
+  const L = coreList();
+  el.hidden = !coreOn() || !L.length;
+  if (el.hidden) return;
+  const cur = Math.min(coreIdx(), L.length - 1);
+  const best = L.reduce((b, o, i) => (o.sum[1] + o.sum[2] < L[b].sum[1] + L[b].sum[2] ? i : b), 0);
+  el.innerHTML = `<span class="starter-l">Pick your six</span><div class="core-opts">` +
+    L.map((o, i) => `<button class="core-opt" data-core="${i}" aria-pressed="${i === cur}">
+      <b>${o.team.map(n => esc(str(n))).join(" · ")}</b>
+      <span>${o.sum[0]} lines · ~${o.sum[1].toLocaleString()} training turns · ${o.sum[3]} faint${o.sum[3] === 1 ? "" : "s"} · League at Lv ${o.sum[5]} · ${o.sum[6] ? `an HM helper in ${o.sum[6]} section${o.sum[6] === 1 ? "" : "s"}` : "carries every HM itself"}${i === best ? ` <em>least turns</em>` : ""}</span>
+    </button>`).join("") + `</div>`;
 }
 
 document.getElementById("starterBtns").innerHTML = STARTERS.map(s =>
@@ -1483,6 +1600,7 @@ document.getElementById("starterBtns").addEventListener("click", ev => {
   renderSecPanel(selectedSec, selectedLeg);
   if (view === "dex") renderDex();
   if (view === "money") renderMoney();
+  if (view === "league") renderLeague();
   saveUi(); syncTouch();
 });
 
@@ -1499,6 +1617,31 @@ if (VERSIONS.length > 1){
   });
 }
 
+document.getElementById("approachBtns").addEventListener("click", ev => {
+  const b = ev.target.closest("[data-approach]"); if (!b) return;
+  approach = b.dataset.approach === "core" ? coreApproach(Math.max(0, coreIdx())) : "max";
+  renderMast(); renderList(); renderSecList(); renderTM();
+  renderPanel(ENC.find(x => x.id === selected));
+  renderSecPanel(selectedSec, selectedLeg);
+  if (view === "dex") renderDex();
+  if (view === "money") renderMoney();
+  if (view === "league") renderLeague();
+  saveUi(); syncTouch();
+});
+document.getElementById("corePick").addEventListener("click", ev => {
+  const b = ev.target.closest("[data-core]"); if (!b) return;
+  approach = coreApproach(+b.dataset.core);
+  renderMast(); renderList(); renderSecList(); renderTM();
+  renderPanel(ENC.find(x => x.id === selected));
+  renderSecPanel(selectedSec, selectedLeg);
+  if (view === "dex") renderDex();
+  if (view === "money") renderMoney();
+  if (view === "league") renderLeague();
+  saveUi(); syncTouch();
+});
+// a payload built without the core pass offers only the maximalist guide
+if (!Object.keys(CORE_OPTS).length){ const el = document.getElementById("approachPick"); if (el) el.hidden = true; }
+
 document.getElementById("tradeBtns").addEventListener("click", ev => {
   const b = ev.target.closest("[data-trade]"); if (!b) return;
   trading = b.dataset.trade === "yes";
@@ -1509,6 +1652,7 @@ document.getElementById("tradeBtns").addEventListener("click", ev => {
   renderSecPanel(selectedSec, selectedLeg);
   if (view === "dex") renderDex();
   if (view === "money") renderMoney();
+  if (view === "league") renderLeague();
   saveUi(); syncTouch();
 });
 
@@ -1555,6 +1699,7 @@ document.getElementById("nav").addEventListener("click", ev => {
     document.getElementById("view-" + v).hidden = v !== view);
   if (view === "dex") renderDex();     // reflects whatever you've checked off so far
   if (view === "money") renderMoney();
+  if (view === "league") renderLeague();
   if (view === "cat") renderCatch();
   if (view === "train") renderTrain();
   updateSticky();
@@ -1974,7 +2119,7 @@ function dexEvoHtml(d){
   const items = sectionEvos(d);
   if (!items.length) return "";
   const card = r => {
-    const from=str(r[0]), to=str(r[1]), how=str(r[2]), note=str(r[3]||"");
+    const from=str(r[0]), to=str(r[1]), how=str(r[2]), note=str(r[3]||""), grind=r[4]||0;
     const key = evolveKey(to), done = DONE.has(key), fs = SPRITES[from], ts = SPRITES[to];
     return `<div class="evo-card${done?" done":""}">
       <span class="chk${done?" on":""}" data-key="${esc(key)}" title="mark evolved — updates the Dex">✓</span>
@@ -1983,6 +2128,7 @@ function dexEvoHtml(d){
         <span class="evo-arrow">→</span>
         ${ts?`<img src="data:image/png;base64,${ts}" alt="">`:`<span class="evo-q">?</span>`}</span>
       <span class="evo-txt"><b>${esc(to)}</b> <span class="num">${esc(how)}</span>${
+        grind ? ` <span class="dim" title="grinding ${esc(from)} there from where it's caught">${fmtDur(grind)} grind</span>` : ""}${
         note?`<span class="dex-note">${esc(note)}</span>`:""}</span></div>`;
   };
   // A choose-one group (one Eevee, three stones) is one item, ticked by picking
@@ -2180,19 +2326,33 @@ function renderSecPanel(id, leg){
     </section>`;
   }
 
+  // ap (core approach only): [ledgerLevel, levelAfter, [specialist names]] --
+  // where the six's own experience had them, and who joins them here
+  if (coreOn() && d.ap){
+    const [led, after, spec] = d.ap;
+    const raised = d.lv > led;
+    prep += `<section class="card"><div class="card-h"><h2>Your six here</h2>
+        <span class="note">Lv ${d.lv}${raised ? ` (their experience reached Lv ${led})` : ""} → about Lv ${after} after</span></div>
+      <p class="note kitnote">${raised
+        ? `The six can't clear this section at the level their trainer experience reached, so they grind to Lv ${d.lv} first (below).`
+        : `Trainer experience alone has the six at this level — no grinding needed for them here.`}
+      ${spec.length ? ` A specialist joins for this section only: <b>${spec.map(n => esc(str(n))).join(", ")}</b>.` : ""}
+      ${(d.legs || []).some(L => (L.rt || []).some(st => st[6])) && !(d.hm || []).some(h => str(h[0]) === "Fly")
+        ? ` None of your six can learn Fly yet, so walk this section's ✈ hops instead.` : ""}</p></section>`;
+  }
   // tr: [name, fromLevel, toLevel, grindTurns, returning] -- the party is chosen to
   // need as little of this as possible (sections.py least-training objective)
   if (d.tr && d.tr.length){
-    const tot = d.tr.reduce((a, t) => a + t[3], 0);
+    const tot = d.tr.reduce((a, t) => a + t[3], 0), secs = trainSeconds(d);
     prep += `<section class="card"><div class="card-h"><h2>Train before this section</h2>
-        <span class="note">~${Math.round(tot)} turns of wild battles in all</span></div>
+        <span class="note">~${Math.round(tot)} turns of wild battles in all${secs ? ` · ${fmtDur(secs)}` : ""}</span></div>
       <div class="ctab-wrap"><table class="ctab"><thead><tr>
         <th>Pokémon</th><th>Level</th><th>Grind</th><th></th>
       </tr></thead><tbody>
-        ${d.tr.map(([name, from, to, turns, back]) => `<tr><td><b>${esc(str(name))}</b></td>
+        ${d.tr.map(([name, from, to, turns, back, secs]) => `<tr><td><b>${esc(str(name))}</b></td>
           <td class="mono">Lv ${from} → ${to}</td>
-          <td class="mono">~${Math.round(turns)} turns</td>
-          <td class="dim">${back ? "back from the bench" : "new to the party"}</td></tr>`).join("")}
+          <td class="mono">~${Math.round(turns)} turns${secs ? ` · ${fmtDur(secs)}` : ""}</td>
+          <td class="dim">${coreOn() ? (back ? "catch-up grind" : "new to the party") : (back ? "back from the bench" : "new to the party")}</td></tr>`).join("")}
       </tbody></table></div>
       <p class="note kitnote">The rest of the party either fought through the last section and kept
       pace, or joins already at this level. "Fastest places to grind" below shows where each
@@ -3739,6 +3899,7 @@ document.querySelector("#playDrawer .drawer-links").addEventListener("click", ev
     document.getElementById("view-" + v).hidden = v !== view);
   if (view === "dex") renderDex();
   if (view === "money") renderMoney();
+  if (view === "league") renderLeague();
   if (view === "cat") renderCatch();
   if (view === "train") renderTrain();
   updateSticky();
@@ -3758,7 +3919,7 @@ const validKey = k => /^[A-Za-z0-9_-]{8,64}$/.test(k);
 /* The whole of a device's progress, as one portable bundle. */
 const syncBundle = () => ({
   v: 1, done: [...DONE], play: {sec: PLAY.sec, leg: PLAY.leg, node: PLAY.node},
-  starter, trading, version: VER, dex: DEXMANUAL, ts: PROGRESS_TS,
+  starter, trading, approach, version: VER, dex: DEXMANUAL, ts: PROGRESS_TS,
 });
 
 /* Fold a bundle (from the server or a pasted code) into this device: never drop
@@ -3783,6 +3944,7 @@ function applyBundle(b){
     }
     if (STARTERS.includes(b.starter)) starter = b.starter;
     if (typeof b.trading === "boolean") trading = b.trading;
+    if (b.approach === "max" || /^core:.+$/.test(b.approach || "")) approach = b.approach;
     // version switching needs a reload, so don't flip it under the user mid-session:
     // just remember a newer device's choice so the next load honours it.
     if (VERSIONS.includes(b.version) && b.version !== VER){
@@ -3798,7 +3960,7 @@ function applyBundle(b){
     localStorage.setItem("lgmax-play", JSON.stringify(PLAY));
     localStorage.setItem("lgmax-dex", JSON.stringify(DEXMANUAL));
     localStorage.setItem("lgmax-ui", JSON.stringify(
-      {view, starter, trading, version: VER, sec: selectedSec, leg: selectedLeg, enc: selected, grindTM, grindMode, pickSpecies}));
+      {view, starter, trading, approach, version: VER, sec: selectedSec, leg: selectedLeg, enc: selected, grindTM, grindMode, pickSpecies}));
     localStorage.setItem("lgmax-ts", String(PROGRESS_TS));
   } catch (e) {}
   return changed;
@@ -4325,6 +4487,121 @@ function renderMoney(){
       costs are the LeafGreen coin prices at ${yen(ECON.coinYen)}/coin.</p>`;
 }
 
+/* ---------------- League: the sixes that clear the Elite Four ----------------
+   league_sets.py: every legal six that beats the whole League one on one by
+   L45-60 (best learnable move each fight, one-copy TMs handed out once), the
+   strongest re-run through the full League simulation (shared HP, PP, the
+   League's items) and raised until they clear. Rows (compact.py):
+   [names, clearLevel (0 never), faints, turns, screenLevel, [[tm, holders]], flags]
+   flags: 1 trades, 2 legendary bird, 4 starter line. */
+let LEAGUE = _vd().leagueSets || {};
+const lg = {starter: null, inc: new Set(), exc: new Set(), trades: null, birds: true,
+            starterLine: false, max: 75, sort: "clear", dir: 1, show: 100};
+const LG_COLS = [["clear", "Clears at", r => r[1] || 999], ["faints", "Faints", r => r[2]],
+                 ["turns", "Turns", r => r[3]], ["screen", "1v1 level", r => r[4]]];
+function leagueRows(blk, st){
+  const allowTrade = lg.trades == null ? trading : lg.trades;
+  return blk.rows.filter(r => {
+    const names = r[0].map(str), f = r[6];
+    if (!allowTrade && (f & 1)) return false;
+    if (!lg.birds && (f & 2)) return false;
+    if (lg.starterLine && !(f & 4)) return false;
+    if ((r[1] || 999) > lg.max) return false;
+    for (const n of lg.inc) if (!names.includes(n)) return false;
+    for (const n of lg.exc) if (names.includes(n)) return false;
+    return true;
+  });
+}
+function renderLeague(){
+  const el = document.getElementById("leaguePanel");
+  LEAGUE = _vd().leagueSets || {};
+  const st = lg.starter || starter, blk = LEAGUE[st];
+  if (!blk){ el.innerHTML = `<p class="foot">No League analysis in this build (league_sets.py).</p>`; return; }
+  const rows = leagueRows(blk, st);
+  const col = LG_COLS.find(c => c[0] === lg.sort) || LG_COLS[0];
+  rows.sort((a, b) => (col[2](a) - col[2](b)) * lg.dir || (a[1] || 999) - (b[1] || 999)
+                      || a[2] - b[2] || a[3] - b[3]);
+  // species chips: everyone who appears in a six, with how many sixes hold them
+  const freq = {};
+  blk.rows.forEach(r => r[0].forEach(i => { const n = str(i); freq[n] = (freq[n] || 0) + 1; }));
+  const chips = Object.keys(freq).sort((a, b) => freq[b] - freq[a] || a.localeCompare(b))
+    .map(n => `<button class="chip${lg.inc.has(n) ? " inc" : lg.exc.has(n) ? " exc" : ""}"
+        data-lgmon="${esc(n)}" title="click: must include · again: exclude · again: clear">${esc(n)}<span class="cnt">${freq[n]}</span></button>`).join("");
+  const allowTrade = lg.trades == null ? trading : lg.trades;
+  const best = rows.find(r => r[1]);
+  const mon = n => { const sp = SPRITES[n]; return `<span class="lg-mon">${sp ? `<img src="data:image/png;base64,${sp}" alt="">` : ""}${esc(n)}</span>`; };
+  const body = rows.slice(0, lg.show).map((r, i) => `<tr>
+      <td class="dim">${i + 1}</td>
+      <td><div class="lg-six">${r[0].map(i2 => mon(str(i2))).join("")}</div></td>
+      <td>${r[1] ? `<span class="lg-lv">L${r[1]}</span>` : `<span class="dim">not by L75</span>`}</td>
+      <td>${r[1] ? r[2] : "—"}</td><td>${r[1] ? Math.round(r[3]) : "—"}</td>
+      <td>L${r[4]}</td>
+      <td class="lg-tms">${r[5].length ? r[5].map(([m, hs]) => `${esc(str(m))} → ${hs.map(h => esc(str(h))).join(", ")}`).join("<br>") : `<span class="dim">none needed</span>`}</td>
+      <td>${r[6] & 1 ? `<span class="lg-flag">trade</span>` : ""}${r[6] & 2 ? `<span class="lg-flag">bird</span>` : ""}${r[6] & 4 ? `<span class="lg-flag">starter</span>` : ""}</td>
+    </tr>`).join("");
+  const th = c => `<th data-sort="${c[0]}" aria-sort="${lg.sort === c[0] ? (lg.dir > 0 ? "ascending" : "descending") : "none"}">${c[1]}</th>`;
+  el.innerHTML = `
+    <section class="card">
+      <div class="card-h"><h2>Teams that clear the Elite Four</h2>
+        <span class="note">${blk.listed.toLocaleString()} sixes cover your League one-on-one by L${blk.through};
+          the best ${blk.simulated.toLocaleString()} were run through the full League fight</span></div>
+      <div class="lg-filters">
+        <div class="lg-row"><span class="lg-lab">Champion</span>
+          ${STARTERS.map(s2 => `<button class="chip" data-lgstarter="${s2}" aria-pressed="${s2 === st}">you chose ${esc(s2)}</button>`).join("")}</div>
+        <div class="lg-row"><span class="lg-lab">Allow</span>
+          <button class="chip" data-lgtoggle="trades" aria-pressed="${allowTrade}">trade evolutions</button>
+          <button class="chip" data-lgtoggle="birds" aria-pressed="${lg.birds}">legendary birds</button>
+          <button class="chip" data-lgtoggle="starterLine" aria-pressed="${lg.starterLine}">must hold my starter</button></div>
+        <div class="lg-row"><span class="lg-lab">Clears by</span>
+          <input type="range" min="45" max="75" value="${lg.max}" data-lgmax aria-label="highest clearing level">
+          <b>L${lg.max}</b></div>
+        <div class="lg-row"><span class="lg-lab">Pokémon</span>${chips}
+          ${lg.inc.size || lg.exc.size ? `<button class="chip" data-lgclear>clear</button>` : ""}</div>
+      </div>
+    </section>
+    <section class="card">
+      <div class="card-h"><h2>${rows.length.toLocaleString()} matching six${rows.length === 1 ? "" : "es"}</h2>
+        <span class="note">${best ? `lowest: L${best[1]}` : "none clear under these filters"} · click a heading to sort</span></div>
+      <div class="ctab-wrap"><table class="ctab lg-tab">
+        <thead><tr><th>#</th><th>Six</th>${LG_COLS.map(th).join("")}<th>One-copy TMs</th><th></th></tr></thead>
+        <tbody>${body || `<tr><td colspan="8" class="dim">No six matches.</td></tr>`}</tbody></table></div>
+    </section>
+    ${rows.length > lg.show ? `<button class="chip lg-more" data-lgmore>show ${Math.min(100, rows.length - lg.show)} more</button>` : ""}
+    <p class="foot">Each of the six fights every Elite Four and Champion Pokémon one on one with the best
+      move it could learn (its own and its earlier forms' level-up moves, every TM and HM, the tutors);
+      Psychic, Earthquake and the other one-copy TMs go to one member each, while Game Corner and
+      Dept. Store TMs can be bought again. The <b>1v1 level</b> is the lowest shared level at which the six
+      beats every foe that way. <b>Clears at</b> is the lowest shared level at which the full League
+      simulation — HP and PP carried fight to fight, the League's own items and tactics — wins.
+      The Champion's team follows the starter you picked.</p>`;
+}
+document.getElementById("leaguePanel").addEventListener("click", ev => {
+  const t = ev.target.closest("button"); if (!t) return;
+  if (t.dataset.lgstarter){ lg.starter = t.dataset.lgstarter; }
+  else if (t.dataset.lgtoggle === "trades"){ lg.trades = !(lg.trades == null ? trading : lg.trades); }
+  else if (t.dataset.lgtoggle){ lg[t.dataset.lgtoggle] = !lg[t.dataset.lgtoggle]; }
+  else if (t.dataset.lgmon){
+    const n = t.dataset.lgmon;
+    if (lg.inc.has(n)){ lg.inc.delete(n); lg.exc.add(n); }
+    else if (lg.exc.has(n)) lg.exc.delete(n);
+    else lg.inc.add(n);
+  }
+  else if (t.dataset.lgclear != null){ lg.inc.clear(); lg.exc.clear(); }
+  else if (t.dataset.lgmore != null){ lg.show += 100; }
+  else return;
+  if (!t.dataset.lgmore) lg.show = 100;
+  renderLeague();
+});
+document.getElementById("leaguePanel").addEventListener("change", ev => {
+  if (ev.target.dataset.lgmax == null) return;
+  lg.max = +ev.target.value; lg.show = 100; renderLeague();
+});
+document.getElementById("leaguePanel").addEventListener("click", ev => {
+  const h = ev.target.closest("th[data-sort]"); if (!h) return;
+  if (lg.sort === h.dataset.sort) lg.dir = -lg.dir; else { lg.sort = h.dataset.sort; lg.dir = 1; }
+  renderLeague();
+});
+
 /* ---------------- boot ---------------- */
 renderMast();
 renderList();
@@ -4335,6 +4612,7 @@ renderCatch();
 renderTrain();
 renderDex();
 renderMoney();
+renderLeague();
 if (!selected || !ENC.some(e => e.id === selected && forStarter(e)))
   selected = (ENC.find(e => e.id === "trainer:TRAINER_LEADER_BROCK") || ENC[0]).id;
 renderPanel(ENC.find(e => e.id === selected));

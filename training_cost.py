@@ -121,12 +121,13 @@ def exp_factor(species, avail):
     return TRADED_EXP if (avail.get(species) or {}).get("kind") == "ingame_trade" else 1.0
 
 # ------------------------------------------------------------------ grind turns
-_TPL = None
-def _turns_per_level():
-    """species name -> {level: turns to gain that level}, from the itineraries."""
-    global _TPL
-    if _TPL is not None: return _TPL
-    _TPL = {}
+_PER_LEVEL = {}
+def _per_level(lo_key, hi_key):
+    """species name -> {level: midpoint of seg[lo_key]/seg[hi_key]} from the
+    itineraries -- turns per level (tplLo/tplHi) or seconds per level
+    (secLo/secHi)."""
+    if (lo_key, hi_key) in _PER_LEVEL: return _PER_LEVEL[(lo_key, hi_key)]
+    out = {}
     path = os.path.join(OUT, f"training_{E.VERSION}.json")
     if not os.path.exists(path):
         path = os.path.join(OUT, "training.json")
@@ -134,11 +135,16 @@ def _turns_per_level():
     for name, modes in data["itineraries"].items():
         per = {}
         for seg in (modes.get(GRIND_MODE) or {}).get(GRIND_TM) or []:
-            tpl = (seg["tplLo"] + seg["tplHi"]) / 2.0
+            if lo_key not in seg: continue
             for lv in range(seg["from"], seg["to"] + 1):
-                per[lv] = tpl
-        _TPL[name] = per
-    return _TPL
+                per[lv] = (seg[lo_key] + seg[hi_key]) / 2.0
+        out[name] = per
+    _PER_LEVEL[(lo_key, hi_key)] = out
+    return out
+
+def _turns_per_level():
+    """species name -> {level: turns to gain that level}, from the itineraries."""
+    return _per_level("tplLo", "tplHi")
 
 _PRE = None
 def _pre_evo(species):
@@ -147,33 +153,37 @@ def _pre_evo(species):
         _PRE = {ev["to"]: frm for frm, evs in E.EVOS.items() for ev in evs}
     return _PRE.get(species)
 
-def _level_turns(species, lv):
-    """Turns for `species` (or, below its evolution level, its pre-evolution) to
-    gain level lv -> lv+1; None when the grind simulator has no spot for it."""
-    tpl = _turns_per_level()
+_MEDIAN = {}
+def _level_value(table, species, lv):
+    """The table's value for `species` (or, below its evolution level, its
+    pre-evolution) gaining level lv -> lv+1, else the median species' value at
+    that level -- for the rare level a species' itinerary skips."""
     sp = species
     while sp:
-        v = tpl.get(E.SPECIES[sp]["name"], {}).get(lv)
+        v = table.get(E.SPECIES[sp]["name"], {}).get(lv)
         if v is not None: return v
         sp = _pre_evo(sp)
-    return None
-
-_FALLBACK = {}
-def _fallback(lv):
-    """The median species' turns at this level -- for the rare level a species'
-    itinerary skips (no reachable spot then)."""
-    if lv not in _FALLBACK:
-        vals = sorted(per[lv] for per in _turns_per_level().values() if lv in per)
-        _FALLBACK[lv] = vals[len(vals) // 2] if vals else 0.0
-    return _FALLBACK[lv]
+    key = (id(table), lv)
+    if key not in _MEDIAN:
+        vals = sorted(per[lv] for per in table.values() if lv in per)
+        _MEDIAN[key] = vals[len(vals) // 2] if vals else 0.0
+    return _MEDIAN[key]
 
 def grind_turns(species, frm, to):
     """Turns to grind `species` from level frm up to level to."""
-    total = 0.0
-    for lv in range(max(1, int(frm)), int(to)):
-        v = _level_turns(species, lv)
-        total += v if v is not None else _fallback(lv)
-    return total
+    tpl = _turns_per_level()
+    return sum(_level_value(tpl, species, lv) for lv in range(max(1, int(frm)), int(to)))
+
+# ------------------------------------------------------------------ grind time
+# The same itineraries priced in real seconds (training.py's effective time per
+# level: finding each wild battle, fighting it, and the Center round-trips), for
+# the guide's playtime estimate. Turns stay the solver's currency.
+def grind_seconds(species, frm, to, avail=None):
+    """Real seconds to grind `species` from level frm up to level to (an in-game
+    trade's 1.5x experience shortens it like the turns)."""
+    spl = _per_level("secLo", "secHi")
+    total = sum(_level_value(spl, species, lv) for lv in range(max(1, int(frm)), int(to)))
+    return total / (exp_factor(species, avail) if avail else 1.0)
 
 def join_cost(species, level, have_level, avail):
     """Turns of training to field `species` at `level` when it is at have_level."""

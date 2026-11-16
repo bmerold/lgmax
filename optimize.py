@@ -51,6 +51,13 @@ def _avail():
     return _AVAIL_CACHE
 
 _TO_HOP = None
+def refresh_availability():
+    """Re-read availability after the evolution-timing plan changes
+    (progression.use_evo_timing): it moves when held-back forms can be had and
+    which pre-evolution moves they carry."""
+    AVAIL.clear(); AVAIL.update(P.full_availability())
+    _AVAIL_CACHE.clear(); _pool_cache.clear()
+
 def _levelup_pool(species, level, stage):
     """Level-up moves this specimen can actually KNOW, the way the game's own
     move-learning works. On CAPTURE it gets GiveBoxMonInitialMoveset -- the
@@ -74,13 +81,20 @@ def _levelup_pool(species, level, stage):
     while True:
         r2, hop = av.get(cur), _TO_HOP.get(cur)
         if not r2 or not str(r2.get("source", "")).startswith("Evolve") or not hop:
-            chain.append((cur, 0)); break
+            chain.append((cur, 0, False)); break
         frm, meth, param = hop
+        # in_battle: the pre-evolution reaches `join` and learns that level's
+        # moves in battle (MonTryLearningNewMove) BEFORE the evolution runs after
+        # it -- true of a LEVEL evolution and of one held for a move
         if meth == "LEVEL" and isinstance(param, int):
-            join = param
+            # held back (evo_timing.py) -> it evolves only at the hold level
+            join, in_battle = P.evolve_level(frm, cur, param), True
         else:
             join = P.STAGE_BY_ID.get(r2.get("stage"), {}).get("level", level) + 1
-        chain.append((cur, join))
+            in_battle = False
+            if P.evo_delay(frm, cur):      # a held stone/trade waits for its move
+                join, in_battle = max(join, P.evo_delay(frm, cur)), True
+        chain.append((cur, join, in_battle))
         cur = frm
     chain.reverse()          # caught base first
     base = chain[0][0]
@@ -90,9 +104,13 @@ def _levelup_pool(species, level, stage):
     out = list(E.default_moveset(base, catch_lvl))
     # then every move learned as it levels from capture to `level`, by the
     # form active at each level; the base's crowded-out low moves never return
-    for i, (form, join) in enumerate(chain):
+    for i, (form, join, _b) in enumerate(chain):
         lo = catch_lvl if i == 0 else join - 1     # inclusive of the evo level
-        hi = min(chain[i + 1][1] - 1, level) if i + 1 < len(chain) else level
+        if i + 1 < len(chain):
+            nxt_join, nxt_battle = chain[i + 1][1], chain[i + 1][2]
+            hi = min(nxt_join if nxt_battle else nxt_join - 1, level)
+        else:
+            hi = level
         for lv, mv in E.LEVELUP.get(form, []):
             if lo < lv <= hi:
                 out.append(mv)
@@ -105,12 +123,13 @@ def move_pool(species, level, stage):
     key = (species, level, stage)
     if key in _pool_cache: return _pool_cache[key]
     moves = learnable(species, level, stage)
+    own = own_moves(species, level, stage)
     dmg = []
     for mv in moves:
         m = E.MOVES.get(mv)
         if not m: continue
         if m["effect"] in E.UNUSABLE_EFFECTS: continue
-        if not tm_allowed(mv, species, stage): continue
+        if mv not in own and not tm_allowed(mv, species, stage): continue
         if m["power"] > 0 or m["effect"] in ("DRAGON_RAGE", "SONICBOOM",
                                              "LEVEL_DAMAGE", "PSYWAVE", "SUPER_FANG"):
             dmg.append(mv)
@@ -119,8 +138,20 @@ def move_pool(species, level, stage):
 
 def setup_pool(species, level, stage, is_setup):
     """The stat-boosting moves (tactics.is_setup) this species could know here."""
+    own = own_moves(species, level, stage)
     return sorted(mv for mv in learnable(species, level, stage)
-                  if mv in E.MOVES and is_setup(mv) and tm_allowed(mv, species, stage))
+                  if mv in E.MOVES and is_setup(mv)
+                  and (mv in own or tm_allowed(mv, species, stage)))
+
+def own_moves(species, level, stage):
+    """Moves this specimen has without spending a TM: by level-up (as it actually
+    levelled) and, from Two Island on, the move tutors. A single-copy TM's owner
+    rule must not take these away -- an Alakazam learns Psychic by level whoever
+    holds TM29, and a Pikachu held to L26 keeps its own Thunderbolt."""
+    out = set(_levelup_pool(species, level, stage))
+    if stage >= 28:
+        out.update("MOVE_" + t for t in E.TUTOR.get(species, []))
+    return out
 
 def learnable(species, level, stage):
     """Every move this species could know at this point, damaging or not:
@@ -778,6 +809,10 @@ def _analyze_one(enc):
 
 if __name__ == "__main__":
     import sys, time, concurrent.futures as cf, multiprocessing as mp
+    # the per-encounter rankings see the same held evolutions sections.py solved
+    # under (evo_timing.py), or the two halves of the guide disagree on forms
+    P.use_evo_timing()
+    refresh_availability()
     graph = json.load(open(os.path.join(OUT, "encounters.json")))
     only = sys.argv[1] if len(sys.argv) > 1 else None
     graph = [enc for enc in graph if not only or only in enc["id"]]

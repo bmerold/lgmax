@@ -5,6 +5,7 @@ keys become positional arrays, and shared strings become indices into pools.
 """
 import base64, json, os, re
 import engine, progression, capture
+progression.use_evo_timing()     # the evolution-timing plan sections.py solved under
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 
@@ -422,10 +423,7 @@ def main():
             })
         return out
 
-    out_sections = {}
-    for _mode, _by_starter in secs["sections"].items():
-      out_sections[_mode] = {}
-      for starter, per_stage in _by_starter.items():
+    def pack_run(per_stage):
         rows = {}
         for stage, sec in per_stage.items():
             if not sec: continue
@@ -433,7 +431,11 @@ def main():
                 "lv": sec["level"], "bg": sec["badges"], "b": sec["battles"],
                 "wb": sec.get("wildBattles", 0), "wt": sec.get("wildTurns", 0),
                 "wl": S(sec.get("wildLead")),
-                "de": [[S(r["from"]), S(r["to"]), S(r["how"]), S(r.get("note"))]
+                # Pokedex evolutions: [from, to, how, note, grindSeconds] -- the
+                # last is 0 when the run's parties already reach it
+                # (sections.price_dex_evos)
+                "de": [[S(r["from"]), S(r["to"]), S(r["how"]), S(r.get("note")),
+                        r.get("sec", 0)]
                        for r in sec.get("dexEvos", [])],
                 "wp": [[S(w["map"]), S(w["lead"]), w["battles"],
                         [[S(r["name"]), r["level"], r["share"], S(r["by"]),
@@ -466,12 +468,39 @@ def main():
                 "bench": [bench_row(b) for b in sec["bench"]],
                 "legs": leg_rows(sec, int(stage)),
                 # least-training objective: who has to be ground up to field this
-                # party -- [name, fromLevel, toLevel, grindTurns, returning 0/1]
+                # party -- [name, fromLevel, toLevel, grindTurns, returning 0/1,
+                #           grindSeconds]
                 "tr": [[S(b["name"]), b["from"], b["to"], b["turns"],
-                        1 if b["returning"] else 0]
+                        1 if b["returning"] else 0, b.get("sec", 0)]
                        for b in sec.get("training", [])],
             }
-        out_sections[_mode][starter] = rows
+            ap = sec.get("approach")
+            if ap:
+                # core approach only: [levelTheLedgerReached, levelAfterThisSection,
+                #                      [specialist names]] (core.solve_core_run)
+                rows[str(stage)]["ap"] = [ap["ledgerLevel"], ap["levelAfter"],
+                                          [S(engine.SPECIES[sp]["name"]) for sp in ap["specialists"]]]
+        return rows
+
+    out_sections = {m: {st: pack_run(per) for st, per in by.items()}
+                    for m, by in secs["sections"].items()}
+    # the core approach (core.py): per run, the League-viable sixes offered to the
+    # player, each with its own section rows. Field map per option:
+    #   coreOptions[mode][starter][i] = {"s": section rows (as "sections"),
+    #     "team": [names], "tm": TM plan, "c": {group: chosen option name},
+    #     "sum": [lines, trainingTurns, battleTurns, faints, unanswered, leagueLevel,
+    #             sectionsNeedingAnHmHelper]}
+    _core = (secs.get("core") or {}).get("options") or {}
+    core_options = {m: {st: [{"s": pack_run(o["result"]),
+                              "team": [S(engine.SPECIES[sp]["name"]) for sp in o["team"]],
+                              "tm": o["tmPlan"],
+                              "c": {g: engine.SPECIES[sp]["name"] for g, sp in o["picks"].items()},
+                              "sum": [o["summary"][k] for k in ("lines", "training", "battle",
+                                                                 "faints", "unanswered",
+                                                                 "leagueLevel", "hmHelped")]}
+                             for o in opts]
+                        for st, opts in by.items()}
+                    for m, by in _core.items()}
 
     choices = {}
     for _mode, _cl in secs["choices"].items():
@@ -621,6 +650,26 @@ def main():
                      for s in progression.STAGES
                      if s.get("gym") or s["id"] == 32]
 
+    # League-clearing sixes (league_sets.py), per starter's Champion:
+    #   {starter: {"listed", "through", "simulated", "rows": [row...]}}
+    #   row = [[six names], clearLevel (0 = never by L75), faints, battleTurns,
+    #          screenLevel, [[tmName, [holder names]]...], flags]
+    #   flags bits: 1 needs trades, 2 holds a legendary bird, 4 holds the starter line
+    league_sets = {}
+    _lp = f"{OUT}/league_sets_{engine.VERSION}.json"
+    if os.path.exists(_lp):
+        _ls = json.load(open(_lp))
+        for _st, _blk in _ls.get("starters", {}).items():
+            league_sets[_st] = {
+                "listed": _blk["listed"], "through": _blk["listedThrough"],
+                "simulated": _blk["simulated"],
+                "rows": [[[S(n) for n in r["six"]], r["clearLevel"] or 0,
+                          r.get("faints", 0), r.get("turns", 0), r["screenLevel"],
+                          [[S(m), [S(h) for h in hs]] for m, hs in r.get("tms", {}).items()],
+                          (1 if r.get("trade") else 0) | (2 if r.get("bird") else 0)
+                          | (4 if r.get("starterLine") else 0)]
+                         for r in _blk["sixes"]]}
+
     payload = {"pool": pool, "stages": stages, "encounters": out_encs,
                "mapart": art, "sprites": sprites, "tpics": tpics,
                "ow": ow, "owByMap": ow_by_map, "dex": dex,
@@ -629,10 +678,12 @@ def main():
                "itineraries": itineraries, "grindRange": _train.get("range", [5, 55]),
                "route": {"total": route["stepTotal"]},
                "sections": out_sections, "choices": choices,
+               "coreOptions": core_options,
                "commitments": secs.get("tradeCommitments", {}),
                "tmPlans": secs.get("tmPlans", {}),
                "tmSupply": secs.get("tmSupply", {}),
-               "wildLoad": secs.get("wildLoad", {})}
+               "wildLoad": secs.get("wildLoad", {}),
+               "leagueSets": league_sets}
     path = f"{OUT}/payload.json"
     with open(path, "w") as f:
         json.dump(payload, f, separators=(",", ":"))

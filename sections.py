@@ -600,6 +600,25 @@ def seg(p, hi, lo):
     return max(0.0, tbl[hi] - tbl[max(0, lo)])
 
 _threat_cache = {}
+DUEL_TURN_CAP = 40     # a KO slower than this is no answer at all
+DUEL_LOSS = 9.0        # the cost recorded for a fight with no answer
+
+def duel_cost(pm, opp, moves, badges):
+    """One-on-one screen: the share of its HP `pm` loses beating `opp` with the
+    best of `moves` (>= 1: it loses), and that move. The faster side gets a free
+    turn. Used by the core pick, the evolution-timing weigh-up and the League
+    analysis, so all three judge a fight the same way."""
+    best, t = None, 999.0
+    for mv in moves:
+        p = profile(pm, opp, mv, badges)
+        if p and p["turns"] < t:
+            best, t = mv, p["turns"]
+    if t >= DUEL_TURN_CAP:
+        return DUEL_LOSS, None
+    thr = threat(opp, pm, badges)["avg"]
+    first = 1.0 if pm["stats"]["speed"] > opp["stats"]["speed"] else 0.0
+    return max(0.0, t - first) * thr / pm["stats"]["hp"], best
+
 def threat(opp, pm, badges):
     """Damage the opponent deals to this player Pokemon per turn."""
     key = (opp["species"], opp["level"], tuple(opp["moves"]), pm["species"],
@@ -826,7 +845,8 @@ def drop_key(member, move, level, stage, opponents, badges):
             move_value(member.mon, move, opponents, badges))
 
 def assign_hms(team, stage, level, badges, avail, opponents, starter,
-               held_roots, held_groups, chosen, teleport=False, moon_used=None):
+               held_roots, held_groups, chosen, teleport=False, moon_used=None,
+               skip=frozenset(), protected=frozenset(), helpers=()):
     """Make sure the party can actually cross the section, not just win in it.
 
     Field moves are cheap to carry and expensive to be without, so they are
@@ -846,9 +866,15 @@ def assign_hms(team, stage, level, badges, avail, opponents, starter,
          branch that costs anything, and it is priced: the section is re-run
          afterwards, so the turn count reflects the move that is gone.
 
+    `skip` drops field moves the run has chosen to do without here (the core
+    approach walks instead of flying until a core member can carry Fly);
+    `protected` species are never traded away for a carrier; `helpers` are line
+    roots a core run already brought in to carry an HM, tried first so one
+    helper keeps the job instead of a new one joining every section.
+
     Returns (plan, extra members to add to the party).
     """
-    req = list(HM.moves_here(stage))
+    req = [mv for mv in HM.moves_here(stage) if mv not in skip]
     # Teleport rides along as a field move on the legs the route uses it (it saves
     # the walk back to a Center). Unlike an HM it's optional -- worth a spare slot
     # or a carrier, never a sacrificed attack -- so it's pulled out before the
@@ -900,7 +926,14 @@ def assign_hms(team, stage, level, badges, avail, opponents, starter,
             continue
         uncovered.append(mv)
 
-    # ---- 3: carriers, each closing as many remaining gaps as it can
+    # ---- 3: carriers, each closing as many remaining gaps as it can. Under the
+    # core approach a field move a core member can learn stays with the core (it
+    # gives up a move in step 4) -- the point is the six carry the HMs; a carrier
+    # joins only for a move none of them can hold.
+    held_back = [mv for mv in uncovered
+                 if any(m.species in protected and field_can_learn(m.species, mv)
+                        for m in team)]
+    uncovered = [mv for mv in uncovered if mv not in held_back]
     pool = None
     while uncovered and len(team) + len(extra) < MAX_TEAM:
         if pool is None:
@@ -908,7 +941,9 @@ def assign_hms(team, stage, level, badges, avail, opponents, starter,
                     if sp not in chosen and C.allowed(sp)
                     and sp not in NO_TEAM_SPECIES
                     and C.starter_of(sp) in (None, starter)
-                    and not C.outgrown(sp, stage, avail)]
+                    and not C.outgrown(sp, stage, avail)
+                    # a core section is at the core's own level (see solve_section)
+                    and not (protected and P.level_evolved(sp, level, avail))]
         best, bestkey = None, None
         roots = set(held_roots) | {C.line_root(m.species) for m in extra}
         groups = set(held_groups) | {g for g in
@@ -927,7 +962,8 @@ def assign_hms(team, stage, level, badges, avail, opponents, starter,
             pm = O.player_mon(sp, level)
             fight = max((move_value(pm, mv, opponents, badges)
                          for mv in O.move_pool(sp, level, stage)), default=0.0)
-            key = (-len(covers), -fight, E.SPECIES[sp]["name"])
+            key = (C.line_root(sp) not in helpers, -len(covers), -fight,
+                   E.SPECIES[sp]["name"])
             if bestkey is None or key < bestkey:
                 best, bestkey = (sp, covers), key
         if best is None: break
@@ -945,6 +981,7 @@ def assign_hms(team, stage, level, badges, avail, opponents, starter,
                          "permanent": False})
         uncovered = [mv for mv in uncovered if mv not in covers]
 
+    uncovered += held_back
     # Teleport is a convenience, not a barrier: if no spare slot or carrier took
     # it, leave it -- the route's teleport hops just cost the full walk instead.
     # Nobody gives up an attack for it.
@@ -980,13 +1017,16 @@ def assign_hms(team, stage, level, badges, avail, opponents, starter,
                 covers = sum(1 for x in uncovered if HM.can_learn(sp, x))
                 fight = max((move_value(pm, x, opponents, badges) for x in mpool),
                             default=0.0)
-                k = (-covers, -fight, E.SPECIES[sp]["name"])
+                # the helper already carrying a field move this run swaps back in
+                # before a stranger (Raticate held Cut, then a full party at Route
+                # 12 swapped in a Scyther for it: two carriers for one job)
+                k = (C.line_root(sp) not in helpers, -covers, -fight, E.SPECIES[sp]["name"])
                 if key is None or k < key:
                     if not C.conflicts(sp, roots, groups) or True:
                         swap_in, key = (sp, pm, mpool, covers), k
-            if swap_in:
+            if swap_in and any(m.species not in protected for m in team):
                 sp, pm, mpool, _ = swap_in
-                worst = min(team, key=lambda m: max(
+                worst = min((m for m in team if m.species not in protected), key=lambda m: max(
                     (move_value(m.mon, x, opponents, badges) for x in m.moves),
                     default=0.0))
                 team.remove(worst)
@@ -1010,9 +1050,16 @@ def assign_hms(team, stage, level, badges, avail, opponents, starter,
             continue
         best, bestkey = None, None
         for m in cands:
-            worst = min(m.moves, key=lambda x: drop_key(m, x, level, stage,
-                                                        opponents, badges))
+            # never trade away a field move this section needs for another one
+            keep = [x for x in m.moves if not (protected and x in req)] or m.moves
+            worst = min(keep, key=lambda x: drop_key(m, x, level, stage,
+                                                     opponents, badges))
             cost = drop_key(m, worst, level, stage, opponents, badges)
+            if protected:
+                # the core spreads its field moves: whoever holds the fewest
+                # gives up a slot, so no member ends up all HMs (Charizard was
+                # handed Cut, Fly, Strength and Rock Smash at once)
+                cost = (sum(1 for x in m.moves if x in HM.HM_MOVE.values()), cost)
             if bestkey is None or cost < bestkey:
                 best, bestkey = (m, worst), cost
         m, worst = best
@@ -1113,14 +1160,21 @@ def dex_evolutions(avail):
         frm = rec.get("from"); meth = rec.get("evoMethod"); param = rec.get("evoParam")
         fname = E.SPECIES[frm]["name"] if frm else "?"
         tname = E.SPECIES[tgt]["name"]
+        hold = rec.get("holdTo")
+        hold_mv = E.MOVES.get(rec.get("holdMove"), {}).get("name") if hold else None
         if meth and meth.startswith("LEVEL"):
             lv = param if isinstance(param, int) else None
             how = f"level it to {lv}" if lv else "level it up"
             note = None
+            if hold:
+                # the timing plan holds this one back for a move (evo_timing.py)
+                how = f"let it evolve at L{hold}, once it knows {hold_mv}"
+                note = (f"cancel the evolution (press B) at L{lv}–{hold - 1}: "
+                        f"{fname} learns {hold_mv} at L{hold}, which {tname} learns later or never")
             # optional: a strong move the pre-evo learns a few levels before the
             # evolved form, within a plausible playthrough window. Delaying trades
             # evolved stats meanwhile, so it is framed as a choice, not advice.
-            if lv:
+            if lv and not hold:
                 fl = {m2: l2 for l2, m2 in E.LEVELUP.get(frm, [])}
                 tl = {m2: l2 for l2, m2 in E.LEVELUP.get(tgt, [])}
                 best = None
@@ -1141,6 +1195,8 @@ def dex_evolutions(avail):
             stn = E.ITEMS.get(param, {}).get("name", param)
             buy = " (buy at Celadon)" if param in STORE_STONES else ""
             how = f"use a {stn}{buy}"
+            if hold:
+                how += f" once it knows {hold_mv} (L{hold})"
             note = ("only 4 in the game — save them for the evolutions you'll keep"
                     if param == "ITEM_MOON_STONE" else None)
             # if the evolved form learns nothing more by level, warn to delay
@@ -1180,6 +1236,48 @@ def dex_evolutions(avail):
     for st in out: out[st].sort(key=lambda r: r["to"])
     _DEX_EVOS = dict(out)
     return _DEX_EVOS
+
+def price_dex_evos(result, avail):
+    """Put a grind time on each level-up Pokédex evolution of one solved run (the
+    rows dex_evolutions shows per section), for the guide's playtime estimate.
+    An evolution the run's own parties reach is free -- the line levelled there
+    fighting. Otherwise the player raises the pre-evolution from where it's caught
+    to the evolution level; a line with several such entries (Caterpie ->
+    Metapod -> Butterfree) is one mon raised up its chain, so each row pays only
+    the levels past the previous one. Stones, trades and friendship cost no XP,
+    unless the timing plan holds one until a move's level."""
+    by_name = {v["name"]: k for k, v in E.SPECIES.items()}
+    fielded = {t["species"] for sec in result.values() if sec for t in sec.get("team", [])}
+    reached = set()
+    for sp in fielded:              # a fielded form has passed every form below it
+        while sp:
+            reached.add(sp); sp = TC._pre_evo(sp)
+    rows = []
+    for st, sec in result.items():
+        if not sec: continue
+        sec["dexEvos"] = [dict(r) for r in sec.get("dexEvos", [])]
+        for r in sec["dexEvos"]:
+            r["sec"] = 0
+            tgt, frm = by_name.get(r["to"]), by_name.get(r["from"])
+            rec = avail.get(tgt) or {}
+            # the level the evolution really happens at: a held one (evo_timing)
+            # waits for its move -- a held stone evolution included, which then
+            # costs XP like a level-up one
+            if rec.get("holdTo"):
+                lv = rec["holdTo"]
+            elif str(rec.get("evoMethod", "")).startswith("LEVEL"):
+                lv = rec.get("evoParam")
+            else:
+                lv = None
+            if tgt in reached or not frm or not isinstance(lv, int):
+                continue
+            rows.append((C.line_root(tgt), lv, frm, r))
+    done = {}                       # line root -> level its grind already reached
+    for root, lv, frm, r in sorted(rows, key=lambda x: (x[0], x[1])):
+        start = max(TC.obtained_level(frm, avail), done.get(root, 0))
+        if lv > start:
+            r["sec"] = round(TC.grind_seconds(frm, start, lv, avail))
+        done[root] = max(lv, done.get(root, 0))
 
 def wild_plan(team, stage, badges):
     """For each map the section walks, the point Pokémon and how it answers
@@ -1899,16 +1997,17 @@ class Objective:
     fewest-turns rule (the wipe fallback in _solve_run) while the bill is still
     tracked and reported."""
     def __init__(self, stage=None, level=None, avail=None, roster=None, plan=None,
-                 weight=1.0):
+                 weight=1.0, levels=None):
         self.active = roster is not None
         self.stage, self.level, self.avail = stage, level, avail
+        self.levels = levels or {}     # species fielded at their own level
         self.roster, self.plan, self.weight = roster, plan or {}, weight
         self._memo = {}
 
     def member(self, sp):
         if not self.active: return 0.0
         if sp not in self._memo:
-            raw = self.roster.owed(sp, self.level, self.avail)[0]
+            raw = self.roster.owed(sp, self.levels.get(sp, self.level), self.avail)[0]
             serves = sum(1 for st in self.plan.get(C.line_root(sp), ()) if st >= self.stage)
             self._memo[sp] = self.weight * raw / max(1, serves)
         return self._memo[sp]
@@ -1933,7 +2032,8 @@ USAGE = {}
 def set_usage(counts):
     USAGE.clear(); USAGE.update(counts or {})
 
-def prune_team(team, chosen, battles, badges, heal_idx, carry, stage, obj=TURNS_ONLY):
+def prune_team(team, chosen, battles, badges, heal_idx, carry, stage, obj=TURNS_ONLY,
+               protected=frozenset()):
     """Drop any member whose removal costs nothing: the greedy seed can end up with
     no job once the specialists join (a solo-strong opener whose every fight gets
     taken over), and the party the page shows should be exactly the bodies the
@@ -1944,6 +2044,7 @@ def prune_team(team, chosen, battles, badges, heal_idx, carry, stage, obj=TURNS_
         base = run_section(team, battles, badges, heal_idx, carry=carry, stage=stage)
         bkey = score(base, obj, team)
         for m in list(team):
+            if m.species in protected: continue
             rest = [x for x in team if x is not m]
             r = run_section(rest, battles, badges, heal_idx, carry=carry, stage=stage)
             if score(r, obj, rest) <= bkey:
@@ -1955,7 +2056,7 @@ def prune_team(team, chosen, battles, badges, heal_idx, carry, stage, obj=TURNS_
 SWAP_ROUNDS = 3      # bound on swap-pass sweeps (each is |team| x |candidates| sims)
 
 def swap_pass(team, chosen, members, battles, badges, heal_idx, carry, stage, moon_used,
-              obj=TURNS_ONLY):
+              obj=TURNS_ONLY, protected=frozenset()):
     """Local search over the greedy party: replace one member at a time with the
     candidate that most improves score() (fewest unanswered, then faints, then
     turns), honoring the same legality as the greedy build (one per evolution
@@ -1969,6 +2070,7 @@ def swap_pass(team, chosen, members, battles, badges, heal_idx, carry, stage, mo
         improved = False
         for i in range(len(team)):
             out = team[i]
+            if out.species in protected: continue
             others = team[:i] + team[i + 1:]
             roots = {C.line_root(m.species) for m in others}
             groups = {g for g in (C.exclusive_group(m.species) for m in others) if g}
@@ -1998,16 +2100,18 @@ def swap_pass(team, chosen, members, battles, badges, heal_idx, carry, stage, mo
     return team, chosen, history
 
 
-def training_bill(team, level, avail, roster):
+def training_bill(team, level, avail, roster, levels=None):
     """The per-member grind the chosen party needs, for the guide."""
     if roster is None:
         return []
     out = []
     for m in team:
-        t, frm, back = roster.owed(m.species, level, avail)
+        to = (levels or {}).get(m.species, level)
+        t, frm, back = roster.owed(m.species, to, avail)
         if t > 0:
-            out.append({"species": m.species, "name": m.name, "from": frm, "to": level,
-                        "turns": round(t, 1), "returning": back})
+            out.append({"species": m.species, "name": m.name, "from": frm, "to": to,
+                        "turns": round(t, 1), "returning": back,
+                        "sec": round(TC.grind_seconds(m.species, frm, to, avail))})
     return out
 
 def pick_key(res, sp, obj=TURNS_ONLY, team=()):
@@ -2289,7 +2393,14 @@ def moon_ok(species, stage, moon_used):
 
 def solve_section(stage, encs, starter, avail, tm_value=None, carry=None, moon_used=None,
                   level_override=None, heal_override=None, train_roster=None, plan=None,
-                  bill_weight=1.0):
+                  bill_weight=1.0, core=None, specialists=True, skip_hms=frozenset(),
+                  hm_helpers=(), member_levels=None):
+    """One section's party. `core` (the core approach) is a list of species that
+    are always fielded -- never pruned, swapped or evicted for an HM carrier --
+    and `specialists` says whether anything else may join them for this section.
+    `member_levels` (species -> level) fields those members at their own level
+    instead of the section's: a core line is as far as its own XP has taken it,
+    and a newcomer joins at the level it was caught, not ground to the team's."""
     st = P.STAGE_BY_ID[stage]
     # level_override lets the recommended-level calculator try a candidate level
     # without touching the progression curve; badges stay stage-based.
@@ -2384,6 +2495,16 @@ def solve_section(stage, encs, starter, avail, tm_value=None, carry=None, moon_u
              and sp not in NO_TEAM_SPECIES
              and not C.outgrown(sp, stage, avail)
              and moon_ok(sp, stage, moon_used)]
+    core = list(core or [])
+    protected = frozenset(core)
+    if core:
+        core_roots = {C.line_root(sp) for sp in core}
+        # a core section's level is the core's own (its XP ledger), so a
+        # specialist is held in the form THAT level gives: one that would have
+        # levelled into its next form by now is not offered
+        cands = ([sp for sp in cands if C.line_root(sp) not in core_roots
+                  and not P.level_evolved(sp, level, avail)]
+                 if specialists else [])
     # everything this solve's result depends on beyond the code itself
     MEAS.note("section", (stage, level, sorted(cands), [b["id"] for b in battles],
                           carry, moon_used, dict(C.COMMITMENTS), O.TM_OWNER,
@@ -2401,31 +2522,35 @@ def solve_section(stage, encs, starter, avail, tm_value=None, carry=None, moon_u
             cover += min(1.0, d / max(1, opp["stats"]["hp"]))
         screened.append((cover, sp))
     screened.sort(reverse=True)
-    finalists = [sp for _, sp in screened[:SCREEN]]
+    finalists = [sp for _, sp in screened[:SCREEN]] + core
     # The starter always gets a look, but as the form you would actually be
     # holding by now. Force-adding the BASE form put a Charmander on the
     # Champion's doorstep in the post-game, where it was picked purely as a
     # warm body once everything else had fainted.
     line = [sp for _, sp in screened if C.starter_of(sp) == starter]
-    if line and not any(sp in finalists for sp in line):
+    if line and not core and not any(sp in finalists for sp in line):
         finalists.append(line[0])
 
+    own = dict(member_levels or {})
     members = {}
     for sp in finalists:
-        pm = O.player_mon(sp, level)
-        pool = O.move_pool(sp, level, stage)
+        lv = own.get(sp, level)
+        pm = O.player_mon(sp, lv)
+        pool = O.move_pool(sp, lv, stage)
         mvs = choose_moveset(pm, pool, opponents, badges)
         if not mvs: continue
         if stage == TAC.LEAGUE_STAGE:
             mvs = league_moveset(pm, mvs, stage, opponents, badges)
-        members[sp] = (pm, mvs, pool, obey_factor(sp, level, badges, avail))
+        members[sp] = (pm, mvs, pool, obey_factor(sp, lv, badges, avail))
 
-    obj = Objective(stage, level, avail, train_roster, plan, bill_weight)
+    obj = Objective(stage, level, avail, train_roster, plan, bill_weight, own)
 
-    # ---- greedy team build
-    team, chosen, history = [], [], []
-    held_roots, held_groups = set(), set()
-    prev = None
+    # ---- greedy team build (a core is seated first and never leaves)
+    team = [Member(*members[sp]) for sp in core if sp in members]
+    chosen, history = [m.species for m in team], []
+    held_roots = {C.line_root(sp) for sp in chosen}
+    held_groups = {g for g in (C.exclusive_group(sp) for sp in chosen) if g}
+    prev = run_section(team, battles, badges, heal_idx, carry=carry) if team else None
     while len(team) < MAX_TEAM:
         best, bestsp, bestres = None, None, None
         for sp, (pm, mvs, pool, ob) in members.items():
@@ -2471,7 +2596,7 @@ def solve_section(stage, encs, starter, avail, tm_value=None, carry=None, moon_u
     # legal candidate in every slot and keep strict improvements (swap_pass).
     greedy_sps = [m.species for m in team]
     swapped, _, swaps = swap_pass(team, chosen, members, battles, badges, heal_idx,
-                                    carry, stage, moon_used, obj)
+                                    carry, stage, moon_used, obj, protected)
     swapped_sps = [m.species for m in swapped]
 
     def finish(sps):
@@ -2479,7 +2604,7 @@ def solve_section(stage, encs, starter, avail, tm_value=None, carry=None, moon_u
         (team, chosen, roots, groups, hm_plan, score, HM_HELD after)."""
         t = [Member(*members[sp]) for sp in sps]
         ch = list(sps)
-        prune_team(t, ch, battles, badges, heal_idx, carry, stage, obj)
+        prune_team(t, ch, battles, badges, heal_idx, carry, stage, obj, protected)
         roots = {C.line_root(m.species) for m in t}
         groups = {g for g in (C.exclusive_group(m.species) for m in t) if g}
         # HM coverage: the party has to be able to CROSS the section, not just win
@@ -2488,7 +2613,8 @@ def solve_section(stage, encs, starter, avail, tm_value=None, carry=None, moon_u
         plan, extra = assign_hms(t, stage, level, badges, avail, opponents,
                                  starter, roots, groups, ch,
                                  teleport=stage in teleport_stages(),
-                                 moon_used=moon_used)
+                                 moon_used=moon_used, skip=skip_hms, protected=protected,
+                                 helpers=hm_helpers)
         for m in extra:
             t.append(m); ch.append(m.species)
         sc = score(run_section(t, battles, badges, heal_idx, carry=carry), obj, t)
@@ -2579,7 +2705,7 @@ def solve_section(stage, encs, starter, avail, tm_value=None, carry=None, moon_u
         "stage": stage, "starter": starter, "level": level,
         "badges": badges["count"],
         "objective": "training" if train_roster is not None else "turns",
-        "training": training_bill(final["team"], level, avail, train_roster),
+        "training": training_bill(final["team"], level, avail, train_roster, own),
         "battles": len(trainer_battles),
         "noBattles": not trainer_battles,
         "wildBattles": len(wild_only),
@@ -3086,6 +3212,57 @@ def _worker_pass2(args):
     build_party_plans(result, _AVAIL_TABLE)
     return trading, starter, result, plan
 
+def _core_mode(trading, picks, counts):
+    O.set_allow_trade(trading)
+    C.set_commitments(picks)
+    reset_solve_caches()
+    set_usage(counts)
+    O.set_tm_plan(SCARCE, None)
+    reset_hm_held()
+
+def _worker_core_pick(args):
+    """The core approach, step 1, for one (starter, trade-mode): the League-viable
+    sixes offered to the player (core.choose_cores, every TM open so candidates
+    are judged on even footing)."""
+    import core as K
+    K.bind(sys.modules[__name__])
+    starter, trading, picks, counts, _tm_value = args
+    _core_mode(trading, picks, counts)
+    return trading, starter, K.choose_cores(starter, _AVAIL_TABLE)
+
+def _league_log(result):
+    """The League section's battle log of a solved run (stage keys may be ints or,
+    once through JSON, strings)."""
+    sec = result.get(TAC.LEAGUE_STAGE) or result.get(str(TAC.LEAGUE_STAGE)) or {}
+    return sec.get("log", [])
+
+def _worker_core_solve(args):
+    """Step 2, one offered six: its own one-time choices locked, the single-use
+    TMs spent on the six alone, then the run solved with the six seated
+    (core.solve_core_run)."""
+    import core as K
+    K.bind(sys.modules[__name__])
+    starter, trading, picks, counts, tm_value, idx, team = args
+    own = K.core_commitments(team, picks)
+    _core_mode(trading, own, counts)
+    roots = {C.line_root(t) for t in team}
+    # The TMs are spent on what the SIX gains from them, measured on its own run
+    # with every TM open. Pass 1's demand only counts species the maximalist
+    # fielded, so a core member it never used (an Electrode) had no claim on
+    # Thunderbolt and fought the League with Secret Power.
+    measured = defaultdict(float)
+    K.solve_core_run(starter, team, _AVAIL_TABLE, tm_value=measured)
+    _core_mode(trading, own, counts)
+    owners, plan = assign_tms({k: v for k, v in measured.items()
+                               if C.line_root(k[1]) in roots}, SCARCE)
+    O.set_tm_plan(SCARCE, owners)
+    reset_solve_caches()
+    reset_hm_held()
+    result = K.solve_core_run(starter, team, _AVAIL_TABLE)
+    build_party_plans(result, _AVAIL_TABLE)
+    return trading, starter, idx, {"team": team, "picks": own, "result": result,
+                                   "tmPlan": plan}
+
 def _run_starters(fn, arglist):
     """Fan the per-starter solves across forked workers, results in input order.
     LGMAX_WORKERS caps the pool (1 forces a single worker, e.g. for debugging)."""
@@ -3155,6 +3332,11 @@ if __name__ == "__main__":
     import time
     graph = json.load(open(f"{OUT}/encounters.json"))
     sections = build_sections(graph)
+    # the evolution-timing plan (evo_timing.py): held-back evolutions move when
+    # their forms can be had and which pre-evolution moves they keep
+    held = P.use_evo_timing()
+    O.refresh_availability()
+    print(f"evolution timing: {len(held)} held-back evolution(s)", flush=True)
     avail = P.full_availability()
     print("estimating the walk...", flush=True)
     wl = route_wild_load()
@@ -3254,15 +3436,70 @@ if __name__ == "__main__":
                 for log in sec["log"]:
                     for step in log["steps"]:
                         for k in ("_moveConst", "_by", "_oppIdx"): step.pop(k, None)
+        for per_stage in result.values():
+            price_dex_evos(per_stage, avail)
         all_sections[mode] = result
         all_plans[mode] = tm_plans
         if mode == "no":
             with open(f"{OUT}/commitments.json", "w") as f:
                 json.dump({"picks": picks_by_mode["no"], "labels": all_commits["no"]}, f)
+    # ---- pass 3 (core approach): a few League-viable sixes per run, each solved ----
+    core_options = {m: {} for m, _ in MODES}
+    if "core" in os.environ.get("LGMAX_APPROACHES", "max core").split():
+        print("\n=== pass 3: core approach, both trade modes, all starters", flush=True)
+        offered = {(tr, st): teams for tr, st, teams in _run_starters(_worker_core_pick, args2)}
+        args3 = [a + (i, team) for a in args2
+                 for i, team in enumerate(offered[(a[1], a[0])])]
+        for tr, st, idx, opt in _run_starters(_worker_core_solve, args3):
+            mode, result = mode_of[tr], opt["result"]
+            keep_lists(result, avail)
+            price_dex_evos(result, avail)
+            for sec in result.values():
+                if not sec: continue
+                for log in sec["log"]:
+                    for step in log["steps"]:
+                        for k in ("_moveConst", "_by", "_oppIdx"): step.pop(k, None)
+            live = [sec for sec in result.values() if sec]
+            opt["summary"] = {
+                "lines": len({C.line_root(t["species"]) for sec in live for t in sec["team"]}),
+                "training": round(sum(b["turns"] for sec in live for b in sec.get("training", []))),
+                "battle": round(sum(sec["turns"] for sec in live)),
+                "faints": sum(sec["faints"] for sec in live),
+                "unanswered": sum(sec["unanswered"] for sec in live),
+                "leagueLevel": max((sec["level"] for sec in live), default=0),
+                # sections where an HM rides on someone outside the six
+                "hmHelped": sum(1 for sec in live
+                                if any(h.get("species") and C.line_root(h["species"])
+                                       not in {C.line_root(t) for t in opt["team"]}
+                                       for h in sec.get("hms", [])))}
+            core_options[mode].setdefault(st, []).append((idx, opt))
+            print(f"  [{mode}] {st} #{idx}: {[E.SPECIES[t]['name'] for t in opt['team']]} "
+                  f"{opt['summary']} ({time.time()-t0:.0f}s)", flush=True)
+        # A six the League sim liked can still meet a section its run can't clear
+        # (a Bulbasaur six wiped on Routes 12-15): offering it would hand the
+        # player a dead end, so it is dropped and the next spare offered instead.
+        import core as K
+        for mode in core_options:
+            for st in core_options[mode]:
+                ranked = [o for _i, o in sorted(core_options[mode][st], key=lambda io: io[0])]
+                clean = [o for o in ranked if o["summary"]["unanswered"] == 0]
+                dropped = len(ranked) - len(clean)
+                if dropped:
+                    print(f"  [{mode}] {st}: dropped {dropped} six(es) whose run wipes", flush=True)
+                # ... and one carrying a passenger: a line the League (at the run's
+                # real levels) never sends in, which the pick-level screen missed
+                busy = [o for o in clean
+                        if not K.league_idle(o["team"], _league_log(o["result"]))]
+                if len(busy) < len(clean):
+                    print(f"  [{mode}] {st}: dropped {len(clean) - len(busy)} six(es) "
+                          f"with a line the League never uses", flush=True)
+                clean = busy
+                core_options[mode][st] = clean[:K.CORE_OPTIONS]
     O.set_allow_trade(False)
     C.load_commitments(f"{OUT}/commitments.json")
     with open(f"{OUT}/sections.json", "w") as f:
         json.dump({"sections": all_sections, "choices": all_choices,
+                   "core": {"options": core_options},
                    "tmPlans": all_plans, "tradeCommitments": all_commits,
                    "wildLoad": {str(k): v for k, v in wl.items()},
                    "tmSupply": {k: v for k, v in supply.items() if v["obtainable"]},
