@@ -868,7 +868,11 @@ textarea.sync-code{width:100%;height:60px;resize:vertical;font-family:var(--mono
   min-width:9ch}
 .lg-row input[type=range]{width:min(220px,100%)}
 .chip.inc{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
-.chip.exc{text-decoration:line-through;color:var(--ink-3);border-style:dashed}
+.chip.exc,.chip.exc[aria-pressed="true"]{background:transparent;text-decoration:line-through;
+  color:var(--ink-3);border-color:var(--line-strong);border-style:dashed}
+.chip[hidden]{display:none}
+.lg-find{font:inherit;font-size:12px;padding:4px 8px;border:1px solid var(--line-strong);
+  border-radius:0;background:var(--surface);color:var(--ink);width:min(180px,100%)}
 .chip .cnt{opacity:.65;margin-left:4px;font-variant-numeric:tabular-nums}
 .lg-tab th[data-sort]{cursor:pointer;user-select:none;white-space:nowrap}
 .lg-tab th[data-sort][aria-sort="ascending"]::after{content:" ▲"}
@@ -4493,10 +4497,13 @@ function renderMoney(){
    strongest re-run through the full League simulation (shared HP, PP, the
    League's items) and raised until they clear. Rows (compact.py):
    [names, clearLevel (0 never), faints, turns, screenLevel, [[tm, holders]], flags]
-   flags: 1 trades, 2 legendary bird, 4 starter line. */
+   flags: 1 trades, 2 legendary bird, 4 starter line.
+   Pokémon filters go both ways: `inc` sixes must hold every one, `exc` sixes must hold none,
+   so "no Zapdos" is one click instead of including everyone else. Birds are tri-state
+   ("any" | "none" | "only") because "no birds" and "a bird" are both common asks. */
 let LEAGUE = _vd().leagueSets || {};
-const lg = {starter: null, inc: new Set(), exc: new Set(), trades: null, birds: true,
-            starterLine: false, max: 75, sort: "clear", dir: 1, show: 100};
+const lg = {starter: null, inc: new Set(), exc: new Set(), mode: "inc", find: "",
+            trades: null, birds: "any", starterLine: false, max: 75, sort: "clear", dir: 1, show: 100};
 const LG_COLS = [["clear", "Clears at", r => r[1] || 999], ["faints", "Faints", r => r[2]],
                  ["turns", "Turns", r => r[3]], ["screen", "1v1 level", r => r[4]]];
 function leagueRows(blk, st){
@@ -4504,7 +4511,8 @@ function leagueRows(blk, st){
   return blk.rows.filter(r => {
     const names = r[0].map(str), f = r[6];
     if (!allowTrade && (f & 1)) return false;
-    if (!lg.birds && (f & 2)) return false;
+    if (lg.birds === "none" && (f & 2)) return false;
+    if (lg.birds === "only" && !(f & 2)) return false;
     if (lg.starterLine && !(f & 4)) return false;
     if ((r[1] || 999) > lg.max) return false;
     for (const n of lg.inc) if (!names.includes(n)) return false;
@@ -4524,9 +4532,15 @@ function renderLeague(){
   // species chips: everyone who appears in a six, with how many sixes hold them
   const freq = {};
   blk.rows.forEach(r => r[0].forEach(i => { const n = str(i); freq[n] = (freq[n] || 0) + 1; }));
+  const other = lg.mode === "inc" ? "exclude" : "must include";
+  const q = lg.find.trim().toLowerCase();
   const chips = Object.keys(freq).sort((a, b) => freq[b] - freq[a] || a.localeCompare(b))
     .map(n => `<button class="chip${lg.inc.has(n) ? " inc" : lg.exc.has(n) ? " exc" : ""}"
-        data-lgmon="${esc(n)}" title="click: must include · again: exclude · again: clear">${esc(n)}<span class="cnt">${freq[n]}</span></button>`).join("");
+        data-lgmon="${esc(n)}"${q && !n.toLowerCase().includes(q) ? " hidden" : ""}
+        aria-pressed="${lg.inc.has(n) || lg.exc.has(n)}"
+        title="click: ${lg.mode === "inc" ? "must include" : "exclude"} · shift-click: ${other} · click again: remove">${esc(n)}<span class="cnt">${freq[n]}</span></button>`).join("");
+  const pill = (n, kind) => `<button class="chip ${kind}" data-lgdrop="${esc(n)}" aria-label="remove ${esc(n)} filter">${kind === "exc" ? "no " : ""}${esc(n)} ×</button>`;
+  const active = [...lg.inc].map(n => pill(n, "inc")).concat([...lg.exc].map(n => pill(n, "exc"))).join("");
   const allowTrade = lg.trades == null ? trading : lg.trades;
   const best = rows.find(r => r[1]);
   const mon = n => { const sp = SPRITES[n]; return `<span class="lg-mon">${sp ? `<img src="data:image/png;base64,${sp}" alt="">` : ""}${esc(n)}</span>`; };
@@ -4550,13 +4564,21 @@ function renderLeague(){
           ${STARTERS.map(s2 => `<button class="chip" data-lgstarter="${s2}" aria-pressed="${s2 === st}">you chose ${esc(s2)}</button>`).join("")}</div>
         <div class="lg-row"><span class="lg-lab">Allow</span>
           <button class="chip" data-lgtoggle="trades" aria-pressed="${allowTrade}">trade evolutions</button>
-          <button class="chip" data-lgtoggle="birds" aria-pressed="${lg.birds}">legendary birds</button>
           <button class="chip" data-lgtoggle="starterLine" aria-pressed="${lg.starterLine}">must hold my starter</button></div>
+        <div class="lg-row"><span class="lg-lab">Legendary birds</span>
+          ${[["any", "any"], ["none", "none"], ["only", "at least one"]].map(([v, l]) =>
+            `<button class="chip" data-lgbirds="${v}" aria-pressed="${lg.birds === v}">${l}</button>`).join("")}</div>
         <div class="lg-row"><span class="lg-lab">Clears by</span>
           <input type="range" min="45" max="75" value="${lg.max}" data-lgmax aria-label="highest clearing level">
           <b>L${lg.max}</b></div>
-        <div class="lg-row"><span class="lg-lab">Pokémon</span>${chips}
-          ${lg.inc.size || lg.exc.size ? `<button class="chip" data-lgclear>clear</button>` : ""}</div>
+        <div class="lg-row"><span class="lg-lab">Click adds</span>
+          <button class="chip" data-lgmode="inc" aria-pressed="${lg.mode === "inc"}">must include</button>
+          <button class="chip" data-lgmode="exc" aria-pressed="${lg.mode === "exc"}">exclude</button>
+          <input type="search" class="lg-find" data-lgfind placeholder="find a Pokémon" value="${esc(lg.find)}" aria-label="find a Pokémon">
+          <span class="note">shift-click does the opposite</span></div>
+        ${active ? `<div class="lg-row"><span class="lg-lab">Filtering</span>${active}
+          <button class="chip" data-lgclear>clear all</button></div>` : ""}
+        <div class="lg-row"><span class="lg-lab">Pokémon</span>${chips}</div>
       </div>
     </section>
     <section class="card">
@@ -4580,17 +4602,32 @@ document.getElementById("leaguePanel").addEventListener("click", ev => {
   if (t.dataset.lgstarter){ lg.starter = t.dataset.lgstarter; }
   else if (t.dataset.lgtoggle === "trades"){ lg.trades = !(lg.trades == null ? trading : lg.trades); }
   else if (t.dataset.lgtoggle){ lg[t.dataset.lgtoggle] = !lg[t.dataset.lgtoggle]; }
+  else if (t.dataset.lgbirds){ lg.birds = t.dataset.lgbirds; }
+  else if (t.dataset.lgmode){ lg.mode = t.dataset.lgmode; }
+  else if (t.dataset.lgdrop){ lg.inc.delete(t.dataset.lgdrop); lg.exc.delete(t.dataset.lgdrop); }
   else if (t.dataset.lgmon){
+    // A chip already filtered clears on click; otherwise it joins the chosen side
+    // (shift flips it), leaving the opposite side if it was there.
     const n = t.dataset.lgmon;
-    if (lg.inc.has(n)){ lg.inc.delete(n); lg.exc.add(n); }
-    else if (lg.exc.has(n)) lg.exc.delete(n);
-    else lg.inc.add(n);
+    if (lg.inc.has(n) || lg.exc.has(n)){ lg.inc.delete(n); lg.exc.delete(n); }
+    else {
+      const toExc = (lg.mode === "exc") !== ev.shiftKey;
+      (toExc ? lg.exc : lg.inc).add(n);
+    }
   }
   else if (t.dataset.lgclear != null){ lg.inc.clear(); lg.exc.clear(); }
   else if (t.dataset.lgmore != null){ lg.show += 100; }
   else return;
   if (!t.dataset.lgmore) lg.show = 100;
   renderLeague();
+});
+// Typing narrows the chips in place: re-rendering would steal the input's focus.
+document.getElementById("leaguePanel").addEventListener("input", ev => {
+  if (ev.target.dataset.lgfind == null) return;
+  lg.find = ev.target.value;
+  const q = lg.find.trim().toLowerCase();
+  ev.currentTarget.querySelectorAll("[data-lgmon]").forEach(b =>
+    b.hidden = !!q && !b.dataset.lgmon.toLowerCase().includes(q));
 });
 document.getElementById("leaguePanel").addEventListener("change", ev => {
   if (ev.target.dataset.lgmax == null) return;
