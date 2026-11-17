@@ -600,6 +600,12 @@ if os.path.exists(_lsp):
             if _why: _ls_bad.append((_st, _r["six"], _why))
     check("every League-tab six is legal (lines, starter, fossil/Dojo, Moon Stones, TM copies)",
           not _ls_bad and not _ls_empty, str((_ls_empty, _ls_bad[:3])))
+    # The tab filters birds out ("none"), so every Champion must offer bird-free
+    # sixes; ranking by screen level once let Moltres fill all of Squirtle's.
+    _ls_birdonly = [_st for _st, _blk in json.load(open(_lsp))["starters"].items()
+                    if _blk["sixes"] and all(_r.get("bird") for _r in _blk["sixes"])]
+    check("every starter's League tab offers sixes without a legendary bird",
+          not _ls_birdonly, str(_ls_birdonly))
 
 # ------------------------------------------------------------------ walk order
 # The completionist route decides the order battles happen in, and the

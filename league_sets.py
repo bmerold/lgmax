@@ -227,17 +227,19 @@ def covers_at(level, cand, mk, need, moon_cap, copies):
     return out
 
 
-def all_covers(table, foes, starter):
+def all_covers(table, foes, starter, exclude=frozenset()):
     """{six (sorted tuple): min shared level} against the League you face having
     picked `starter` (its Champion team), listed level by level until LIST_CAP.
-    A six holds this starter's line or none. Returns (sets, counts, last level)."""
+    A six holds this starter's line or none, and none of the `exclude` lines.
+    Returns (sets, counts, last level)."""
     mk = masks(table, foes)
     need = required(foes)[starter]
     moon_cap = S.moon_budget(STAGE)
     copies = league_scarce()
     found, counts, last = {}, {}, None
     for lv in LEVELS:
-        cand = [t for t in table if C.starter_of(t) in (None, starter) and mk[t][lv][2]]
+        cand = [t for t in table if C.starter_of(t) in (None, starter) and mk[t][lv][2]
+                and t not in exclude]
         new = 0
         for six, plan in covers_at(lv, cand, mk, need, moon_cap, copies):
             key = tuple(sorted(six))
@@ -253,6 +255,21 @@ def all_covers(table, foes, starter):
 # ------------------------------------------------------------------ step 4
 SIM_TOP = int(os.environ.get("LGMAX_SIM_TOP", 1200))   # sixes simulated, split per starter
 RANK_LEVEL = 50      # the 1v1 margin that orders sixes for the full simulation
+# Share of each starter's simulated sixes held for teams without a legendary bird.
+# Ranking by screen level alone let the birds crowd them out: picking Squirtle,
+# the Champion's Venusaur (L63) is beaten one on one only by Moltres until L48
+# and by no other line until L50, so all 33k sixes listed by the L46 cap held a
+# bird and the League tab's "no birds" filter showed nothing for that path.
+BIRDLESS_SHARE = 0.25
+
+def pick_for_sim(ranked, per_top, birdless):
+    """The top `per_top` of `ranked` (best first), with up to BIRDLESS_SHARE of
+    them held for the best bird-free sixes (fewer when fewer exist); rank order kept."""
+    keep = {kv[0] for kv in [kv for kv in ranked if birdless(kv[0])][:int(per_top * BIRDLESS_SHARE)]}
+    for kv in ranked:
+        if len(keep) >= per_top: break
+        keep.add(kv[0])
+    return [kv for kv in ranked if kv[0] in keep]
 
 def _member_costs(t, lv, table, plan):
     """A line's per-foe costs at lv with the one-copy TMs `plan` gives it."""
@@ -365,7 +382,7 @@ def inputs_hash():
     for name in INPUT_DATA:
         p = os.path.join(S.OUT, name)
         if os.path.exists(p): h.update(name.encode()); h.update(open(p, "rb").read())
-    h.update(f"{E.VERSION}|{SIM_TOP}|{LIST_CAP}|{os.environ.get('LGMAX_POKEFIRERED', '')}".encode())
+    h.update(f"{E.VERSION}|{SIM_TOP}|{LIST_CAP}|{BIRDLESS_SHARE}|{os.environ.get('LGMAX_POKEFIRERED', '')}".encode())
     return h.hexdigest()
 
 
@@ -408,12 +425,24 @@ if __name__ == "__main__":
     order = os.environ.get("LGMAX_LEAGUE_STARTERS", " ".join(STARTERS)).split()
     for st in order:
         found, counts, last = all_covers(table, foes, st)
+        birds = frozenset(t for t in table if t in S.NO_TEAM_SPECIES)
+        birdless = lambda six: not birds.intersection(six)
+        listed = len(found)
+        n_free = sum(1 for six in found if birdless(six))
+        if n_free < per_top * BIRDLESS_SHARE:
+            # the cap stopped the listing before bird-free sixes appear: list them
+            # on their own (levels already listed find nothing new; earlier wins)
+            free, _c, free_last = all_covers(table, foes, st, exclude=birds)
+            for six, v in free.items():
+                found.setdefault(six, v)
+            n_free = sum(1 for six in found if birdless(six))
+            print(f"[{st}] bird-free sixes: {n_free} (listed through L{free_last})", flush=True)
         # rank by the screen's own hand-out (cheap), then complete the hand-out
         # only for the sixes that go on to the full simulation
         ranked = sorted(found.items(), key=lambda kv: (
             kv[1][0], margin(kv[0], tbl, need[st], foes, kv[1][1]), kv[0]))
         top = [(six, st, lv, full_plan(six, plan, tbl, need[st], foes))
-               for six, (lv, plan) in ranked[:per_top]]
+               for six, (lv, plan) in pick_for_sim(ranked, per_top, birdless)]
         print(f"[{st}] {len(found)} sixes through L{last}; simulating the top {len(top)}", flush=True)
         sims = simulate(top)
         rows = [{"six": [name(t) for t in six], "species": list(six), "screenLevel": lv1,
@@ -423,7 +452,8 @@ if __name__ == "__main__":
                 for (six, _st, lv1, plan), (_s, lv, info) in zip(top, sims)]
         rows.sort(key=lambda r: (r["clearLevel"] is None, r["clearLevel"] or 0,
                                  r.get("faints", 0), r.get("turns", 0)))
-        report["starters"][st] = {"listed": len(found), "listedThrough": last,
+        report["starters"][st] = {"listed": listed, "listedThrough": last,
+                                  "birdless": n_free,
                                   "countsByLevel": counts, "simulated": len(top), "sixes": rows}
         print(f"[{st}] best:", flush=True)
         for r in rows[:15]:
