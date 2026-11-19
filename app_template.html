@@ -886,6 +886,21 @@ textarea.sync-code{width:100%;height:60px;resize:vertical;font-family:var(--mono
   border:1px solid var(--line-strong);padding:1px 5px;margin:1px 2px 1px 0;color:var(--ink-2)}
 .lg-tms{font-size:11.5px;color:var(--ink-2)}
 .lg-more{align-self:center}
+.lg-open{margin-top:4px;font-size:11px}
+.lg-mvtoggle{margin-left:auto}
+.lg-six-mv{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:6px 12px;
+  min-width:min(520px,62vw)}  /* three across on a desktop, fewer on a phone */
+.lg-mon-mv{align-items:flex-start;white-space:normal}
+.lg-mon-mv img{margin:0}
+.lg-mv{display:block;font-size:11px;line-height:1.35;color:var(--ink-2)}
+.lg-mv .cnt{color:var(--ink-3);margin-left:1px}
+.lg-detail > td{padding-top:0}
+.lg-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px}
+.lg-card{border:1px solid var(--line);border-radius:6px;padding:8px 10px;display:flex;flex-direction:column;gap:4px}
+.lg-moves{margin:0;padding-left:16px;font-size:12px}
+.lg-moves .cnt{color:var(--ink-3);font-size:11px}
+.lg-beats{font-size:11.5px;color:var(--ink-2)}
+.lg-beats .lg-lab{font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3)}
 
 /* ---------- notes ---------- */
 details.notes{background:var(--surface);border:1px solid var(--line);border-radius:var(--r)}
@@ -4496,15 +4511,50 @@ function renderMoney(){
    L45-60 (best learnable move each fight, one-copy TMs handed out once), the
    strongest re-run through the full League simulation (shared HP, PP, the
    League's items) and raised until they clear. Rows (compact.py):
-   [names, clearLevel (0 never), faints, turns, screenLevel, [[tm, holders]], flags]
-   flags: 1 trades, 2 legendary bird, 4 starter line.
+   [names, clearLevel (0 never), faints, turns, screenLevel, [[tm, holders]], flags, team]
+   flags: 1 trades, 2 legendary bird, 4 starter line. team (r[7]) is the clearing run's
+   [[member, [[move, uses]], [[foe, level, move, outcome]]]]: its moves and every foe it fought
+   (outcome 1 finished it, 0 wore it down, -1 knocked out before moving).
+   r[8] is the % of League replays (real accuracy, damage and item rolls) the six won at its
+   clear level, r[9] how many replays ran there; faints and turns are the replays' means.
    Pokémon filters go both ways: `inc` sixes must hold every one, `exc` sixes must hold none,
    so "no Zapdos" is one click instead of including everyone else. Birds are tri-state
    ("any" | "none" | "only") because "no birds" and "a bird" are both common asks. */
 let LEAGUE = _vd().leagueSets || {};
 const lg = {starter: null, inc: new Set(), exc: new Set(), mode: "inc", find: "",
-            trades: null, birds: "any", starterLine: false, max: 75, sort: "clear", dir: 1, show: 100};
-const LG_COLS = [["clear", "Clears at", r => r[1] || 999], ["faints", "Faints", r => r[2]],
+            trades: null, birds: "any", starterLine: false, max: 75, sort: "clear", dir: 1, show: 100,
+            open: new Set(), moves: false};
+// "Show moves" puts each member's League moves under its name in every row, so a list
+// of sixes can be compared at a glance; it is off by default to keep the table to
+// one line per six, and remembered on this device (a view preference, not synced).
+try { lg.moves = localStorage.getItem("lgmax.lgMoves") === "1"; } catch (e) {}
+// A member with the moves it used in the clearing run, most-used first. Unused
+// moves stay out of the row (the ▸ panel still lists all four).
+function lgMonMoves(n, moves){
+  const sp = SPRITES[n];
+  const used = (moves || []).filter(([, u]) => u > 0).sort((a, b) => b[1] - a[1]);
+  return `<span class="lg-mon lg-mon-mv">${sp ? `<img src="data:image/png;base64,${sp}" alt="">` : ""}<span>${esc(n)}
+    <span class="lg-mv">${used.length ? used.map(([m, u]) => `${esc(str(m))}<span class="cnt">×${Math.round(u * 10) / 10}</span>`).join(" · ") : "not sent in"}</span></span></span>`;
+}
+// A six's key for the open/closed moves panel: its member names, which outlive re-sorting.
+const lgKey = r => r[0].map(str).join("+");
+// One member's card in a six's moves panel: the four moves it carried (unused ones dimmed,
+// League uses rounded) and the foes it fought in the clearing run: finished, or worn down
+// before it went out (an Explosion into the Champion's ace is a finish).
+function lgMember([n, moves, beats]){
+  const sp = SPRITES[str(n)];
+  const mv = moves.map(([m, u]) => `<li class="${u > 0 ? "" : "dim"}">${esc(str(m))}${u > 0 ? ` <span class="cnt">×${Math.round(u * 10) / 10}</span>` : ""}</li>`).join("");
+  // the move is the one it was sent in to use; one knocked out first never used it
+  const foe = ([o, lv, m, out]) => `${esc(str(o))} L${lv}${out === -1 ? "" : ` <span class="dim">(${esc(str(m))})</span>`}`;
+  const won = beats.filter(b => b[3] === 1), worn = beats.filter(b => b[3] === 0),
+        fodder = beats.filter(b => b[3] === -1);
+  const line = (lab, list) => list.length ? `<div class="lg-beats"><span class="lg-lab">${lab}</span> ${list.map(foe).join(", ")}</div>` : "";
+  return `<div class="lg-card"><div class="lg-mon">${sp ? `<img src="data:image/png;base64,${sp}" alt="">` : ""}<b>${esc(str(n))}</b></div>
+    <ul class="lg-moves">${mv}</ul>${line("Finishes", won)}${line("Wears down", worn)}${line("Knocked out before moving", fodder)}
+    ${beats.length ? "" : `<div class="lg-beats dim">never sent in — a passenger here</div>`}</div>`;
+}
+const LG_COLS = [["clear", "Clears at", r => r[1] || 999], ["rate", "Wins", r => -(r[8] || 0)],
+                 ["faints", "Faints", r => r[2]],
                  ["turns", "Turns", r => r[3]], ["screen", "1v1 level", r => r[4]]];
 function leagueRows(blk, st){
   const allowTrade = lg.trades == null ? trading : lg.trades;
@@ -4544,15 +4594,20 @@ function renderLeague(){
   const allowTrade = lg.trades == null ? trading : lg.trades;
   const best = rows.find(r => r[1]);
   const mon = n => { const sp = SPRITES[n]; return `<span class="lg-mon">${sp ? `<img src="data:image/png;base64,${sp}" alt="">` : ""}${esc(n)}</span>`; };
-  const body = rows.slice(0, lg.show).map((r, i) => `<tr>
+  const body = rows.slice(0, lg.show).map((r, i) => { const k = lgKey(r), open = lg.open.has(k); return `<tr>
       <td class="dim">${i + 1}</td>
-      <td><div class="lg-six">${r[0].map(i2 => mon(str(i2))).join("")}</div></td>
+      <td>${lg.moves && r[7] && r[7].length
+          ? (mv => `<div class="lg-six lg-six-mv">${r[0].map(i2 => lgMonMoves(str(i2), mv[str(i2)])).join("")}</div>`)(
+              Object.fromEntries(r[7].map(t => [str(t[0]), t[1]])))
+          : `<div class="lg-six">${r[0].map(i2 => mon(str(i2))).join("")}</div>`}
+        ${r[7] && r[7].length ? `<button class="chip lg-open" data-lgopen="${esc(k)}" aria-expanded="${open}">${open ? "▾ hide" : lg.moves ? "▸ who each one beats" : "▸ moves & foes"}</button>` : ""}</td>
       <td>${r[1] ? `<span class="lg-lv">L${r[1]}</span>` : `<span class="dim">not by L75</span>`}</td>
+      <td>${r[1] && r[9] ? `<span title="won ${Math.round(r[8] * r[9] / 100)} of ${r[9]} replays">${r[8]}%</span>` : "—"}</td>
       <td>${r[1] ? r[2] : "—"}</td><td>${r[1] ? Math.round(r[3]) : "—"}</td>
       <td>L${r[4]}</td>
       <td class="lg-tms">${r[5].length ? r[5].map(([m, hs]) => `${esc(str(m))} → ${hs.map(h => esc(str(h))).join(", ")}`).join("<br>") : `<span class="dim">none needed</span>`}</td>
       <td>${r[6] & 1 ? `<span class="lg-flag">trade</span>` : ""}${r[6] & 2 ? `<span class="lg-flag">bird</span>` : ""}${r[6] & 4 ? `<span class="lg-flag">starter</span>` : ""}</td>
-    </tr>`).join("");
+    </tr>${open ? `<tr class="lg-detail"><td></td><td colspan="8"><div class="lg-cards">${r[7].map(lgMember).join("")}</div></td></tr>` : ""}`; }).join("");
   const th = c => `<th data-sort="${c[0]}" aria-sort="${lg.sort === c[0] ? (lg.dir > 0 ? "ascending" : "descending") : "none"}">${c[1]}</th>`;
   el.innerHTML = `
     <section class="card">
@@ -4583,10 +4638,11 @@ function renderLeague(){
     </section>
     <section class="card">
       <div class="card-h"><h2>${rows.length.toLocaleString()} matching six${rows.length === 1 ? "" : "es"}</h2>
-        <span class="note">${best ? `lowest: L${best[1]}` : "none clear under these filters"} · click a heading to sort</span></div>
+        <span class="note">${best ? `lowest: L${best[1]}` : "none clear under these filters"} · click a heading to sort</span>
+        <button class="chip lg-mvtoggle" data-lgmoves aria-pressed="${lg.moves}">Show moves</button></div>
       <div class="ctab-wrap"><table class="ctab lg-tab">
         <thead><tr><th>#</th><th>Six</th>${LG_COLS.map(th).join("")}<th>One-copy TMs</th><th></th></tr></thead>
-        <tbody>${body || `<tr><td colspan="8" class="dim">No six matches.</td></tr>`}</tbody></table></div>
+        <tbody>${body || `<tr><td colspan="9" class="dim">No six matches.</td></tr>`}</tbody></table></div>
     </section>
     ${rows.length > lg.show ? `<button class="chip lg-more" data-lgmore>show ${Math.min(100, rows.length - lg.show)} more</button>` : ""}
     <p class="foot">Each of the six fights every Elite Four and Champion Pokémon one on one with the best
@@ -4594,11 +4650,25 @@ function renderLeague(){
       Psychic, Earthquake and the other one-copy TMs go to one member each, while Game Corner and
       Dept. Store TMs can be bought again. The <b>1v1 level</b> is the lowest shared level at which the six
       beats every foe that way. <b>Clears at</b> is the lowest shared level at which the full League
-      simulation — HP and PP carried fight to fight, the League's own items and tactics — wins.
+      simulation — HP and PP carried fight to fight, the League's own items and tactics — wins at
+      least 90% of its replays: each replay plays every turn with real accuracy checks, damage rolls
+      and crits, and the Elite Four's Full Restores on the game's own rules. <b>Wins</b> is that
+      share; <b>Faints</b> and <b>Turns</b> are the replays' averages.
       The Champion's team follows the starter you picked.</p>`;
 }
 document.getElementById("leaguePanel").addEventListener("click", ev => {
   const t = ev.target.closest("button"); if (!t) return;
+  if (t.dataset.lgopen){
+    // Opening a six's moves only re-renders; it keeps the list length and filters.
+    const k = t.dataset.lgopen; lg.open.has(k) ? lg.open.delete(k) : lg.open.add(k);
+    renderLeague(); return;
+  }
+  if (t.dataset.lgmoves != null){
+    // a display switch: keeps the list length, filters and open rows
+    lg.moves = !lg.moves;
+    try { localStorage.setItem("lgmax.lgMoves", lg.moves ? "1" : "0"); } catch (e) {}
+    renderLeague(); return;
+  }
   if (t.dataset.lgstarter){ lg.starter = t.dataset.lgstarter; }
   else if (t.dataset.lgtoggle === "trades"){ lg.trades = !(lg.trades == null ? trading : lg.trades); }
   else if (t.dataset.lgtoggle){ lg[t.dataset.lgtoggle] = !lg[t.dataset.lgtoggle]; }

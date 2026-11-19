@@ -28,6 +28,7 @@ import constraints as C
 import walking as W
 import hms as HM
 import trainer_items as TI
+import rolls as RL
 import measure as MEAS
 import tactics as TAC
 import route_order as R
@@ -586,7 +587,9 @@ def profile(pm, opp, move, badges, obey=1.0):
                        "eff": p["effectiveness"], "min": p["min"], "max": p["max"],
                        "turns": t if math.isfinite(t) else 999.0,
                        "pp": E.MOVES[move]["pp"], "avg": p["avg"],
-                       "acc": p["accuracy"], "table": tbl}
+                       "acc": p["accuracy"], "table": tbl,
+                       # the per-hit spread, for the KO chances (win_chance)
+                       "dist": E.bin_dist(p["dist"])}
         _profile_cache[key] = hit
     return hit
 
@@ -603,6 +606,16 @@ _threat_cache = {}
 DUEL_TURN_CAP = 40     # a KO slower than this is no answer at all
 DUEL_LOSS = 9.0        # the cost recorded for a fight with no answer
 
+# Self-Destruct and Explosion faint the user the turn they are used, hit or miss
+# (BattleScript_EffectExplosion runs setatkhptozero before the damage,
+# data/battle_scripts_1.s), so the user gets exactly one. A plan that needs a
+# second use to finish the foe is no plan: the League sim once charged a Golem
+# 2.7 Explosions against one Gyarados. Expected turns <= 1 means one use does it.
+ONE_USE = 1.0 + 1e-6
+
+def self_ko(mv):
+    return E.MOVES[mv]["effect"] == "EXPLOSION"
+
 def duel_cost(pm, opp, moves, badges):
     """One-on-one screen: the share of its HP `pm` loses beating `opp` with the
     best of `moves` (>= 1: it loses), and that move. The faster side gets a free
@@ -611,7 +624,7 @@ def duel_cost(pm, opp, moves, badges):
     best, t = None, 999.0
     for mv in moves:
         p = profile(pm, opp, mv, badges)
-        if p and p["turns"] < t:
+        if p and p["turns"] < t and not (self_ko(mv) and p["turns"] > ONE_USE):
             best, t = mv, p["turns"]
     if t >= DUEL_TURN_CAP:
         return DUEL_LOSS, None
@@ -633,7 +646,10 @@ def threat(opp, pm, badges):
                         moves=opp["moves"])
         hit = ({"name": t["name"], "avg": t["avg"] * t["accuracy"] / 100.0,
                 "max": t["max"], "const": t["move"],
-                "cat": E.MOVES[t["move"]]["category"]}
+                "cat": E.MOVES[t["move"]]["category"],
+                # its per-hit spread and accuracy: how many hits it takes to
+                # drop us is a distribution too (survive)
+                "dist": E.bin_dist(t["dist"]), "acc": t["accuracy"]}
                if t else {"name": None, "avg": 0.0, "max": 0,
                           "const": None, "cat": None})
         _threat_cache[key] = hit
@@ -758,9 +774,10 @@ class Member:
         self.legMinHpPct = max(0.0, self.hp) / self.maxhp * 100
         self.legFaints = self.fainted
 
-def usable(member, opp, badges, boosts=None):
+def usable(member, opp, badges, boosts=None, hp=None):
     """Best move this member can still afford against this opponent, at its
-    current stat stages (or `boosts`, for a what-if)."""
+    current stat stages (or `boosts`, for a what-if). A self-KO move counts only
+    where one use finishes the foe at `hp` (default: full HP; ONE_USE)."""
     best = None
     mon = member.bmon() if boosts is None else with_boosts(member.mon, boosts)
     for mv in member.moves:
@@ -768,6 +785,9 @@ def usable(member, opp, badges, boosts=None):
         if member.pp[mv] < 1: continue
         p = profile(mon, opp, mv, badges, member.obey)
         if not p or p["turns"] >= 900: continue
+        if self_ko(mv):
+            t = p["table"][min(hp, len(p["table"]) - 1)] if hp and "table" in p else p["turns"]
+            if t > ONE_USE: continue
         if best is None or p["turns"] < best["turns"]:
             best = p
     return best
@@ -1395,9 +1415,14 @@ def _tactic_eval(m, opp, badges, H, s, k, boosts, heal, n, item_drag, rest, team
         return None                                   # dies before it ever attacks
     amt = kit.heal_amount(heal, m.maxhp) if heal else 0.0
     pool = hp1 + n * max(0.0, min(amt, m.maxhp - thr["avg"]))
-    acts = acting_turns(pool, thr["avg"], n, fast)
-    lands = acts >= t - 1e-9
-    frac = 1.0 if lands else (acts / t if t > 0 else 0.0)
+    acts = acting_turns(pool, thr["avg"], n, fast) + sum(uses or ())   # foe heal turns
+    # its odds: live through the switch-in and the setup turns at its unboosted
+    # bulk, then out-race the foe with the boosted move from the healed-up pool
+    pw = survive(thr0, m.hp, s + k) * win_chance(
+        p, H, thr, pool, n, fast, pace=m.obey, extra=xt, free=sum(uses or ()),
+        pp=m.pp[p["move"]])
+    lands = pw >= LAND_P
+    frac = 1.0 if lands else min(FAIL_FRAC, acts / t if t > 0 else 0.0)
     taken = (n + max(0.0, t - (1.0 if fast else 0.0) + xa)) * thr["avg"]
     hp_end = max(1.0, pool - taken) if lands else 0.0
     # what the boost keeps paying on the foes still to come, if it stays in
@@ -1417,10 +1442,12 @@ def _tactic_eval(m, opp, badges, H, s, k, boosts, heal, n, item_drag, rest, team
             run -= max(0.0, pj["turns"] - (1.0 if fj else 0.0)) * thj["avg"]
     turns = s + k + n + (t if lands else acts)
     return {"p": p, "thr": thr, "fast": fast, "t": t, "uses": uses, "lands": lands,
+            "pw": pw, "acts": s + k + n + min(acts, t),
             "frac": frac, "hp_end": hp_end, "turns": turns, "saving": saving,
-            "left": 0 if lands else hp_after(p, H, 0, frac)}
+            # what it leaves the foe at on the runs where it does go down
+            "failLeft": hp_after(p, H, 0, min(FAIL_FRAC, acts / t if t > 0 else 0.0))}
 
-def league_variants(team, opp, badges, active, H, item_drag, tac):
+def league_variants(team, opp, badges, active, H, item_drag, tac, fallback):
     """The League lines worth comparing with the plain plans: per member, a greedy
     boost sequence (up to tactics.MAX_BOOSTS per stint) and, for a member that
     would go down, the cheapest heals (up to MAX_HEALS) that let it finish.
@@ -1461,14 +1488,15 @@ def league_variants(team, opp, badges, active, H, item_drag, tac):
                 cost = sum(TAC.price(x[1]) for x in seq_l if x[0] == "item") + \
                        (TAC.price(heal) * n if heal else 0)
                 lands = ev["lands"]
-                key = (0 if lands else 2, ev["left"],
-                       round(ev["turns"] - ev["saving"], 4),
-                       ev["thr"]["avg"] * ev["turns"], cost)
+                fails = ([(1.0 - ev["pw"], ev["acts"], fallback(m, ev["failLeft"]))]
+                         if ev["pw"] < 1.0 - 1e-9 else [])
+                key = plan_key(ev["pw"], ev["turns"] - ev["saving"], False,
+                               ev["thr"]["avg"] * ev["turns"], fails, cost)
                 pp_cost = ev["t"] * ev["frac"] / m.obey
                 info = {"boosts": b, "actions": seq_l, "heal": heal, "heals": n,
                         "lands": lands, "frac": ev["frac"], "hpEnd": ev["hp_end"]}
                 out.append((key, [(m, ev["p"], ev["thr"], ev["turns"], 0.0, s > 0, False,
-                                   pp_cost, ev["uses"], H, 0, ev["fast"], info)]))
+                                   pp_cost, ev["uses"], H, 0, ev["fast"], info, ev["pw"])]))
                 if n: break          # cheapest heal that finishes is enough
     return out
 
@@ -1561,12 +1589,13 @@ def acting_turns(hp, per_hit, sw, faster):
     n = math.ceil(hp / per_hit - 1e-9)
     return max(0, n - sw - (0 if faster else 1))
 
-def segment_outcome(m, thr, turns, switched, faster):
+def segment_outcome(m, thr, turns, switched, faster, free=0.0):
     """(finished?, share of its work done) for one plan segment, given the
-    member's HP right now. `turns` includes the switch-in turn when switched."""
+    member's HP right now. `turns` includes the switch-in turn when switched;
+    `free` is the turns the foe spends on items (it does not attack in them)."""
     sw = 1 if switched else 0
     need = max(0.0, turns - sw)
-    acts = acting_turns(m.hp, thr["avg"], sw, faster)
+    acts = acting_turns(m.hp, thr["avg"], sw, faster) + free
     if acts >= need - 1e-9:
         return True, 1.0
     return False, (acts / need if need > 0 else 0.0)
@@ -1576,11 +1605,117 @@ def hp_after(p, hp_from, hp_to, frac):
     hp_from down to hp_to, read off the move's own expected-turns DP."""
     tbl = p["table"]
     hp_from = min(hp_from, len(tbl) - 1)
-    target = tbl[hp_from] - (tbl[hp_from] - tbl[hp_to]) * max(0.0, min(1.0, frac))
+    # A member that never acted dealt nothing. The DP is a staircase -- a move
+    # that KOs from 19 HP in one turn KOs from 1 HP in one too -- and the search
+    # below takes the lowest HP on the step, so a Cloyster one-shot on its
+    # switch-in "left" the Champion's Arcanine at 1 HP, and the planner, ranking
+    # losing plans by the HP they leave, chose that phantom over every real one.
+    if frac <= 0:
+        return hp_from
+    frac = min(1.0, frac)
+    target = tbl[hp_from] - (tbl[hp_from] - tbl[hp_to]) * frac
+    stair = hp_from
     for h in range(hp_to, hp_from + 1):
         if tbl[h] >= target - 1e-9:
-            return h
-    return hp_from
+            stair = h
+            break
+    # On a flat step the HP share of the work done is the honest reading
+    # (the DP is close to linear in HP off the steps); keep whichever leaves the
+    # foe more, so partial work never lands as a near-KO it did not deal.
+    linear = hp_to + (hp_from - hp_to) * (1.0 - frac)
+    return max(stair, int(math.ceil(linear - 1e-9)))
+
+# ------------------------------------------------------------------ win chances
+# Accuracy, damage rolls and crits are chances, not averages. Folded into one
+# expected-turns number, an 80% Hydro Pump that one-shots the Champion's Rhydon
+# read as 1.25 turns -- a sure loss for a member with one action -- and the
+# planner threw away an 80% win. Each plan is now priced by the chance it lands
+# (win_chance: our KO-in-k-uses curve against the foe's drop-us-in-j-hits curve)
+# and, when it may fail, by what the party falls back on (plan_vs's fallback).
+MAX_REPLANS = 40      # re-plans against one foe before a replay calls it lost
+                      # (each one costs a member, PP or a turn, so a real fight
+                      # never comes close)
+FAIL_FRAC = 0.9       # most of a foe a failed segment is credited with wearing
+                      # off: a member that falls short did not quite finish it
+LAND_P = 0.5          # the walk-through draws a segment as landing when it lands
+                      # at least this often: the median outcome of the fight
+EF_STEP = 0.05        # expected faints closer than this rank as equal; turns decide
+FALLBACK_LOSS = 20.0  # turns charged when nobody left can finish the foe
+
+def _curve(src, hp):
+    """The KoCurve of a profile/threat's move from `hp`, cached on the (itself
+    cached) profile or threat, so one fight's curve is built once per solve."""
+    cur = src.get("_ko")
+    if cur is None:
+        cur = src["_ko"] = {}
+    c = cur.get(hp)
+    if c is None:
+        c = cur[hp] = E.KoCurve(src["dist"], src["acc"], hp)
+    return c
+
+def survive(thr, hp, hits):
+    """Chance a member at `hp` still stands after `hits` uses of the foe's best
+    move (fractional hits interpolate: a status-stalled or item-spending foe
+    attacks on only part of its turns)."""
+    if hp <= 0: return 0.0
+    if hits <= 0 or not thr.get("const") or not thr.get("dist"): return 1.0
+    c = _curve(thr, int(math.ceil(hp - 1e-9)))
+    lo = int(math.floor(hits + 1e-9)); f = hits - lo
+    cdf = c.upto(lo + (1 if f > 1e-9 else 0))
+    s_lo = 1.0 - cdf[lo]
+    return s_lo if f <= 1e-9 else s_lo + ((1.0 - cdf[lo + 1]) - s_lo) * f
+
+def _use_turn(move, k):
+    """Our turn on which the k-th use lands: a charge move winds up first, and
+    Hyper Beam spends a recharge turn after each hit (optimize._turn_cost)."""
+    e = E.MOVES[move]["effect"]
+    if e in E.RECHARGE_EFFECTS: return 2 * k - 1
+    if e in E.CHARGE_EFFECTS: return 2 * k
+    return k
+
+def win_chance(p, h, thr, hp, sw, faster, pace=1.0, extra=0.0, free=0.0,
+               foe_scale=1.0, chip=0.0, maxhp=0.0, pp=None):
+    """Chance this member takes the foe from `h` HP to 0 before the foe's hits
+    drop it from `hp`. The k-th use is the KO with chance cdf[k] - cdf[k-1]; it
+    comes on our action a = turn(k) * pace + extra (pace: obedience and the foe's
+    stalling status; extra: the uses a trainer's heal undoes). Before it the foe
+    has attacked sw + a - 1 times if we move first, sw + a if not, less the
+    `free` turns it spends on items, each hit scaled by foe_scale (our flinch /
+    paralysis / burn on it). `chip` is its residual on us, a share of max HP per
+    turn. A move runs out at its PP (`pp` uses)."""
+    kmax = DUEL_TURN_CAP if pp is None else min(DUEL_TURN_CAP, int(pp + 1e-9))
+    if kmax < 1 or h <= 0:
+        return 1.0 if h <= 0 else 0.0
+    c = _curve(p, int(h))
+    total, k = 0.0, 1
+    while k <= kmax:
+        cdf = c.upto(k)
+        pk = cdf[k] - cdf[k - 1]
+        a = _use_turn(p["move"], k) * pace + extra
+        n = max(0.0, sw + a - (1.0 if faster else 0.0) - free) * foe_scale
+        alive = survive(thr, hp - chip * maxhp * a, n)
+        total += pk * alive
+        if cdf[k] >= 1.0 - 1e-6 or alive < 1e-6:
+            break
+        k += 1
+    return min(1.0, total)
+
+def plan_key(pw, t_win, selfko, dmg, fails=(), cost=0):
+    """Rank a plan by expected faints (EF_STEP buckets), then expected turns.
+    A plan that lands with chance pw fails the rest of the time; each way it can
+    fail is (chance, turns spent before the faint, fb), fb being the (win chance,
+    turns) of the best member left to finish the foe -- sent in free after the
+    faint. That one step of lookahead is what keeps the planner from picking a
+    sacrifice by the HP it leaves and then cascading: the next member's odds of
+    finishing are priced before the first is spent."""
+    ef = pw * (1.0 if selfko else 0.0)
+    et = pw * t_win
+    for q, t_fail, fb in fails:
+        if q <= 0: continue
+        fp, ft = fb if fb else (0.0, FALLBACK_LOSS)
+        ef += q * (2.0 - fp)
+        et += q * (t_fail + ft)
+    return (int(ef / EF_STEP + 1e-9), round(et, 4), dmg, cost, round(-pw, 6))
 
 def plan_vs(team, opp, badges, active, terrain=None, items=None, opp_hp=None,
             tac=None):
@@ -1614,15 +1749,30 @@ def plan_vs(team, opp, badges, active, terrain=None, items=None, opp_hp=None,
     nothing on the team can touch this Pokemon. itemUses (expected consumption
     per item slot) rides on the last segment, None on the others.
     """
-    def item_drag(t, t_full=None):
+    def item_drag(t, t_full=None, at=None):
+        """The trainer's heals over `t` of our hits, starting from `at` HP (H)."""
         if not items or not items[0]: return 0.0, 0.0, None
         return TI.drag(items[0], t, opp["stats"]["hp"], items[1],
-                       hp_frac=H / opp["stats"]["hp"], t_full=t_full)
+                       hp_frac=(H if at is None else at) / opp["stats"]["hp"], t_full=t_full)
     H = min(opp_hp, opp["stats"]["hp"]) if opp_hp else opp["stats"]["hp"]
+    def fall_short(p, h, acts):
+        """Foe HP a member leaves when it goes down after `acts` attacking turns,
+        starting on the foe at `h`. A foe already parked in its heal window heals
+        before the member's first move (items act first), so its work counts from
+        the healed HP: 7 HP on a Full-Restore holder is really full HP, and a
+        handover that parks the foe there buys nothing. The heal is NOT applied to
+        the member's own partial work: an 80% Hydro Pump that may miss either KOs
+        or leaves the foe untouched -- "80% of the work" is not a foe at 20% HP
+        that will Full Restore, and pricing it so made Jolteon's Bite chip outrank
+        Omastar's likely knockout of the Champion's Rhydon."""
+        if items and items[0]:
+            h = max(1, int(round(TI.after_heal(items[0], h, opp["stats"]["hp"], items[1]))))
+        t = p["table"][min(h, len(p["table"]) - 1)]
+        return hp_after(p, h, 0, acts / t if t > 0 else 0.0)
     opts = []
     for m in team:
         if not m.alive(): continue
-        p = usable(m, opp, badges)
+        p = usable(m, opp, badges, hp=H)
         if not p or "table" not in p: continue
         bm = m.bmon()
         opts.append((m, p, threat(opp, bm, badges),
@@ -1633,7 +1783,25 @@ def plan_vs(team, opp, badges, active, terrain=None, items=None, opp_hp=None,
         if not tac: return None
 
     def sw(m): return 0 if (active is None or m is active) else 1
-    def boom(p): return E.MOVES[p["move"]]["effect"] == "EXPLOSION"
+    def boom(p): return self_ko(p["move"])
+    def pp_of(m, p): return 1 if boom(p) else m.pp[p["move"]]
+    fb_cache = {}
+    def fallback(excl, h):
+        """(win chance, turns) of the best member other than `excl` finishing
+        the foe from h HP, sent in free after `excl` faints."""
+        h = max(1, min(int(h), H))
+        key = (id(excl), h)
+        if key not in fb_cache:
+            best_fb = None
+            for o, po, tho, fo in opts:
+                if o is excl or not o.alive(): continue
+                t = po["table"][min(h, len(po["table"]) - 1)]
+                if boom(po) and t > ONE_USE: continue
+                pw = win_chance(po, h, tho, o.hp, 0, fo, pace=o.obey, pp=pp_of(o, po))
+                cand = (int((1.0 - pw) / EF_STEP + 1e-9), t, pw)
+                if best_fb is None or cand < best_fb: best_fb = cand
+            fb_cache[key] = (best_fb[2], best_fb[1]) if best_fb else None
+        return fb_cache[key]
 
     # ---- solo
     best, bestkey = None, None
@@ -1644,7 +1812,7 @@ def plan_vs(team, opp, badges, active, terrain=None, items=None, opp_hp=None,
         # own status moves stretch our clock and add residual damage to us
         act, burnf, chip = E.status_tempo(p["move"], faster, t, terrain,
             def_ability=opp.get("ability", "NONE"), atk_ability=m.mon.get("ability", "NONE"))
-        t_me, chip_in = t, 0.0
+        t_me, chip_in, t_plain = t, 0.0, t
         if thr.get("const"):
             a2, b2, c2 = E.status_tempo(thr["const"], not faster, t, terrain,
                 def_ability=m.mon.get("ability", "NONE"), atk_ability=opp.get("ability", "NONE"))
@@ -1653,24 +1821,33 @@ def plan_vs(team, opp, badges, active, terrain=None, items=None, opp_hp=None,
                 t_me /= max(1e-6, 1.0 - 0.5 * b2)
             chip_in = c2
         t_me = t_me / (1.0 + chip * t_me)      # our chip shortens the fight
+        tempo = t_me / t_plain if t_plain > 0 else 1.0
         xt, xa, uses = item_drag(t_me, p["turns"])
         t_me += xt
+        if boom(p) and t_me > ONE_USE: continue    # one Explosion won't finish it
         hits = max(0.0, t_me - xt - (1.0 if faster else 0.0) + xa) + s
         scale = act * ((1.0 - 0.5 * burnf) if thr.get("cat") == "PHYSICAL" else 1.0)
         dmg = thr["avg"] * hits * scale + chip_in * t_me * m.maxhp
         hits_dmg = dmg / max(thr["avg"], 1e-6)     # so m.hurt() charges the real toll
         kills_self = boom(p)
-        acts = acting_turns(m.hp, thr["avg"], s, faster)
-        lands = acts >= t_me - 1e-9
-        survives = lands and not kills_self
-        # a body lost: a self-KO that lands trades one mon for the KO; a member
-        # that dies first is ranked by how much of the foe it leaves standing
-        left = 0 if lands else hp_after(p, H, 0, acts / max(t_me, 1e-9))
-        key = (0 if survives else (1 if lands else 2), left, round(t_me + s, 4), dmg, 0)
+        # a turn the foe spends on an item is one it does not attack in: our
+        # member gets that action free (one per expected heal, sum(uses))
+        raw_acts = acting_turns(m.hp, thr["avg"], s, faster)
+        free = sum(uses or ())
+        pw = win_chance(p, H, thr, m.hp, s, faster, pace=m.obey * tempo, extra=xt,
+                        free=free, foe_scale=scale, chip=chip_in, maxhp=m.maxhp,
+                        pp=pp_of(m, p))
+        # when it fails it has worn the foe down to roughly what the expected
+        # clock says, and the best member left picks it up from there
+        fails = []
+        if pw < 1.0 - 1e-9:
+            fails = [(1.0 - pw, s + min(raw_acts, t_me),
+                      fallback(m, fall_short(p, H, raw_acts)))]
+        key = plan_key(pw, t_me + s, kills_self, dmg, fails)
         if bestkey is None or key < bestkey:
             bestkey = key
             best = [(m, p, thr, t_me + s, hits_dmg, s > 0, kills_self,
-                     (t + xt) / m.obey, uses, H, 0, faster, None)]
+                     (t + xt) / m.obey, uses, H, 0, faster, None, pw)]
 
     # Expected turns are very nearly linear in the target's remaining HP, so
     # prefix + switch + finish is essentially never FASTER than whichever solo
@@ -1680,12 +1857,13 @@ def plan_vs(team, opp, badges, active, terrain=None, items=None, opp_hp=None,
     # whenever the best solo drops a Pokemon, and otherwise only for fights slow
     # enough that the tax could still be worth paying.
     if tac:
-        for key, plan in league_variants(team, opp, badges, active, H, item_drag, tac):
+        for key, plan in league_variants(team, opp, badges, active, H, item_drag, tac,
+                                         fallback):
             if bestkey is None or key < bestkey:
                 bestkey, best = key, plan
     if best is None:
         return None
-    if bestkey[0] == 0 and bestkey[2] <= HANDOVER_FLOOR:
+    if bestkey[0] == 0 and bestkey[1] <= HANDOVER_FLOOR:
         return best
 
     if not opts:
@@ -1712,37 +1890,87 @@ def plan_vs(team, opp, badges, active, terrain=None, items=None, opp_hp=None,
                 # the trainer heals off the whole fight's clock; the finisher
                 # eats the replay (a heal resets the foe after A's softening)
                 xt, xa, uses = item_drag(pre + fin, pB["turns"])
+                # a handover that parks the foe inside its heal window gets the
+                # heal for certain before the finisher moves (items go first);
+                # priced from the whole fight's start it looked like a coin flip,
+                # and the Champion's Rhydon left at 21 HP Full-Restored past six
+                # finishers in a row
+                xt2, xa2, uses2 = item_drag(fin, pB["turns"], at=h)
+                if xt2 > xt:
+                    xt, xa, uses = xt2, xa2, uses2
                 fin += xt
-                if fin > ppB: continue
+                if fin > ppB or (boom(pB) and fin > ONE_USE): continue
                 total = sA + pre + 1.0 + fin
                 # only prune on turns when the incumbent already keeps everyone
                 # standing -- otherwise a slower plan that saves a Pokemon has
                 # to be allowed to win
-                if bestkey[0] == 0 and total >= bestkey[2] - 1e-9: continue
+                if bestkey[0] == 0 and total >= bestkey[1] - 1e-9: continue
                 hitsA = pre + sA                   # A never lands the KO
                 hitsB = 1.0 + max(0.0, fin - xt - (1.0 if fastB else 0.0) + xa)
                 dmgA, dmgB = thrA["avg"] * hitsA, thrB["avg"] * hitsB
                 kills_self = boom(pB)
-                okA = acting_turns(mA.hp, thrA["avg"], sA, fastA) >= pre - 1e-9
-                actsB = acting_turns(mB.hp, thrB["avg"], 1, fastB)
-                landsB = okA and actsB >= fin - 1e-9
-                survives = landsB and not kills_self
-                # only handovers whose opener lives to hand over are real plans
-                if not okA: continue
-                left = 0 if landsB else hp_after(pB, h, 0, actsB / max(fin, 1e-9))
-                key = (0 if survives else (1 if landsB else 2), left,
-                       round(total, 4), dmgA + dmgB, 0)
+                # the opener has to live through its share to hand over at all
+                pA_ok = survive(thrA, mA.hp, sA + pre - (1.0 if fastA else 0.0))
+                if pA_ok < LAND_P: continue
+                rawA = acting_turns(mA.hp, thrA["avg"], sA, fastA)
+                rawB = acting_turns(mB.hp, thrB["avg"], 1, fastB)
+                pB_ok = win_chance(pB, h, thrB, mB.hp, 1, fastB, pace=mB.obey,
+                                   extra=xt, free=sum(uses or ()), pp=pp_of(mB, pB))
+                fails = [(1.0 - pA_ok, sA + min(rawA, pre),
+                          fallback(mA, fall_short(pA, H, min(rawA, pre)))),
+                         (pA_ok * (1.0 - pB_ok), sA + pre + 1.0 + min(rawB, fin),
+                          fallback(mB, fall_short(pB, h, rawB)))]
+                key = plan_key(pA_ok * pB_ok, total, kills_self, dmgA + dmgB, fails)
                 if key < bestkey:
                     bestkey = key
                     best = [(mA, pA, thrA, pre + sA, hitsA, sA > 0, False,
-                             pre / mA.obey, None, H, h, fastA, None),
+                             pre / mA.obey, None, H, h, fastA, None, pA_ok),
                             (mB, pB, thrB, fin + 1.0, hitsB, True, kills_self,
-                             fin / mB.obey, uses, h, 0, fastB, None)]
+                             fin / mB.obey, uses, h, 0, fastB, None, pB_ok)]
     return best
 
+def _roll_segment(rng, m, p, thr, opp, rem, hp_to, switched, faster, slots,
+                  valid_mons, selfko, tinfo, kit, terrain, badges):
+    """Play one plan segment with real rolls (rolls.play) and book it on the
+    member and the bag. -> (done, foe HP left, turns, slot uses, stalled)."""
+    a, b, c = E.status_tempo(p["move"], faster, max(1.0, p["turns"]), terrain,
+                             def_ability=opp.get("ability", "NONE"),
+                             atk_ability=m.mon.get("ability", "NONE"))
+    a2, b2, c2 = 1.0, 0.0, 0.0
+    if thr.get("const"):
+        a2, b2, c2 = E.status_tempo(thr["const"], not faster, max(1.0, p["turns"]),
+                                   terrain, def_ability=m.mon.get("ability", "NONE"),
+                                   atk_ability=opp.get("ability", "NONE"))
+    tempo = (a2, a, b, c, c2, b2)
+    if tinfo:
+        k = len(tinfo["actions"])
+        amt = kit.heal_amount(tinfo["heal"], m.maxhp) if tinfo["heal"] else 0.0
+        out = RL.play(rng, m, p, thr, opp, rem, hp_to, switched, faster, slots,
+                     valid_mons, False, tempo, thr_setup=threat(opp, m.bmon(), badges),
+                     setup_turns=k, heals=tinfo["heals"], kit_amount=amt)
+        # a member knocked out mid-setup took only the actions it lived to take
+        for kind, what, _ in tinfo["actions"][:out["setup"]]:
+            if kind == "item": kit.charge(what)
+            else: m.spend(what, 1.0)
+        if out["heals"]: kit.charge(tinfo["heal"], out["heals"])
+        if out["done"] and out["hp"] > 0:
+            m.boosts = dict(tinfo["boosts"]); m.stint += k
+    else:
+        out = RL.play(rng, m, p, thr, opp, rem, hp_to, switched, faster, slots,
+                     valid_mons, selfko, tempo)
+    m.spend(p["move"], out["uses"])
+    m.hurt(max(0.0, m.hp - out["hp"]))
+    m.hp = out["hp"]
+    uses = out["items"] if any(out["items"]) else None
+    return (out["done"], int(math.ceil(out["foe"] - 1e-9)), out["turns"], uses,
+            out["stalled"])
+
 def run_section(team, battles, badges, heal_after_idx, tm_value=None,
-                carry=None, stage=None):
+                carry=None, stage=None, rng=None):
     """Walk the section with one party, no items. Returns a full ledger.
+    With `rng` (a random.Random) it is a replay: every segment is played with
+    real accuracy, damage and item rolls (rolls.py) instead of drawn as its
+    median outcome, and the planner re-plans from what actually happened.
     `carry` seeds members with the HP and PP they ended the previous section
     on, for the stage boundaries the game leaves unhealed."""
     for m in team:
@@ -1836,7 +2064,12 @@ def run_section(team, battles, badges, heal_after_idx, tm_value=None,
             # fainted member with the KO -- Golem "beating" a Blastoise whose Surf
             # one-shots it before it moves -- so "no full wipe" almost never bit.)
             rem = opp["stats"]["hp"]
+            replans = 0
             while rem > 0:
+                replans += 1
+                if replans > MAX_REPLANS:
+                    failed += 1        # a replay going round in circles: not a clear
+                    break
                 plan = plan_vs(have, opp, badges, active, terrain,
                                items=(slots, n_opp - oi) if slots else None,
                                opp_hp=rem,
@@ -1847,49 +2080,70 @@ def run_section(team, battles, badges, heal_after_idx, tm_value=None,
                                     "by": None, "move": None, "turns": 0.0})
                     break
                 for si, (m, p, thr, turns, hits, switched, selfko, ppc, uses,
-                         hp_from, hp_to, faster, tinfo) in enumerate(plan):
+                         hp_from, hp_to, faster, tinfo, pw) in enumerate(plan):
                     if field is not None and m is not field:
                         field.unboost(); field = None    # switched out: stages lost
-                    if tinfo:
-                        done, frac = tinfo["lands"], tinfo["frac"]
+                    stalled = False
+                    if rng is not None:
+                        # a replay: the segment is played with real rolls
+                        done, rem, turns_used, bag_use, stalled = _roll_segment(
+                            rng, m, p, thr, opp, rem, hp_to, switched, faster, slots,
+                            n_opp - oi, selfko, tinfo, kit, terrain, badges)
+                        if bag_use:
+                            TI.spend(slots, bag_use); item_uses += sum(bag_use)
                     else:
-                        done, frac = segment_outcome(m, thr, turns, switched, faster)
-                    if uses:
-                        uses = [u * frac for u in uses]
-                        TI.spend(slots, uses)
-                        item_uses += sum(uses)
-                    if tinfo:
-                        # the bag and the setup moves it spends, then its attack
-                        for kind, what, _ in tinfo["actions"]:
-                            if kind == "item": kit.charge(what)
-                            else: m.spend(what, 1.0)
-                        if tinfo["heals"]: kit.charge(tinfo["heal"], tinfo["heals"])
-                        m.spend(p["move"], ppc)
-                        if done:
-                            m.hurt(max(0.0, m.hp - tinfo["hpEnd"]))
-                            m.hp = tinfo["hpEnd"]      # mid-fight heals included
-                            m.boosts = dict(tinfo["boosts"])
-                            m.stint += len(tinfo["actions"])
-                            rem = 0
+                        if tinfo:
+                            done, frac = tinfo["lands"], tinfo["frac"]
                         else:
+                            # drawn as the median outcome: it lands when it lands at
+                            # least LAND_P of the time (win_chance), and a miss gets
+                            # the share of the work its expected clock covers
+                            _, frac = segment_outcome(m, thr, turns, switched, faster,
+                                                      free=sum(uses or ()))
+                            done = pw >= LAND_P
+                            frac = 1.0 if done else min(FAIL_FRAC, frac)
+                        if uses:
+                            uses = [u * frac for u in uses]
+                            TI.spend(slots, uses)
+                            item_uses += sum(uses)
+                            # what this foe drew from the bag, unclamped, so verify can
+                            # hold the sim to ShouldUseItem's one-use-per-slot rule
+                            # and its held-back-slot gate (validMons = foes still up)
+                            bag_use = list(uses)
+                        else:
+                            bag_use = None
+                        if tinfo:
+                            # the bag and the setup moves it spends, then its attack
+                            for kind, what, _ in tinfo["actions"]:
+                                if kind == "item": kit.charge(what)
+                                else: m.spend(what, 1.0)
+                            if tinfo["heals"]: kit.charge(tinfo["heal"], tinfo["heals"])
+                            m.spend(p["move"], ppc)
+                            if done:
+                                m.hurt(max(0.0, m.hp - tinfo["hpEnd"]))
+                                m.hp = tinfo["hpEnd"]      # mid-fight heals included
+                                m.boosts = dict(tinfo["boosts"])
+                                m.stint += len(tinfo["actions"])
+                                rem = 0
+                            else:
+                                m.hurt(m.hp)
+                                rem = hp_after(p, hp_from, 0, frac)
+                            turns_used = turns
+                        elif done:
+                            m.spend(p["move"], ppc)
+                            # it finishes its share before the foe's hits drop it
+                            # (a KO'd foe swings no more), so it ends standing
+                            m.hurt(max(0.0, min(thr["avg"] * hits, m.hp - 1.0)))
+                            if selfko:   # Self-Destruct / Explosion take the user too
+                                m.hp = 0.0; m.minHpPct = 0.0; m.legMinHpPct = 0.0
+                            rem = hp_to
+                            turns_used = turns
+                        else:
+                            m.spend(p["move"], ppc * frac)
                             m.hurt(m.hp)
-                            rem = hp_after(p, hp_from, 0, frac)
-                        turns_used = turns
-                    elif done:
-                        m.spend(p["move"], ppc)
-                        # it finishes its share before the foe's hits drop it
-                        # (a KO'd foe swings no more), so it ends standing
-                        m.hurt(max(0.0, min(thr["avg"] * hits, m.hp - 1.0)))
-                        if selfko:   # Self-Destruct / Explosion take the user too
-                            m.hp = 0.0; m.minHpPct = 0.0; m.legMinHpPct = 0.0
-                        rem = hp_to
-                        turns_used = turns
-                    else:
-                        m.spend(p["move"], ppc * frac)
-                        m.hurt(m.hp)
-                        rem = hp_after(p, hp_from, hp_to, frac)
-                        turns_used = (1.0 if switched else 0.0) + frac * max(
-                            0.0, turns - (1.0 if switched else 0.0))
+                            rem = hp_after(p, hp_from, hp_to, frac)
+                            turns_used = (1.0 if switched else 0.0) + frac * max(
+                                0.0, turns - (1.0 if switched else 0.0))
                     if m.hp <= 0:
                         faints += 1; m.fainted += 1
                         m.unboost()
@@ -1929,11 +2183,17 @@ def run_section(team, battles, badges, heal_after_idx, tm_value=None,
                         # League bag/setup use on this foe, e.g. "X Special ×2"
                         "tactics": tactic_label(tinfo),
                     })
-                    if not done:
+                    if bag_use and any(bag_use):
+                        entries[-1]["itemUse"] = bag_use
+                        entries[-1]["validMons"] = n_opp - oi
+                    if stalled:
+                        failed += 1    # nobody could finish it in TURN_CAP turns
+                        rem = 0
+                    if not done or rem <= 0:
                         break          # re-plan the remainder with who is left
         log.append({"enc": enc["name"], "id": enc["id"], "kind": enc["kind"],
                     "location": enc["location"], "steps": entries,
-                    "group": enc.get("group")})
+                    "group": enc.get("group"), "bag": len(slots)})
         if enc["kind"] == "elite4" and bi not in heal_after_idx:
             # Between League members you may use the bag (Revives, Full Restores)
             # before walking into the next room, so every member is fought at full
@@ -2391,6 +2651,8 @@ def moon_ok(species, stage, moon_used):
         return True
     return species in moon_used or len(moon_used) < moon_budget(stage)
 
+LAST_SOLVE = {}
+
 def solve_section(stage, encs, starter, avail, tm_value=None, carry=None, moon_used=None,
                   level_override=None, heal_override=None, train_roster=None, plan=None,
                   bill_weight=1.0, core=None, specialists=True, skip_hms=frozenset(),
@@ -2640,6 +2902,10 @@ def solve_section(stage, encs, starter, avail, tm_value=None, carry=None, moon_u
         history.extend(swaps)
     final = run_section(team, battles, badges, heal_idx, tm_value, carry=carry,
                         stage=stage)
+    # what a replay needs to fight this section again with the chosen party
+    # (league_sets' random-roll trials); in-process only, never serialized
+    LAST_SOLVE.update(team=team, battles=battles, badges=badges,
+                      heal_idx=heal_idx, carry=carry, stage=stage)
 
     # ---- bench: strong candidates that didn't make the cut
     bench = []
@@ -3175,6 +3441,7 @@ def reset_solve_caches():
     _profile_cache.clear()
     _threat_cache.clear()
     _STOCK.clear()
+    LAST_SOLVE.clear()
     O.reset_caches()
 
 def _worker_pass1(args):

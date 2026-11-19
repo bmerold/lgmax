@@ -655,6 +655,13 @@ def main():
     #   row = [[six names], clearLevel (0 = never by L75), faints, battleTurns,
     #          screenLevel, [[tmName, [holder names]]...], flags]
     #   flags bits: 1 needs trades, 2 holds a legendary bird, 4 holds the starter line
+    #   (appended) team = [[member, [[move, League uses]...], [[foe, level, move, outcome]...]]...]
+    #   -- each member's moves and every foe it fought in the clearing run ([] if none);
+    #   outcome 1 = it landed the KO, 0 = wore the foe down before going out,
+    #   -1 = knocked out before it moved (buys the next member a free switch-in)
+    #   (appended) clearRate = % of the League replays (league_sets.TRIALS, real
+    #   rolls) the six won at its clear level; faints/battleTurns are their means
+    #   [r[8]], and trials = how many replays were run there [r[9]]
     league_sets = {}
     _lp = f"{OUT}/league_sets_{engine.VERSION}.json"
     if os.path.exists(_lp):
@@ -667,7 +674,11 @@ def main():
                           r.get("faints", 0), r.get("turns", 0), r["screenLevel"],
                           [[S(m), [S(h) for h in hs]] for m, hs in r.get("tms", {}).items()],
                           (1 if r.get("trade") else 0) | (2 if r.get("bird") else 0)
-                          | (4 if r.get("starterLine") else 0)]
+                          | (4 if r.get("starterLine") else 0),
+                          [[S(m["name"]), [[S(mv), u] for mv, u in m["moves"]],
+                            [[S(o), lv, S(mv), out] for o, lv, mv, out in m["beats"]]]
+                           for m in r.get("team", [])],
+                          r.get("clearRate", 0), r.get("trials", 0)]
                          for r in _blk["sixes"]]}
 
     payload = {"pool": pool, "stages": stages, "encounters": out_encs,

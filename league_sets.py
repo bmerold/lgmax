@@ -15,12 +15,13 @@ analysis (like mq.py), not a pipeline stage.
      it beats lowest (reported).
   4. The best of those sixes are re-run through the real League simulation
      (sections.solve_section: cumulative damage, PP, the League's items and
-     tactics), raising the shared level until the six clears.
+     tactics), then replayed with real rolls (clear_rate): a six clears at the
+     lowest shared level that wins CLEAR_RATE of its replays.
 
 Usage:  LGMAX_VERSION=lg python3 league_sets.py [--sim N]   (N sixes simulated)
 Writes data/league_sets_<v>.json.
 """
-import json, os, sys, time, itertools, collections
+import json, os, sys, time, itertools, collections, math, random
 import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor
 import engine as E
@@ -325,6 +326,7 @@ def _clears(six, starter, lv, plan):
     avail = S._AVAIL_TABLE
     C.set_commitments(K.core_commitments(list(six), {}))
     O.set_tm_plan(S.SCARCE, _owners(plan))
+    S.LAST_SOLVE.clear()      # clear_rate replays whatever this solve leaves here
     try:
         forms = [K.core_form(t, STAGE, lv, avail) or t for t in six]
         res = S.solve_section(STAGE, S._SECTIONS_GRAPH.get(STAGE, []), starter, avail,
@@ -335,20 +337,143 @@ def _clears(six, starter, lv, plan):
     return res["unanswered"] == 0, res
 
 
+def team_detail(res):
+    """Each member of a cleared League run: the four moves it carried (with how
+    often the League sim used each) and every foe it was sent against, in fight
+    order, as [foe, level, move, outcome] -- what the tab shows to say why a member
+    is in the six. outcome 1: it landed the KO (an Explosion finish counts);
+    0: it wore the foe down before going out, a role as real as the KO; -1: it was
+    knocked out before it moved -- fodder that buys the next member a free switch-in."""
+    beats = collections.defaultdict(list)
+    for e in res.get("log", []):
+        if e.get("kind") not in S.LEAGUE_KINDS: continue
+        for s in e.get("steps", []):
+            if not s.get("bySpecies"): continue      # an unanswered foe: no one fought it
+            outcome = 1 if s.get("landed") else (0 if s.get("turns", 0) > 0 else -1)
+            beats[s["bySpecies"]].append([s["opp"], s["lvl"], s["move"], outcome])
+    return [{"name": m["name"], "species": m["species"], "fainted": m.get("fainted", 0),
+             "moves": [[mv["name"], round(mv.get("used", 0), 1)] for mv in m["moves"]],
+             "beats": beats.get(m["species"], [])}
+            for m in res.get("team", [])]
+
+
+# "Clears at" is a chance, not a single run. The section sim draws each fight as
+# its median outcome; a six that wins its median League can still lose it a third
+# of the time (the 80%-accurate one-shot, the Full Restore that comes at the wrong
+# moment), and the median level jumped about from one level to the next. So the
+# chosen party is replayed TRIALS times with real rolls (rolls.py) and a six
+# clears at the lowest level that wins at least CLEAR_RATE of them. The replays
+# use the same seeds at every level and for every six (common random numbers), so
+# the level-to-level comparison is not swamped by luck.
+CLEAR_RATE = 0.9
+TRIALS = 60
+ABOVE_SLACK = 0.1    # the levels above may dip this far under CLEAR_RATE (noise)
+
+def clear_rate(six, starter, lv, plan, need=CLEAR_RATE, n=TRIALS):
+    """Solve the League at `lv`, then replay it n times with real rolls.
+    Stops early once the six can no longer reach `need`. -> dict with the share
+    won, whether it reached `need`, the mean faints/turns of the replays, and
+    the median-outcome solve (its team detail is what the tab shows)."""
+    ok, res = _clears(six, starter, lv, plan)
+    if not S.LAST_SOLVE:
+        return {"rate": 0.0, "passed": False, "res": res, "n": 0}
+    z = dict(S.LAST_SOLVE)
+    allowed = n - math.ceil(need * n - 1e-9)
+    wins = losses = 0
+    faints = turns = 0.0
+    for i in range(n):
+        rr = S.run_section(z["team"], z["battles"], z["badges"], z["heal_idx"],
+                           carry=z["carry"], stage=z["stage"], rng=random.Random(i))
+        if rr["failed"]: losses += 1
+        else: wins += 1
+        faints += rr["faints"]; turns += rr["turns"]
+        if losses > allowed:
+            break
+    k = wins + losses
+    return {"rate": wins / k, "passed": losses <= allowed, "res": res, "n": k,
+            "faints": faints / k, "turns": turns / k}
+
+def _holds(rate, lv, proven):
+    """The six still wins its replays every ABOVE_STEPS level above `lv`, at the
+    slack the above-clear check allows. A level in `proven` already passed at
+    the full rate. The planner is myopic across the League's five fights (it
+    spends HP on one that a later fight needs), so a higher level can pick a
+    worse line: LG Bulbasaur's Jynx six wins 91% at L46 and 72% at L48, where
+    Lance's line leaves Jynx too low to take Exeggutor. A clear level must not
+    sit on that kind of dip."""
+    return all(lv + d > SIM_MAX_LEVEL or lv + d in proven
+               or rate(lv + d, CLEAR_RATE - ABOVE_SLACK)["passed"]
+               for d in ABOVE_STEPS)
+
+
 def _sim_one(args):
-    """Lowest shared level at which the full League simulation clears this six
-    (binary search; clearing is taken as monotone in level), or None."""
+    """Lowest shared level at which this six wins CLEAR_RATE of its League
+    replays and keeps winning them above (_holds), or None. The median-outcome
+    sim's own clear level (binary search) is the starting point; the replays
+    then walk down while they keep passing, or up until they do."""
     six, starter, lo, plan = args
     S.reset_solve_caches()
     ok, res = _clears(six, starter, SIM_MAX_LEVEL, plan)
     if not ok: return six, None, None
-    hi, best = SIM_MAX_LEVEL, res
+    hi = SIM_MAX_LEVEL
     while lo < hi:
         mid = (lo + hi) // 2
-        ok, res = _clears(six, starter, mid, plan)
-        if ok: hi, best = mid, res
+        if _clears(six, starter, mid, plan)[0]: hi = mid
         else: lo = mid + 1
-    return six, hi, {"faints": best["faints"], "turns": round(best["turns"], 1)}
+    memo = {}
+    def rate(lv, need=CLEAR_RATE):
+        # each is a full solve plus up to TRIALS replays; the walk and _holds
+        # revisit levels, and the same seeds make a rerun identical
+        if (lv, need) not in memo:
+            memo[lv, need] = clear_rate(six, starter, lv, plan, need=need)
+        return memo[lv, need]
+    lv, best = hi, rate(hi)
+    proven = set()
+    if best["passed"]:
+        proven.add(lv)
+        while lv - 1 >= LEVELS[0]:
+            down = rate(lv - 1)
+            if not down["passed"]: break
+            lv, best = lv - 1, down
+            proven.add(lv)
+    passed = best["passed"] and _holds(rate, lv, proven)
+    while not passed:
+        lv += 1
+        if lv > SIM_MAX_LEVEL: return six, None, None
+        best = rate(lv)
+        if best["passed"]: proven.add(lv)
+        passed = best["passed"] and _holds(rate, lv, proven)
+    res = best["res"]
+    return six, lv, {"faints": round(best["faints"], 1), "turns": round(best["turns"], 1),
+                     "clearRate": round(best["rate"] * 100), "trials": best["n"],
+                     "team": team_detail(res)}
+
+
+# A six's clear chance should hold as it levels; a planner flaw once broke that
+# (sixes cleared at L49 and failed at L50-52: a foe parked in its Full Restore
+# window ranked as nearly beaten), so a sample is replayed above its clear level
+# and the result kept for verify.py.
+ABOVE_STEPS = (1, 2)
+
+def _above_one(args):
+    six, starter, lv, plan = args
+    S.reset_solve_caches()
+    out = []
+    for d in ABOVE_STEPS:
+        if lv + d > SIM_MAX_LEVEL: continue
+        r = clear_rate(six, starter, lv + d, plan, need=CLEAR_RATE - ABOVE_SLACK)
+        out.append([lv + d, r["passed"], round(r["rate"] * 100)])
+    return out
+
+def above_clear(cleared, starter):
+    """[[six names, clear level, [[level, still clears?, % won]...]]] for the
+    first, middle and last cleared sixes (`cleared`: (six, plan, level) best first)."""
+    pick = sorted({0, len(cleared) // 2, len(cleared) - 1}) if cleared else []
+    out = []
+    for i in pick:
+        six, plan, lv = cleared[i]
+        out.append([[E.SPECIES[t]["name"] for t in six], lv, _above_one((six, starter, lv, plan))])
+    return out
 
 
 def simulate(ranked):
@@ -367,7 +492,7 @@ def simulate(ranked):
 # result when nothing it reads has changed (training.py does the same).
 INPUT_MODULES = ("league_sets.py", "engine.py", "abilities.py", "sections.py", "optimize.py",
                  "core.py", "progression.py", "constraints.py", "tms.py", "tactics.py",
-                 "trainer_items.py", "hms.py", "measure.py", "training_cost.py", "build_graph.py")
+                 "trainer_items.py", "rolls.py", "hms.py", "measure.py", "training_cost.py", "build_graph.py")
 INPUT_DATA = ("encounters.json", "route.json", "species.json", "moves.json",
               "levelUpLearnsets.json", "tmhmLearnsets.json", "tutorLearnsets.json",
               "evolutions.json", "typeChart.json", "items.json")
@@ -382,7 +507,7 @@ def inputs_hash():
     for name in INPUT_DATA:
         p = os.path.join(S.OUT, name)
         if os.path.exists(p): h.update(name.encode()); h.update(open(p, "rb").read())
-    h.update(f"{E.VERSION}|{SIM_TOP}|{LIST_CAP}|{BIRDLESS_SHARE}|{os.environ.get('LGMAX_POKEFIRERED', '')}".encode())
+    h.update(f"{E.VERSION}|{SIM_TOP}|{LIST_CAP}|{BIRDLESS_SHARE}|{CLEAR_RATE}|{TRIALS}|{ABOVE_SLACK}|{os.environ.get('LGMAX_POKEFIRERED', '')}".encode())
     return h.hexdigest()
 
 
@@ -452,9 +577,12 @@ if __name__ == "__main__":
                 for (six, _st, lv1, plan), (_s, lv, info) in zip(top, sims)]
         rows.sort(key=lambda r: (r["clearLevel"] is None, r["clearLevel"] or 0,
                                  r.get("faints", 0), r.get("turns", 0)))
+        cleared = sorted(((six, plan, lv) for (six, _st, _l1, plan), (_s, lv, _i)
+                          in zip(top, sims) if lv), key=lambda c: (c[2], c[0]))
         report["starters"][st] = {"listed": listed, "listedThrough": last,
                                   "birdless": n_free,
-                                  "countsByLevel": counts, "simulated": len(top), "sixes": rows}
+                                  "countsByLevel": counts, "simulated": len(top), "sixes": rows,
+                                  "aboveClear": above_clear(cleared, st)}
         print(f"[{st}] best:", flush=True)
         for r in rows[:15]:
             tms = "; ".join(f"{m}: {', '.join(h)}" for m, h in r["tms"].items())

@@ -669,6 +669,59 @@ def ko_probability(dist, accuracy, target_hp, turns):
         states = nxt
     return dead
 
+DIST_BINS = 8   # damage values kept per hit for the KO-chance DP (see bin_dist)
+
+def bin_dist(dist, n=DIST_BINS):
+    """A move's per-hit damage distribution (16 rolls x crit, up to 32 values)
+    folded into n equal-probability bins, each at its mean damage. The KO-chance
+    DP below runs once per state per bin, and the bins keep the spread that
+    decides a KO -- the top rolls and crits -- that a single mean would lose."""
+    pts = sorted((d, p) for d, p in dist.items() if d > 0 and p > 0)
+    tot = sum(p for _, p in pts)
+    if not pts: return {}
+    if len(pts) <= n:
+        return {d: p / tot for d, p in pts}
+    out, acc_p, acc_dp, edge = {}, 0.0, 0.0, tot / n
+    for d, p in pts:
+        while p > 1e-12:
+            take = min(p, edge - acc_p)
+            acc_p += take; acc_dp += take * d; p -= take
+            if acc_p >= edge - 1e-12:
+                v = int(round(acc_dp / acc_p))
+                out[v] = out.get(v, 0.0) + acc_p / tot
+                acc_p = acc_dp = 0.0
+    if acc_p > 1e-12:
+        v = int(round(acc_dp / acc_p))
+        out[v] = out.get(v, 0.0) + acc_p / tot
+    return out
+
+class KoCurve:
+    """P(the target is down within k uses) for k = 0, 1, 2, ... from one starting
+    HP: the turn_table DP's whole distribution rather than its mean. Extended a
+    use at a time on demand, so a long fight that is never asked about costs
+    nothing. A miss (1 - accuracy) leaves the HP where it was."""
+    __slots__ = ("dist", "acc", "states", "cdf")
+    def __init__(self, dist, accuracy, hp):
+        self.dist = dist
+        self.acc = max(0.0, min(1.0, accuracy / 100.0))
+        self.states = {int(hp): 1.0} if hp > 0 else {}
+        self.cdf = [0.0 if hp > 0 else 1.0]
+    def upto(self, k):
+        while len(self.cdf) <= k:
+            nxt, dead, acc = {}, 0.0, self.acc
+            for hp, p in self.states.items():
+                if acc < 1.0:
+                    nxt[hp] = nxt.get(hp, 0.0) + p * (1.0 - acc)
+                pa = p * acc
+                for d, pd in self.dist.items():
+                    nh = hp - d
+                    if nh <= 0: dead += pa * pd
+                    else: nxt[nh] = nxt.get(nh, 0.0) + pa * pd
+            # states this unlikely change no answer the planner asks for
+            self.states = {h: q for h, q in nxt.items() if q > 1e-9}
+            self.cdf.append(min(1.0, self.cdf[-1] + dead))
+        return self.cdf
+
 def best_move(attacker, defender, badges=None, moves=None):
     """The attacker's best damaging option against this defender, by expected damage."""
     cands = moves if moves is not None else attacker["moves"]

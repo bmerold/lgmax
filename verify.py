@@ -189,6 +189,105 @@ _bird_team = [(sk, st, t["name"]) for sk, per in raw["sections"].items()
 check("no recommended team fields a legendary bird (Dex only, by request)",
       not _bird_team, str(_bird_team[:4]))
 
+# Self-Destruct and Explosion faint the user (setatkhptozero in
+# BattleScript_EffectExplosion, data/battle_scripts_1.s), so a member can use them
+# at most once per faint; the sim once charged a Golem 2.7 Explosions on one foe.
+_SELF_KO = {E.MOVES[m]["name"] for m in E.MOVES if E.MOVES[m]["effect"] == "EXPLOSION"}
+def _boom_over(team):
+    return [(t["name"], mv["name"], round(mv.get("used", 0), 1), t.get("fainted", 0))
+            for t in team for mv in t.get("moves", [])
+            if mv["name"] in _SELF_KO and mv.get("used", 0) > t.get("fainted", 0) + 1e-6]
+_boom_bad = [(sk, st, b) for sk, per in raw["sections"].items()
+             for st, sec in per.items() if sec for b in _boom_over(sec.get("team", []))]
+check("no section uses Explosion / Self-Destruct more often than the user faints",
+      not _boom_bad, str(_boom_bad[:4]))
+
+# A member knocked out before it moves deals nothing: the foe stays at the HP the
+# step before left it. hp_after once read "no work done" off the DP's staircase
+# as the lowest HP on the step -- a Cloyster one-shot on its switch-in "left" the
+# Champion's Arcanine at 1 HP -- and the planner chose plans for that phantom.
+def _phantom(log):
+    out = []
+    for e in log or []:
+        prev = {}
+        for s in e.get("steps", []):
+            # sections.json drops _oppIdx, so foes are told apart by name; a
+            # foe that went down frees its name for the next one (Bruno's two
+            # Onix, Agatha's two Gengar)
+            k = s.get("opp")
+            if (s.get("by") and not s.get("landed") and s.get("turns", 0) == 0
+                    and k in prev and s.get("foeHpLeft") != prev[k]):
+                out.append((s["opp"], s["by"], prev[k], s.get("foeHpLeft")))
+            if s.get("foeHpLeft") == 0: prev.pop(k, None)
+            else: prev[k] = s.get("foeHpLeft")
+    return out
+_ph_bad = [(sk, st, b) for sk, per in raw["sections"].items()
+           for st, sec in per.items() if sec for b in _phantom(sec.get("log"))]
+check("a member knocked out before moving leaves the foe's HP untouched",
+      not _ph_bad, str(_ph_bad[:4]))
+
+# A trainer's bag is its src/data/trainers.h `.items`, copied once per battle
+# (battle_ai_script_commands.c); ShouldUseItem zeroes a slot when it uses it, and
+# skips slot i > 0 while validMons > (itemsNo - i) + 1. So within one battle each
+# slot is spent at most once (the E4's two Full Restores are two heals, not one
+# per Pokemon), the second only once the trainer is down to its last two, and a
+# wild Pokemon never heals at all.
+def _bag_over(log):
+    out = []
+    for e in log or []:
+        n, spent = e.get("bag", 0), collections.defaultdict(float)
+        for s in e.get("steps", []):
+            use = s.get("itemUse")
+            if not use: continue
+            if e.get("kind") == "wild" or len(use) != n:
+                out.append((e["enc"], s["opp"], "no bag", use)); continue
+            for i, u in enumerate(use):
+                spent[i] += u
+                if i and u > 1e-6 and s["validMons"] > (n - i) + 1:
+                    out.append((e["enc"], s["opp"], f"slot {i} early", s["validMons"]))
+        out += [(e["enc"], i, "slot overspent", v)
+                for i, v in spent.items() if v > 1 + 1e-6]
+    return out
+_bag_bad = [(sk, st, b) for sk, per in raw["sections"].items()
+            for st, sec in per.items() if sec for b in _bag_over(sec.get("log"))]
+check("no trainer uses an item more often than its bag and ShouldUseItem allow",
+      not _bag_bad, str(_bag_bad[:4]))
+# The planner prices fights by their chances (sections.win_chance). Its KO curve
+# is turn_table's DP kept as a distribution, so its mean must be the expected
+# uses turn_table prices (the bins keep the mean to a rounding), it can only
+# rise with more uses, and more HP for the member can only help.
+import sections as _SEC
+def _curve_drift():
+    out = []
+    pairs = [("SPECIES_STARMIE", "MOVE_SURF", "SPECIES_RHYDON"),
+             ("SPECIES_OMASTAR", "MOVE_HYDRO_PUMP", "SPECIES_RHYDON"),
+             ("SPECIES_JOLTEON", "MOVE_THUNDERBOLT", "SPECIES_GYARADOS"),
+             ("SPECIES_SNORLAX", "MOVE_BODY_SLAM", "SPECIES_ALAKAZAM")]
+    for a, mv, d in pairs:
+        if a not in E.SPECIES or d not in E.SPECIES or mv not in E.MOVES: continue
+        atk, dfn = E.make_mon(a, 55), E.make_mon(d, 55)
+        pr = E.move_profile(atk, dfn, mv)
+        if not pr or pr["immune"]: continue
+        hp = dfn["stats"]["hp"]
+        tt = E.turn_table(pr["dist"], pr["accuracy"], hp)[hp]
+        cur = E.KoCurve(E.bin_dist(pr["dist"]), pr["accuracy"], hp).upto(80)
+        mean = sum(1.0 - c for c in cur[:-1])
+        if abs(mean - tt) > 0.03 * tt + 0.02 or any(y < x - 1e-12 for x, y in zip(cur, cur[1:])):
+            out.append((a, mv, d, round(mean, 3), round(tt, 3)))
+        thr = {"const": mv, "dist": E.bin_dist(pr["dist"]), "acc": pr["accuracy"], "max": pr["max"]}
+        p = {"move": mv, "dist": thr["dist"], "acc": pr["accuracy"]}
+        ws = [_SEC.win_chance(p, hp, thr, x, 0, True) for x in range(10, 400, 30)]
+        if any(y < x - 1e-9 for x, y in zip(ws, ws[1:])):
+            out.append((a, mv, d, "win chance falls as HP rises"))
+    return out, len(pairs)
+_cd_bad, _cd_n = _curve_drift()
+check("the KO-chance curve matches turn_table's expected turns and is monotone",
+      not _cd_bad, str(_cd_bad[:3]))
+_bag_seen = sum(1 for per in raw["sections"].values() for sec in per.values() if sec
+                for e in sec.get("log") or [] for s in e.get("steps", []) if s.get("itemUse"))
+check("trainer item use is recorded per foe (the bag guard has data to check)",
+      _bag_seen > 0, "no step carries itemUse")
+
 conflicts = []
 for starter, per_stage in raw["sections"].items():
     used = collections.defaultdict(set)
@@ -606,6 +705,41 @@ if os.path.exists(_lsp):
                     if _blk["sixes"] and all(_r.get("bird") for _r in _blk["sixes"])]
     check("every starter's League tab offers sixes without a legendary bird",
           not _ls_birdonly, str(_ls_birdonly))
+    # The tab's moves panel reads each clearing run's team: six members, each with
+    # its moves, and every foe it finished one the run really fought.
+    _ls_nodetail = [(_st, _r["six"]) for _st, _blk in json.load(open(_lsp))["starters"].items()
+                    for _r in _blk["sixes"] if _r["clearLevel"]
+                    and (len(_r.get("team", [])) != 6
+                         or any(not 1 <= len(_m["moves"]) <= 4 for _m in _r["team"])
+                         or not any(_b[3] == 1 for _m in _r["team"] for _b in _m["beats"]))]
+    check("every League-tab six that clears carries its members' moves and finishes",
+          not _ls_nodetail, str(_ls_nodetail[:3]))
+    _ls_boom = [(_st, _r["six"], _m["name"], _mv, _u)
+                for _st, _blk in json.load(open(_lsp))["starters"].items()
+                for _r in _blk["sixes"] for _m in _r.get("team", [])
+                for _mv, _u in _m["moves"] if _mv in _SELF_KO and _u > _m.get("fainted", 0) + 1e-6]
+    check("no League-tab six uses Explosion / Self-Destruct more often than the user faints",
+          not _ls_boom, str(_ls_boom[:3]))
+    # "Clears at" is the lowest level that wins league_sets.CLEAR_RATE of the
+    # real-roll replays; a row must say so, with the replays behind it
+    import league_sets as _LS
+    _ls_rate = [(_st, _r["six"], _r.get("clearRate"), _r.get("trials"))
+                for _st, _blk in json.load(open(_lsp))["starters"].items()
+                for _r in _blk["sixes"] if _r["clearLevel"]
+                and (_r.get("clearRate", 0) < _LS.CLEAR_RATE * 100 - 0.5
+                     or _r.get("trials") != _LS.TRIALS)]
+    check("every League-tab clear level wins at least 90% of its real-roll replays",
+          not _ls_rate, str(_ls_rate[:3]))
+    # the clear chance must hold above a six's clear level (the level search
+    # walks down from the median sim's level, so it assumes it), within the
+    # replays' noise (ABOVE_SLACK)
+    _ls_above = [(_st, _a[0], _a[1], _x[0], _x[2])
+                 for _st, _blk in json.load(open(_lsp))["starters"].items()
+                 for _a in _blk.get("aboveClear", []) for _x in _a[2] if not _x[1]]
+    _ls_noabove = [_st for _st, _blk in json.load(open(_lsp))["starters"].items()
+                   if any(_r["clearLevel"] for _r in _blk["sixes"]) and not _blk.get("aboveClear")]
+    check("a League-tab six still wins its replays one and two levels above its clear level",
+          not _ls_above and not _ls_noabove, str((_ls_noabove, _ls_above[:3])))
 
 # ------------------------------------------------------------------ walk order
 # The completionist route decides the order battles happen in, and the

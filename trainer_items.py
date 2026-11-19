@@ -78,9 +78,11 @@ def _trigger(item, t, foe_hp, hp_frac=1.0, t_full=None):
         a = 255 if eff["amount"] == FULL else eff["amount"]
         window = max(0.25, 1.0 - min(1.0, a / foe_hp))
     if hp_frac <= window:
-        # already inside the window: it heals on its next action unless we KO it
-        # first -- a one-hit finish beats it only when we move first, ~half the time
-        p = 1.0 if t > 1.0 else 0.5
+        # already inside the window: it heals on its next action, before any
+        # move -- SetActionsAndBattlersTurnOrder (src/battle_main.c) queues every
+        # item and switch ahead of every move, whatever the speeds, and the AI's
+        # below-1/4 rule has no roll -- so not even a faster one-hit finish beats it
+        p = 1.0
         missing = 1.0 - hp_frac
         heal = missing if (eff["kind"] == "full_restore" or eff["amount"] == FULL) \
                else min(eff["amount"] / foe_hp, missing)
@@ -102,6 +104,66 @@ def _trigger(item, t, foe_hp, hp_frac=1.0, t_full=None):
         heal = missing if amt == FULL else min(f, missing)
     p = p_not_ohko * min(1.0, window / d)
     return p, heal / d
+
+def after_heal(slots, hp, max_hp, valid_mons):
+    """Expected HP of a foe left at `hp` once its next action comes round: the
+    first slot whose ShouldUseItem rule fires is used before any move (items act
+    first), so a foe parked in a heal window is not really that low. Ranks the
+    plans that lose a member by what they truly leave standing."""
+    if hp <= 0:
+        return 0.0
+    n, want, gain = len(slots), 1.0, 0.0
+    for i, (item, left) in enumerate(slots):
+        if left <= 0 or not is_hp_item(item):
+            continue
+        if i and valid_mons > (n - i) + 1:
+            continue                       # ShouldUseItem's held-back-slot gate
+        eff = EFFECTS[item]
+        if eff["kind"] == "full_restore":
+            fires, healed = hp < int(max_hp) // 4, max_hp
+        else:
+            a = 255 if eff["amount"] == FULL else eff["amount"]
+            fires = hp < int(max_hp) // 4 or max_hp - hp > a
+            healed = max_hp if eff["amount"] == FULL else min(max_hp, hp + eff["amount"])
+        if not fires:
+            continue
+        q = want * left                    # this slot still holds its item
+        gain += q * (healed - hp)
+        want *= 1.0 - left                 # emptied: the next matching slot is tried
+        if want <= 0:
+            break
+    return hp + gain
+
+def choose_item(slots, left, hp, max_hp, valid_mons):
+    """The slot ShouldUseItem uses this turn on a foe at `hp`, or None: the
+    first slot, in order, that still holds an HP item, passes the held-back-slot
+    gate, and whose rule fires (Full Restore below 1/4; an HP item below 1/4 or
+    missing more than it heals). `left[i]` says slot i is still full. The
+    random-roll replays (rolls.py) use it; the expected model is `drag`."""
+    if hp <= 0:
+        return None
+    n = len(slots)
+    for i, (item, _) in enumerate(slots):
+        if not left[i] or not is_hp_item(item):
+            continue
+        if i and valid_mons > (n - i) + 1:
+            continue
+        eff = EFFECTS[item]
+        if eff["kind"] == "full_restore":
+            fires = hp < max_hp // 4
+        else:
+            a = 255 if eff["amount"] == FULL else eff["amount"]
+            fires = hp < max_hp // 4 or max_hp - hp > a
+        if fires:
+            return i
+    return None
+
+def heal_to(item, hp, max_hp):
+    """The foe's HP after using `item` at `hp`."""
+    eff = EFFECTS[item]
+    if eff["kind"] == "full_restore" or eff["amount"] == FULL:
+        return float(max_hp)
+    return float(min(max_hp, hp + eff["amount"]))
 
 def new_slots(items):
     """Per-battle item state: [name, chance still unused] in trainer slot order."""
